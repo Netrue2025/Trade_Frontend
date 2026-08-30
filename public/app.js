@@ -14,6 +14,7 @@ const EXCHANGE_OPTIONS = [
 ];
 const WATCHLIST_REFRESH_INTERVAL_MS = 30000;
 const TRADE_REFRESH_INTERVAL_MS = 30000;
+const FUTURES_REFRESH_INTERVAL_MS = 180000;
 const SIGNAL_CHART_REFRESH_INTERVAL_MS = 5000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const ACTIVE_API_ORDER_STATUSES = new Set(["NEW", "PARTIALLY_FILLED", "PENDING_NEW"]);
@@ -88,6 +89,8 @@ const state = {
   trades: [],
   dashboardMarketMode: "spot",
   futuresAccount: null,
+  futuresLastLoadedAt: 0,
+  futuresError: "",
   loadingFutures: false,
   expandedFuturesPositionIds: [],
   expandedFuturesOrderIds: [],
@@ -169,6 +172,7 @@ const topbarActions = document.getElementById("topbar-actions");
 
 let watchlistRefreshPromise = null;
 let tradeRefreshPromise = null;
+let futuresRefreshPromise = null;
 let signalChartRefreshTimer = null;
 let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
@@ -2550,12 +2554,13 @@ function disconnectWatchSocket() {
 
 function startTradeRefreshTimer() {
   clearInterval(state.tradeRefreshTimer);
+  const refreshIntervalMs = isFuturesMode() ? FUTURES_REFRESH_INTERVAL_MS : TRADE_REFRESH_INTERVAL_MS;
   state.tradeRefreshTimer = setInterval(() => {
     if (!shouldRefreshTradeLive()) {
       return;
     }
     void refreshDashboardLiveData();
-  }, TRADE_REFRESH_INTERVAL_MS);
+  }, refreshIntervalMs);
 }
 
 function stopTradeRefreshTimer() {
@@ -2638,11 +2643,10 @@ async function refreshDashboardLiveData() {
     return tradeRefreshPromise;
   }
 
-  tradeRefreshPromise = Promise.allSettled([
-    refreshTradeMarketData(),
-    refreshTradeStatusData(),
-    isFuturesMode() ? loadFuturesDashboard() : Promise.resolve(),
-  ]).finally(() => {
+  const refreshTasks = isFuturesMode()
+    ? [loadFuturesDashboard()]
+    : [refreshTradeMarketData(), refreshTradeStatusData()];
+  tradeRefreshPromise = Promise.allSettled(refreshTasks).finally(() => {
     tradeRefreshPromise = null;
   });
 
@@ -2757,19 +2761,44 @@ async function loadSignalAutoTradeSettings() {
   }
 }
 
-async function loadFuturesDashboard() {
+async function loadFuturesDashboard(options = {}) {
   if (!state.user || !canUseFuturesMode()) {
     state.futuresAccount = null;
+    state.futuresLastLoadedAt = 0;
+    state.futuresError = "";
     state.loadingFutures = false;
     return;
   }
 
-  state.loadingFutures = true;
-  try {
-    state.futuresAccount = await api("/api/binance/futures/account");
-  } finally {
-    state.loadingFutures = false;
+  const force = !!options.force;
+  const hasFreshSnapshot =
+    state.futuresAccount && Date.now() - Number(state.futuresLastLoadedAt || 0) < FUTURES_REFRESH_INTERVAL_MS;
+  if (!force && hasFreshSnapshot) {
+    return state.futuresAccount;
   }
+
+  if (futuresRefreshPromise) {
+    return futuresRefreshPromise;
+  }
+
+  state.loadingFutures = !state.futuresAccount;
+  futuresRefreshPromise = api("/api/binance/futures/account")
+    .then((account) => {
+      state.futuresAccount = account;
+      state.futuresLastLoadedAt = Date.now();
+      state.futuresError = account.warning || "";
+      return account;
+    })
+    .catch((error) => {
+      state.futuresError = error.message || "Unable to refresh Binance futures right now.";
+      throw error;
+    })
+    .finally(() => {
+      state.loadingFutures = false;
+      futuresRefreshPromise = null;
+    });
+
+  return futuresRefreshPromise;
 }
 
 async function loadDashboardData() {
@@ -3355,6 +3384,11 @@ function renderFuturesBalanceGrid(account) {
         <div>
           <h3>Binance Futures Balance</h3>
           <p class="muted-copy">USDT-M futures wallet and margin snapshot.</p>
+          ${
+            account?.warning || state.futuresError
+              ? `<p class="muted-copy warning-copy">${account?.warning || state.futuresError}</p>`
+              : ""
+          }
         </div>
       </div>
       <div class="metric-grid futures-metric-grid">
@@ -5037,7 +5071,8 @@ async function cancelFuturesOrder(orderId, symbol) {
       method: "POST",
       body: JSON.stringify({ symbol }),
     });
-    await loadFuturesDashboard();
+    state.futuresLastLoadedAt = 0;
+    await loadFuturesDashboard({ force: true });
     render();
     showNotice(`Futures order ${String(orderId).slice(-8)} canceled`);
   }).catch((error) => showError(error.message));
@@ -5053,7 +5088,8 @@ async function closeFuturesPosition(symbol, positionSide, quantity) {
       method: "POST",
       body: JSON.stringify({ symbol, positionSide, quantity }),
     });
-    await loadFuturesDashboard();
+    state.futuresLastLoadedAt = 0;
+    await loadFuturesDashboard({ force: true });
     render();
     showNotice(`${symbol} futures position close order sent`);
   }).catch((error) => showError(error.message));
@@ -5065,8 +5101,9 @@ function bindMarketModeActions() {
       const nextMode = button.dataset.marketMode || "spot";
       setDashboardMarketMode(nextMode);
       render();
+      startTradeRefreshTimer();
       if (isFuturesMode()) {
-        await loadFuturesDashboard().catch((error) => showError(error.message));
+        await loadFuturesDashboard({ force: !state.futuresAccount }).catch((error) => showError(error.message));
         render();
       }
     };

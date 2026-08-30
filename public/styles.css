@@ -1169,6 +1169,11 @@ body[data-theme="dark"] .section-loading-card {
   color: #94a3b8;
 }
 
+.warning-copy {
+  color: #b7791f;
+  font-weight: 700;
+}
+
 .market-mode-bar {
   display: grid;
   gap: 8px;
