@@ -76,8 +76,8 @@ const state = {
   authExchange: localStorage.getItem("tradeflow-auth-exchange") || "bybit",
   selectedExchange: localStorage.getItem("tradeflow-selected-exchange") || "bybit",
   authTab: "login",
-  showSplash: true,
-  hasShownSplash: false,
+  showSplash: false,
+  hasShownSplash: true,
   activeTab: "home",
   isLoading: false,
   modalError: null,
@@ -86,6 +86,12 @@ const state = {
   balances: [],
   openOrders: [],
   trades: [],
+  dashboardMarketMode: "spot",
+  futuresAccount: null,
+  loadingFutures: false,
+  expandedFuturesPositionIds: [],
+  expandedFuturesOrderIds: [],
+  reportPeriod: "days",
   users: [],
   adminDeposits: [],
   adminWithdrawals: [],
@@ -1008,6 +1014,8 @@ function icon(name) {
       '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8c0-3.4 2.8-6 7-6s7 2.6 7 6"/>',
     contact:
       '<path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v11A2.5 2.5 0 0 1 16.5 20h-9A2.5 2.5 0 0 1 5 17.5v-11Z"/><path d="m8 8 4 3 4-3"/>' ,
+    download:
+      '<path d="M12 3v10"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/>',
     home:
       '<path d="M4 11.5 12 5l8 6.5V20h-5v-4h-6v4H4z"/>',
   };
@@ -1074,6 +1082,19 @@ function getConnectedExchanges(user) {
   }
 
   return EXCHANGE_OPTIONS.filter((exchange) => user[`${exchange.id}Connected`]);
+}
+
+function canUseFuturesMode() {
+  return !!state.user?.binanceConnected;
+}
+
+function isFuturesMode() {
+  return state.dashboardMarketMode === "futures";
+}
+
+function setDashboardMarketMode(mode) {
+  const nextMode = mode === "futures" ? "futures" : "spot";
+  state.dashboardMarketMode = nextMode === "futures" && !canUseFuturesMode() ? "spot" : nextMode;
 }
 
 function getSpotMirrorGuidance(exchange = getActiveExchange()) {
@@ -1557,6 +1578,131 @@ function getTradePnlValue(trade) {
   return (current - entry) * quantity * multiplier;
 }
 
+function getTradeStaticPnlValue(trade) {
+  const entry = getTradeEntryPrice(trade);
+  const quantity = getTradeExecutedQuantity(trade);
+  if (!entry || !quantity || trade.lifecycleStatus === "CANCELED") {
+    return 0;
+  }
+  return entry * quantity * (getTradeStaticPnlPercent(trade) / 100);
+}
+
+function getTradeReportPnlValue(trade) {
+  const status = String(trade.lifecycleStatus || "").toUpperCase();
+  if (["CLOSED", "CANCELED"].includes(status)) {
+    return getTradeStaticPnlValue(trade);
+  }
+  return getTradePnlValue(trade);
+}
+
+function getWeekStartKey(date) {
+  const normalized = new Date(date);
+  const day = normalized.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  normalized.setDate(normalized.getDate() + offset);
+  return normalized.toISOString().slice(0, 10);
+}
+
+function getTradeReportKey(trade, period) {
+  const date = new Date(trade.closedAt || trade.updatedAt || trade.createdAt || Date.now());
+  if (period === "months") {
+    return date.toISOString().slice(0, 7);
+  }
+  if (period === "weeks") {
+    return `Week of ${getWeekStartKey(date)}`;
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function getProfitLossReportRows(period = state.reportPeriod) {
+  const groups = new Map();
+  for (const trade of getHistoryTrades()) {
+    const key = getTradeReportKey(trade, period);
+    const current = groups.get(key) || {
+      key,
+      trades: 0,
+      pnlValue: 0,
+      wins: 0,
+      losses: 0,
+    };
+    const pnlValue = getTradeReportPnlValue(trade);
+    current.trades += 1;
+    current.pnlValue += pnlValue;
+    if (pnlValue > 0) {
+      current.wins += 1;
+    } else if (pnlValue < 0) {
+      current.losses += 1;
+    }
+    groups.set(key, current);
+  }
+  return [...groups.values()].sort((a, b) => b.key.localeCompare(a.key));
+}
+
+function getReportPeriodLabel(period = state.reportPeriod) {
+  return {
+    days: "Daily",
+    weeks: "Weekly",
+    months: "Monthly",
+  }[period] || "Daily";
+}
+
+function escapePdfText(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function createSimplePdfBlob(lines) {
+  const content = [
+    "BT",
+    "/F1 14 Tf",
+    "50 790 Td",
+    ...lines.flatMap((line, index) => [
+      `${index === 0 ? "" : "0 -20 Td"}(${escapePdfText(line).slice(0, 96)}) Tj`,
+    ]),
+    "ET",
+  ].join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(body.length);
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefStart = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return new Blob([body], { type: "application/pdf" });
+}
+
+function downloadProfitLossReport() {
+  const rows = getProfitLossReportRows(state.reportPeriod);
+  const total = rows.reduce((sum, row) => sum + row.pnlValue, 0);
+  const lines = [
+    `Trade Profit/Loss Report - ${getReportPeriodLabel(state.reportPeriod)}`,
+    `Generated: ${new Date().toLocaleString()}`,
+    `Total P/L: ${total >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(total))}`,
+    "",
+    ...(rows.length
+      ? rows.map((row) => `${row.key}: ${row.pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(row.pnlValue))} | Trades ${row.trades} | Wins ${row.wins} | Losses ${row.losses}`)
+      : ["No trade history available."]),
+  ];
+  const blob = createSimplePdfBlob(lines);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `trade-profit-loss-${state.reportPeriod}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function getTradeTpPnlPercent(trade, targetPrice) {
   const entry = getTradeEntryPrice(trade);
   const target = Number(targetPrice || 0);
@@ -1912,7 +2058,7 @@ function renderAuthLanding() {
 
 function renderLanding() {
   app.innerHTML = `
-    ${state.showSplash ? renderSplashScreen() : renderAuthLanding()}
+    ${renderAuthLanding()}
     ${renderNotice()}
     ${renderErrorModal()}
     ${renderActionModal()}
@@ -1941,27 +2087,10 @@ function renderTopbarActions() {
   const topbar = document.querySelector(".topbar");
   document.body.dataset.appShell = state.user ? "dashboard" : "guest";
 
-  if (state.user || state.showSplash) {
-    if (topbar) {
-      topbar.style.display = "none";
-    }
-    topbarActions.innerHTML = "";
-    return;
-  }
-
   if (topbar) {
-    topbar.style.display = "";
+    topbar.style.display = "none";
   }
-
-  topbarActions.innerHTML = `
-    <div class="brand-mark">
-      <div class="brand-icon star-icon">&#9733;</div>
-      <div>
-        <strong>TradeFlow</strong>
-        <p>Binance and Bybit spot dashboard access</p>
-      </div>
-    </div>
-  `;
+  topbarActions.innerHTML = "";
 }
 
 function bindModalActions() {
@@ -2512,6 +2641,7 @@ async function refreshDashboardLiveData() {
   tradeRefreshPromise = Promise.allSettled([
     refreshTradeMarketData(),
     refreshTradeStatusData(),
+    isFuturesMode() ? loadFuturesDashboard() : Promise.resolve(),
   ]).finally(() => {
     tradeRefreshPromise = null;
   });
@@ -2627,6 +2757,21 @@ async function loadSignalAutoTradeSettings() {
   }
 }
 
+async function loadFuturesDashboard() {
+  if (!state.user || !canUseFuturesMode()) {
+    state.futuresAccount = null;
+    state.loadingFutures = false;
+    return;
+  }
+
+  state.loadingFutures = true;
+  try {
+    state.futuresAccount = await api("/api/binance/futures/account");
+  } finally {
+    state.loadingFutures = false;
+  }
+}
+
 async function loadDashboardData() {
   if (!state.user) {
     disconnectWatchSocket();
@@ -2685,6 +2830,17 @@ async function loadDashboardData() {
   const signalAutoTradePromise = loadSignalAutoTradeSettings().then(() => {
     render();
   });
+  const futuresPromise = isFuturesMode()
+    ? loadFuturesDashboard()
+        .then(() => {
+          render();
+        })
+        .catch((error) => {
+          state.loadingFutures = false;
+          render();
+          showError(error.message);
+        })
+    : Promise.resolve();
   const watchlistPromise = refreshWatchlistFeed()
     .then(() => {
       connectWatchSocket();
@@ -2748,12 +2904,26 @@ async function loadDashboardData() {
   void accountPromise;
   void settingsPromise;
   void signalAutoTradePromise;
+  void futuresPromise;
   void watchlistPromise;
   void financialPromise;
   void adminFinancePromise;
 }
 
 function bindHistoryActions() {
+  const reportPeriodSelect = document.getElementById("pl-report-period");
+  if (reportPeriodSelect) {
+    reportPeriodSelect.addEventListener("change", () => {
+      state.reportPeriod = reportPeriodSelect.value || "days";
+      render();
+    });
+  }
+
+  const downloadReportButton = document.getElementById("download-pl-report-btn");
+  if (downloadReportButton) {
+    downloadReportButton.addEventListener("click", downloadProfitLossReport);
+  }
+
   document.querySelectorAll("[data-history-trade-id]").forEach((input) => {
     input.addEventListener("change", () => {
       const tradeId = input.dataset.historyTradeId;
@@ -2945,10 +3115,32 @@ function renderBottomNav() {
   `;
 }
 
+function renderMarketModeSwitch() {
+  const futuresDisabled = !canUseFuturesMode();
+  return `
+    <section class="market-mode-bar">
+      <div class="segmented market-mode-switch" role="tablist" aria-label="Trading mode">
+        <button class="segment ${!isFuturesMode() ? "active" : ""}" data-market-mode="spot" type="button">Spot</button>
+        <button class="segment ${isFuturesMode() ? "active" : ""}" data-market-mode="futures" type="button" ${futuresDisabled ? "disabled" : ""}>Futures</button>
+      </div>
+      <p class="muted-copy">${
+        futuresDisabled
+          ? "Connect Binance in Settings to view and manage futures trades."
+          : isFuturesMode()
+            ? "Binance futures balances, positions, and open orders."
+            : "Spot balances, mirrored trades, and open orders."
+      }</p>
+    </section>
+  `;
+}
+
 function renderSummaryCard() {
   const isAdmin = state.user?.role === "admin";
   const adminStats = state.financialDashboard || {};
-  const portfolioBalance = Number(state.totalUsdt || 0);
+  const futuresAccount = state.futuresAccount || {};
+  const portfolioBalance = isFuturesMode()
+    ? Number(futuresAccount.totalMarginBalance || futuresAccount.totalWalletBalance || 0)
+    : Number(state.totalUsdt || 0);
   const investmentBalance = getInvestmentBalanceNgn();
   const investmentDailyReturn = getInvestmentDailyReturnNgn();
   const usdtWallet = getFinancialWallet("USDT");
@@ -2957,17 +3149,22 @@ function renderSummaryCard() {
   const configuredRate = Number(state.financialDashboard?.totalBalance?.usdtToNgnRate || state.usdtNgnRate || 0);
   const accountLoading = state.loadingAccount;
   const exchangeLabel = getExchangeLabel(getActiveExchange());
-  const todayPositive = Number(state.todayPnlValue || 0) >= 0;
-  const monthPositive = Number(state.monthPnlValue || 0) >= 0;
+  const todayValue = isFuturesMode()
+    ? Number(futuresAccount.totalUnrealizedProfit || 0)
+    : Number(state.todayPnlValue || 0);
+  const todayPercent = isFuturesMode()
+    ? (portfolioBalance ? (todayValue / portfolioBalance) * 100 : 0)
+    : Number(state.todayPnlPercent || 0);
+  const todayTone = todayValue > 0 ? "positive" : todayValue < 0 ? "negative" : "neutral";
   const chips =
     state.user?.role === "admin"
       ? [
-          "Spot only",
+          isFuturesMode() ? "Futures view" : "Spot view",
           `Mirrored users ${state.users.filter((user) => user.mirrorEnabled).length}`,
           `Connected users ${state.users.filter((user) => user.bybitConnected || user.binanceConnected).length}`,
         ]
       : [
-          "Spot only",
+          isFuturesMode() ? "Futures view" : "Spot view",
           state.user?.mirrorEnabled ? "Mirror enabled" : "Mirror off",
           state.user?.exchangeConnected ? `${exchangeLabel} connected` : "Setup needed",
         ];
@@ -2980,8 +3177,10 @@ function renderSummaryCard() {
             <p class="eyebrow light">Live Account Balance</p>
             <h2>${formatUsdt(portfolioBalance)}</h2>
             <div class="hero-return-tags">
-              <span class="hero-chip ${todayPositive ? "positive" : "negative"}">Today's return ${todayPositive ? "+" : "-"}${formatUsdt(Math.abs(state.todayPnlValue || 0))} ${state.todayPnlPercent >= 0 ? "+" : ""}${formatNumber(state.todayPnlPercent, 2)}%</span>
-              <span class="hero-chip ${monthPositive ? "positive" : "negative"}">${formatMonthLabel(state.monthLabel)} return ${monthPositive ? "+" : "-"}${formatUsdt(Math.abs(state.monthPnlValue || 0))} ${state.monthPnlPercent >= 0 ? "+" : ""}${formatNumber(state.monthPnlPercent, 2)}%</span>
+              <span class="hero-chip today-return-chip">
+                <span>Today's return</span>
+                <strong class="${todayTone}">${todayValue >= 0 ? "+" : "-"}${formatUsdt(Math.abs(todayValue))} ${todayPercent >= 0 ? "+" : ""}${formatNumber(todayPercent, 2)}%</strong>
+              </span>
             </div>
             
           </div>
@@ -3143,6 +3342,184 @@ function renderWatchlistSection() {
         <button id="toggle-watchlist-btn" class="text-link" type="button">${state.showAllWatchlist ? "See less" : "See more"}</button>
       </div>
       <div class="compact-list" data-watchlist-host="dashboard">${renderWatchlistRows(watchlist)}</div>
+    </section>
+  `;
+}
+
+function renderFuturesBalanceGrid(account) {
+  const balances = (account?.balances || []).slice(0, 6);
+  return `
+    <section class="mobile-card${loadingClass(state.loadingFutures)}">
+      ${state.loadingFutures ? renderSectionLoadingOverlay("Loading futures", "Syncing Binance futures account") : ""}
+      <div class="section-head">
+        <div>
+          <h3>Binance Futures Balance</h3>
+          <p class="muted-copy">USDT-M futures wallet and margin snapshot.</p>
+        </div>
+      </div>
+      <div class="metric-grid futures-metric-grid">
+        <div class="trade-detail-pill">
+          <span>Wallet</span>
+          <strong>${formatUsdtUnit(account?.totalWalletBalance || 0)}</strong>
+        </div>
+        <div class="trade-detail-pill">
+          <span>Available</span>
+          <strong>${formatUsdtUnit(account?.availableBalance || 0)}</strong>
+        </div>
+        <div class="trade-detail-pill">
+          <span>Margin</span>
+          <strong>${formatUsdtUnit(account?.totalMarginBalance || 0)}</strong>
+        </div>
+        <div class="trade-detail-pill">
+          <span>Unrealized P/L</span>
+          <strong class="${Number(account?.totalUnrealizedProfit || 0) > 0 ? "positive" : Number(account?.totalUnrealizedProfit || 0) < 0 ? "negative" : "neutral"}">${Number(account?.totalUnrealizedProfit || 0) >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(Number(account?.totalUnrealizedProfit || 0)))}</strong>
+        </div>
+      </div>
+      <div class="card-list">
+        ${balances
+          .map(
+            (balance) => `
+              <div class="asset-card">
+                <div>
+                  <strong>${balance.asset}</strong>
+                  <p class="muted-copy">Wallet ${formatUsdtUnit(balance.walletBalance)}</p>
+                </div>
+                <div class="asset-values">
+                  <strong>${formatUsdtUnit(balance.availableBalance)}</strong>
+                  <p class="muted-copy ${Number(balance.unrealizedProfit || 0) > 0 ? "positive" : Number(balance.unrealizedProfit || 0) < 0 ? "negative" : "neutral"}">P/L ${Number(balance.unrealizedProfit || 0) >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(Number(balance.unrealizedProfit || 0)))}</p>
+                </div>
+              </div>
+            `
+          )
+          .join("") || `<p class="muted-copy">No Binance futures balance was returned.</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderFuturesPosition(position) {
+  const key = `${position.symbol}:${position.positionSide}`;
+  const isExpanded = state.expandedFuturesPositionIds.includes(key);
+  const pnlValue = Number(position.unrealizedProfit || 0);
+  const amount = Math.abs(Number(position.positionAmt || 0));
+  return `
+    <details class="trade-disclosure trade-row-rich" data-futures-position-id="${key}" ${isExpanded ? "open" : ""}>
+      <summary class="trade-summary-row">
+        <div>
+          <strong>${position.symbol}</strong>
+          <p class="muted-copy">${position.side} ${position.positionSide} | ${formatNumber(amount, 8)}</p>
+        </div>
+        <div class="asset-values">
+          ${renderTradeStatusBadge("OPEN")}
+          <strong class="${pnlValue > 0 ? "positive" : pnlValue < 0 ? "negative" : "neutral"}">${pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(pnlValue))}</strong>
+        </div>
+      </summary>
+      <div class="trade-disclosure-body">
+        <div class="trade-detail-grid">
+          <div class="trade-detail-pill">
+            <span>Entry</span>
+            <strong>${formatNumber(position.entryPrice, 8)}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>Mark</span>
+            <strong>${formatNumber(position.markPrice, 8)}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>Leverage</span>
+            <strong>${formatNumber(position.leverage, 0)}x</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>Liq.</span>
+            <strong>${formatNumber(position.liquidationPrice, 8)}</strong>
+          </div>
+        </div>
+        <div class="trade-actions-inline trade-actions-stack reveal-actions">
+          <button class="micro-btn danger" data-close-futures-position="${position.symbol}" data-position-side="${position.positionSide}" data-position-quantity="${amount}" type="button">Close position</button>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function renderFuturesOrder(order) {
+  const key = String(order.orderId || "");
+  const isExpanded = state.expandedFuturesOrderIds.includes(key);
+  return `
+    <details class="trade-disclosure trade-row-rich" data-futures-order-id="${key}" ${isExpanded ? "open" : ""}>
+      <summary class="trade-summary-row">
+        <div>
+          <strong>${order.symbol}</strong>
+          <p class="muted-copy">${order.side} ${order.type} | ${order.positionSide}</p>
+        </div>
+        <div class="asset-values">
+          ${renderTradeStatusBadge("PENDING")}
+          <strong>${formatNumber(order.origQty, 8)}</strong>
+        </div>
+      </summary>
+      <div class="trade-disclosure-body">
+        <div class="trade-detail-grid">
+          <div class="trade-detail-pill">
+            <span>Order ID</span>
+            <strong>${String(order.orderId || "").slice(-8) || "--"}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>Price</span>
+            <strong>${formatNumber(order.price, 8)}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>Filled</span>
+            <strong>${formatNumber(order.executedQty, 8)}</strong>
+          </div>
+        </div>
+        <div class="trade-actions-inline trade-actions-stack reveal-actions">
+          <button class="micro-btn danger" data-cancel-futures-order="${order.orderId}" data-order-symbol="${order.symbol}" type="button">Cancel order</button>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function renderFuturesDashboard() {
+  if (!canUseFuturesMode()) {
+    return `
+      <section class="mobile-card">
+        <div class="section-head">
+          <div>
+            <h3>Binance Futures</h3>
+            <p class="muted-copy">Connect Binance in Settings before switching to futures.</p>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  const account = state.futuresAccount || {};
+  const positions = account.positions || [];
+  const openOrders = account.openOrders || [];
+  return `
+    ${renderFuturesBalanceGrid(account)}
+    <section class="mobile-card${loadingClass(state.loadingFutures)}">
+      ${state.loadingFutures ? renderSectionLoadingOverlay("Loading futures trades", "Checking positions and open orders") : ""}
+      <div class="section-head">
+        <div>
+          <h3>Futures Trades</h3>
+          <p class="muted-copy">Open Binance futures positions and orders you can manage remotely.</p>
+        </div>
+      </div>
+      <div class="split-card futures-split">
+        <div>
+          <h4>Positions</h4>
+          <div class="compact-list">
+            ${positions.map(renderFuturesPosition).join("") || `<p class="muted-copy">No open futures positions.</p>`}
+          </div>
+        </div>
+        <div>
+          <h4>Open Orders</h4>
+          <div class="compact-list">
+            ${openOrders.map(renderFuturesOrder).join("") || `<p class="muted-copy">No open futures orders.</p>`}
+          </div>
+        </div>
+      </div>
     </section>
   `;
 }
@@ -3938,6 +4315,54 @@ function renderSignalsPane() {
     : `<section class="mobile-card"><p class="muted-copy">Signal dashboard is loading...</p></section>`;
 }
 
+function renderProfitLossReportCard() {
+  const rows = getProfitLossReportRows(state.reportPeriod);
+  const monthValue = Number(state.monthPnlValue || 0);
+  const reportTotal = rows.reduce((sum, row) => sum + row.pnlValue, 0);
+  return `
+    <section class="mobile-card profit-report-card">
+      <div class="section-head">
+        <div>
+          <h3>This Month Profit / Loss</h3>
+          <p class="muted-copy">${formatMonthLabel(state.monthLabel)}: <span class="${monthValue > 0 ? "positive" : monthValue < 0 ? "negative" : "neutral"}">${monthValue >= 0 ? "+" : "-"}${formatUsdt(Math.abs(monthValue))} ${state.monthPnlPercent >= 0 ? "+" : ""}${formatNumber(state.monthPnlPercent, 2)}%</span></p>
+        </div>
+        <button id="download-pl-report-btn" class="icon-action" type="button" title="Download PDF report" aria-label="Download PDF report">
+          ${icon("download")}
+        </button>
+      </div>
+      <div class="history-toolbar report-toolbar">
+        <label>
+          Report
+          <select id="pl-report-period">
+            <option value="days" ${state.reportPeriod === "days" ? "selected" : ""}>By days</option>
+            <option value="weeks" ${state.reportPeriod === "weeks" ? "selected" : ""}>By weeks</option>
+            <option value="months" ${state.reportPeriod === "months" ? "selected" : ""}>By months</option>
+          </select>
+        </label>
+        <strong class="${reportTotal > 0 ? "positive" : reportTotal < 0 ? "negative" : "neutral"}">${reportTotal >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(reportTotal))}</strong>
+      </div>
+      <div class="compact-list report-list">
+        ${rows
+          .slice(0, 8)
+          .map(
+            (row) => `
+              <div class="asset-card report-row">
+                <div>
+                  <strong>${row.key}</strong>
+                  <p class="muted-copy">${row.trades} trade${row.trades === 1 ? "" : "s"} | ${row.wins} win${row.wins === 1 ? "" : "s"} | ${row.losses} loss${row.losses === 1 ? "" : "es"}</p>
+                </div>
+                <div class="asset-values">
+                  <strong class="${row.pnlValue > 0 ? "positive" : row.pnlValue < 0 ? "negative" : "neutral"}">${row.pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(row.pnlValue))}</strong>
+                </div>
+              </div>
+            `
+          )
+          .join("") || `<p class="muted-copy">No profit/loss history yet.</p>`}
+      </div>
+    </section>
+  `;
+}
+
 function renderHistoryContent() {
   const trades = getHistoryTrades();
   const canClearHistory = state.user?.role === "admin";
@@ -4012,6 +4437,7 @@ function renderHistoryPane() {
   const selectedCount = state.selectedHistoryTradeIds.length;
   const allSelected = !!clearableTrades.length && selectedCount === clearableTrades.length;
   return `
+    ${renderProfitLossReportCard()}
     <section class="mobile-card${loadingClass(state.loadingTrades)}">
       ${state.loadingTrades ? renderSectionLoadingOverlay("Loading history", "Syncing your saved trade timeline") : ""}
       <div class="section-head">
@@ -4050,10 +4476,17 @@ function renderHistoryPane() {
 
 function renderHomePane() {
     return `
+      ${renderMarketModeSwitch()}
       ${renderSummaryCard()}
-      ${state.user.role === "admin" ? renderTradeTicket() : ""}
-      ${renderBalancesSection()}
-      <div data-home-trades-host>${renderOpenOrdersSection()}</div>
+      ${
+        isFuturesMode()
+          ? renderFuturesDashboard()
+          : `
+            ${state.user.role === "admin" ? renderTradeTicket() : ""}
+            ${renderBalancesSection()}
+            <div data-home-trades-host>${renderOpenOrdersSection()}</div>
+          `
+      }
     `;
 }
 
@@ -4103,7 +4536,9 @@ function renderDashboardShell() {
 }
 
 function bindDashboardActions() {
+  bindMarketModeActions();
   bindHistoryActions();
+  bindFuturesActions();
   bindAdminUserDisclosureToggles();
   bindSignalFeedActions();
 
@@ -4331,6 +4766,10 @@ function bindDashboardActions() {
       state.balances = [];
       state.openOrders = [];
       state.trades = [];
+      state.futuresAccount = null;
+      state.dashboardMarketMode = "spot";
+      state.expandedFuturesPositionIds = [];
+      state.expandedFuturesOrderIds = [];
       state.users = [];
       state.adminDeposits = [];
       state.adminWithdrawals = [];
@@ -4592,6 +5031,65 @@ async function cancelPendingOrder(orderId, symbol) {
   }).catch((error) => showError(error.message));
 }
 
+async function cancelFuturesOrder(orderId, symbol) {
+  await withLoading(async () => {
+    await api(`/api/binance/futures/open-orders/${encodeURIComponent(orderId)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ symbol }),
+    });
+    await loadFuturesDashboard();
+    render();
+    showNotice(`Futures order ${String(orderId).slice(-8)} canceled`);
+  }).catch((error) => showError(error.message));
+}
+
+async function closeFuturesPosition(symbol, positionSide, quantity) {
+  if (!window.confirm(`Close the ${symbol} ${positionSide || "BOTH"} futures position at market price?`)) {
+    return;
+  }
+
+  await withLoading(async () => {
+    await api("/api/binance/futures/positions/close", {
+      method: "POST",
+      body: JSON.stringify({ symbol, positionSide, quantity }),
+    });
+    await loadFuturesDashboard();
+    render();
+    showNotice(`${symbol} futures position close order sent`);
+  }).catch((error) => showError(error.message));
+}
+
+function bindMarketModeActions() {
+  document.querySelectorAll("[data-market-mode]").forEach((button) => {
+    button.onclick = async () => {
+      const nextMode = button.dataset.marketMode || "spot";
+      setDashboardMarketMode(nextMode);
+      render();
+      if (isFuturesMode()) {
+        await loadFuturesDashboard().catch((error) => showError(error.message));
+        render();
+      }
+    };
+  });
+}
+
+function bindFuturesActions() {
+  bindFuturesDisclosureToggles();
+
+  document.querySelectorAll("[data-close-futures-position]").forEach((button) => {
+    button.onclick = () =>
+      closeFuturesPosition(
+        button.dataset.closeFuturesPosition,
+        button.dataset.positionSide,
+        Number(button.dataset.positionQuantity || 0)
+      );
+  });
+
+  document.querySelectorAll("[data-cancel-futures-order]").forEach((button) => {
+    button.onclick = () => cancelFuturesOrder(button.dataset.cancelFuturesOrder, button.dataset.orderSymbol);
+  });
+}
+
 function bindTradeTicketActions() {
   const symbolInput = document.getElementById("trade-symbol");
   const typeInput = document.getElementById("trade-type");
@@ -4700,6 +5198,32 @@ function bindPendingOrderDisclosureToggles() {
   });
 }
 
+function bindFuturesDisclosureToggles() {
+  document.querySelectorAll("[data-futures-position-id]").forEach((details) => {
+    details.ontoggle = () => {
+      const id = details.dataset.futuresPositionId;
+      if (!id) {
+        return;
+      }
+      state.expandedFuturesPositionIds = details.open
+        ? [...new Set([...state.expandedFuturesPositionIds, id])]
+        : state.expandedFuturesPositionIds.filter((item) => item !== id);
+    };
+  });
+
+  document.querySelectorAll("[data-futures-order-id]").forEach((details) => {
+    details.ontoggle = () => {
+      const id = details.dataset.futuresOrderId;
+      if (!id) {
+        return;
+      }
+      state.expandedFuturesOrderIds = details.open
+        ? [...new Set([...state.expandedFuturesOrderIds, id])]
+        : state.expandedFuturesOrderIds.filter((item) => item !== id);
+    };
+  });
+}
+
 function render() {
   applyTheme();
   renderTopbarActions();
@@ -4734,7 +5258,7 @@ async function bootstrap() {
         window.SignalPage.destroyActiveChart();
       }
       stopTradeRefreshTimer();
-      startSplashSequence();
+      render();
     }
   } catch {
     state.user = null;
@@ -4747,7 +5271,7 @@ async function bootstrap() {
     }
     stopTradeRefreshTimer();
     seenSignalIds.clear();
-    startSplashSequence();
+    render();
   } finally {
     endLoading();
   }

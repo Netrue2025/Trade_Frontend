@@ -851,6 +851,15 @@ button:active,
   white-space: normal;
 }
 
+.today-return-chip {
+  align-items: baseline;
+  color: #fff;
+}
+
+.today-return-chip strong {
+  font-size: 0.9rem;
+}
+
 .carousel-hint {
   display: flex;
   gap: 8px;
@@ -1154,6 +1163,70 @@ body[data-theme="dark"] .section-loading-card {
 
 .negative {
   color: #ff6d86;
+}
+
+.neutral {
+  color: #94a3b8;
+}
+
+.market-mode-bar {
+  display: grid;
+  gap: 8px;
+  padding: 10px 2px 2px;
+}
+
+.market-mode-switch {
+  width: 100%;
+}
+
+.icon-action {
+  width: 42px;
+  height: 42px;
+  border: 0;
+  border-radius: 14px;
+  display: inline-grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), #18b47f);
+  box-shadow: 0 14px 28px rgba(31, 111, 235, 0.2);
+}
+
+.icon-action .nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.futures-metric-grid {
+  margin: 12px 0;
+}
+
+.futures-split h4 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+}
+
+.profit-report-card {
+  display: grid;
+  gap: 12px;
+}
+
+.report-toolbar {
+  grid-template-columns: 1fr auto;
+  align-items: end;
+}
+
+.report-toolbar label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.report-toolbar select {
+  width: 100%;
+}
+
+.report-list {
+  margin-top: 2px;
 }
 
 .segmented {
