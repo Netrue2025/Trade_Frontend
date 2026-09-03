@@ -745,7 +745,8 @@ button {
 .nav-button,
 .segment,
 .button-primary,
-.button-secondary {
+.button-secondary,
+.button-ghost {
   transition:
     transform 160ms ease,
     box-shadow 160ms ease,
@@ -845,6 +846,13 @@ textarea {
 .button-secondary {
   background: var(--soft-surface-2);
   color: var(--accent);
+}
+
+.button-ghost {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 900;
 }
 
 .shimmer-button {
@@ -2298,6 +2306,7 @@ body[data-theme="dark"] .mirror-guide-pill {
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   gap: 10px;
   width: min(420px, 100%);
+  max-height: min(94dvh, 720px);
   overflow: hidden;
   padding: 16px;
 }
@@ -2372,6 +2381,74 @@ body[data-theme="dark"] .mirror-guide-pill {
 
 .wallet-action-fields input {
   min-height: 40px;
+}
+
+.wallet-amount-field {
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--soft-surface);
+}
+
+.wallet-amount-field span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.wallet-action-fields .wallet-amount-input {
+  min-height: 62px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: clamp(1.55rem, 7vw, 2.2rem);
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.saved-bank-list {
+  display: grid;
+  gap: 8px;
+}
+
+.saved-bank-option {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 70px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--soft-surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.saved-bank-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.saved-bank-option span,
+.saved-bank-option code {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.saved-bank-option strong {
+  font-size: 0.95rem;
+}
+
+.save-account-row {
+  justify-content: flex-start;
+}
+
+.compact-link {
+  min-height: 36px;
+  justify-self: start;
+  padding-inline: 0;
 }
 
 .inline-check {

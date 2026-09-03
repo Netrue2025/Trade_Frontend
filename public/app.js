@@ -215,7 +215,13 @@ function shouldRefreshWatchlistLive() {
 }
 
 function shouldRefreshTradeLive() {
-  return !!state.user && isDocumentVisible() && ["home", "history"].includes(state.activeTab);
+  if (!state.user || !isDocumentVisible()) {
+    return false;
+  }
+  if (state.user.role === "admin") {
+    return ["home", "history", "settings", "signals"].includes(state.activeTab);
+  }
+  return ["home", "history", "signals"].includes(state.activeTab);
 }
 
 function getExchangeLabel(exchange) {
@@ -521,13 +527,24 @@ function showActionModal(modal) {
 async function openWalletActionModal(type) {
   await withLoading(async () => {
     await loadFinancialDashboard();
-    if (type === "withdraw" && getActiveInvestmentRecords().length) {
+    if (type === "withdraw") {
+      await refreshTradeStatusData();
+    }
+    if (type === "withdraw" && getWithdrawalBlockingInvestmentRecords().length) {
       showActionModal({ type: "withdraw-blocked" });
       return;
     }
     if (type === "withdraw") {
       await loadPaymentBanks().catch(() => []);
-      state.resolvedBankAccount = getSavedBankAccount()?.verified ? getSavedBankAccount() : null;
+      const savedAccounts = getSavedBankAccounts();
+      state.resolvedBankAccount = savedAccounts[0] || null;
+      showActionModal({
+        type,
+        currency: "",
+        bankMode: savedAccounts.length ? "saved" : "new",
+        bankAccountId: savedAccounts[0]?.id || "",
+      });
+      return;
     }
     showActionModal({ type, currency: "" });
   }).catch((error) => showError(error.message));
@@ -1426,7 +1443,22 @@ function getUserOpenTradePnlUsdt() {
 }
 
 function getSavedBankAccount() {
-  return state.financialDashboard?.bankAccount || {};
+  return getSavedBankAccounts()[0] || state.financialDashboard?.bankAccount || {};
+}
+
+function getSavedBankAccounts() {
+  const bankAccounts = [
+    ...(Array.isArray(state.financialDashboard?.bankAccounts) ? state.financialDashboard.bankAccounts : []),
+    state.financialDashboard?.bankAccount,
+  ].filter((account) => account?.verified);
+  const byKey = new Map();
+  bankAccounts.forEach((account) => {
+    const key = account.id || `${account.bankCode || ""}:${account.accountNumber || account.maskedAccountNumber || ""}`;
+    if (key && !byKey.has(key)) {
+      byKey.set(key, account);
+    }
+  });
+  return [...byKey.values()];
 }
 
 function getUserDynamicPnlUsdt() {
@@ -1445,6 +1477,7 @@ function getUserDynamicPnlUsdt() {
 function getActiveInvestmentRecords() {
   const fromDashboard = state.financialDashboard?.activeInvestments || [];
   const fromTrades = (state.trades || [])
+    .filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()))
     .map((trade) => trade.userInvestment)
     .filter((investment) => investment?.status === "ACTIVE");
   const byId = new Map();
@@ -1454,6 +1487,13 @@ function getActiveInvestmentRecords() {
     }
   });
   return [...byId.values()];
+}
+
+function getWithdrawalBlockingInvestmentRecords() {
+  return (state.trades || [])
+    .filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()))
+    .map((trade) => trade.userInvestment)
+    .filter((investment) => investment?.status === "ACTIVE");
 }
 
 function getUserLockedInvestmentUsdt() {
@@ -1512,8 +1552,14 @@ async function loadFinancialDashboard() {
     return;
   }
   const endpoint = state.user.role === "admin" ? "/api/admin/dashboard" : "/api/user/dashboard";
-  state.financialDashboard = await api(endpoint);
+  const url = state.user.role === "admin"
+    ? `${endpoint}?exchange=${encodeURIComponent(getActiveExchange())}&refresh=1`
+    : endpoint;
+  state.financialDashboard = await api(url);
   state.notifications = state.financialDashboard?.notifications || [];
+  if (state.user.role === "admin" && state.financialDashboard?.accountSnapshot) {
+    applyAccountSnapshot(state.financialDashboard.accountSnapshot);
+  }
 }
 
 async function loadPaymentBanks({ force = false } = {}) {
@@ -2056,7 +2102,7 @@ function renderActionModal() {
   }
 
   if (state.actionModal.type === "withdraw-blocked") {
-    const activeCount = getActiveInvestmentRecords().length;
+    const activeCount = getWithdrawalBlockingInvestmentRecords().length;
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card">
@@ -2132,8 +2178,11 @@ function renderActionModal() {
     const rate = Number(settings.exchangeRate?.usdtToNgn || state.financialDashboard?.totalBalance?.usdtToNgnRate || 0);
     const usdtWallet = getFinancialWallet("USDT");
     const ngnWallet = getFinancialWallet("NGN");
+    const savedBanks = getSavedBankAccounts();
     const savedBank = getSavedBankAccount();
-    const resolvedBank = state.resolvedBankAccount || (savedBank.verified ? savedBank : null);
+    const bankMode = state.actionModal.bankMode || (savedBanks.length ? "saved" : "new");
+    const selectedSavedBank = savedBanks.find((account) => account.id === state.actionModal.bankAccountId) || savedBanks[0] || null;
+    const resolvedBank = state.resolvedBankAccount || (bankMode === "saved" ? selectedSavedBank : null);
     const selectedBankCode = state.actionModal.bankCode || resolvedBank?.bankCode || savedBank.bankCode || "";
     const bankOptions = (state.paymentBanks || [])
       .map((bank) => `<option value="${escapeHtml(bank.code)}" ${selectedBankCode === bank.code ? "selected" : ""}>${escapeHtml(bank.name)}</option>`)
@@ -2155,8 +2204,15 @@ function renderActionModal() {
             : "Admin confirms Naira deposits."
           : `Network: ${depositSettings.usdtNetwork || "USDT"}.`
         : currency === "NGN"
-          ? `Available: ${formatNaira(liveAvailableNgn)}.`
+          ? `Available ${formatNaira(liveAvailableNgn)}`
           : `Available: ${formatUsdtUnit(liveAvailableUsdt)}.`;
+    const amountField = (label, step) => `
+      <label class="stack-label wallet-amount-field">
+        <span>${label}</span>
+        <input id="wallet-amount-input" class="wallet-amount-input" type="number" min="0" step="${step}" placeholder="0.00" />
+      </label>
+      <p class="wallet-equivalent-preview" id="wallet-equivalent-preview">Equivalent: --</p>
+    `;
     const currencyChoices = `
       <div class="wallet-choice-row" role="group" aria-label="${isDeposit ? "Deposit" : "Withdrawal"} currency">
         <button class="wallet-choice ${currency === "NGN" ? "active" : ""}" data-wallet-currency="NGN" type="button">Naira</button>
@@ -2177,11 +2233,7 @@ function renderActionModal() {
     const depositForm = currency === "NGN"
       ? `
         ${bankDetails}
-        <label class="stack-label">
-          <span>Amount (Naira)</span>
-          <input id="wallet-amount-input" type="number" min="0" step="1" placeholder="Enter amount" />
-        </label>
-        <p class="wallet-equivalent-preview" id="wallet-equivalent-preview">Equivalent: --</p>
+        ${amountField("Amount (Naira)", "1")}
         <label class="stack-label">
           <span>Sender name</span>
           <input id="wallet-sender-input" type="text" placeholder="Name on payment" value="${escapeHtml(state.user?.name || "")}" />
@@ -2193,11 +2245,7 @@ function renderActionModal() {
       `
       : currency === "USDT"
         ? `
-          <label class="stack-label">
-            <span>Amount (USDT)</span>
-            <input id="wallet-amount-input" type="number" min="0" step="0.00000001" placeholder="Enter amount" />
-          </label>
-          <p class="wallet-equivalent-preview" id="wallet-equivalent-preview">Equivalent: --</p>
+          ${amountField("Amount (USDT)", "0.00000001")}
           <div class="wallet-instructions">
             <span>Send to</span>
             <code>${escapeHtml(depositSettings.usdtAddress || "Deposit address not configured")}</code>
@@ -2210,44 +2258,71 @@ function renderActionModal() {
           </label>
         `
         : "";
-    const withdrawalForm = currency === "NGN"
+    const savedBankList = savedBanks.length
       ? `
-        <label class="stack-label">
-          <span>Amount (Naira)</span>
-          <input id="wallet-amount-input" type="number" min="0" step="1" placeholder="Enter amount" />
-        </label>
-        <p class="wallet-equivalent-preview" id="wallet-equivalent-preview">Equivalent: --</p>
-        <label class="stack-label">
-          <span>Bank</span>
-          <select id="wallet-bank-code-input">
-            <option value="">Choose bank</option>
-            ${bankOptions}
-          </select>
-        </label>
-        <label class="stack-label">
-          <span>Account number</span>
-          <input id="wallet-account-input" type="text" inputmode="numeric" maxlength="10" placeholder="10 digits" value="${escapeHtml(resolvedBank?.accountNumber || savedBank.accountNumber || "")}" />
-        </label>
-        <button class="button-secondary shimmer-button" id="wallet-resolve-bank-btn" type="button">${icon("bank")} Resolve</button>
-        ${
-          resolvedBank?.verified
-            ? `
-              <div class="wallet-instructions verified-bank-card">
-                <span>${escapeHtml(resolvedBank.bankName || "Bank")}</span>
-                <strong>${escapeHtml(resolvedBank.accountName || "")}</strong>
-                <code>${escapeHtml(resolvedBank.maskedAccountNumber || resolvedBank.accountNumber || "")}</code>
-              </div>
-            `
-            : `<p class="muted-copy">Resolve your bank account to continue.</p>`
-        }
+        <div class="saved-bank-list">
+          ${savedBanks.map((account) => `
+            <button class="saved-bank-option ${account.id === selectedSavedBank?.id ? "active" : ""}" data-saved-bank-id="${escapeHtml(account.id || "")}" type="button">
+              <span>${escapeHtml(account.bankName || "Bank")}</span>
+              <strong>${escapeHtml(account.accountName || "")}</strong>
+              <code>${escapeHtml(account.maskedAccountNumber || account.accountNumber || "")}</code>
+            </button>
+          `).join("")}
+        </div>
       `
+      : "";
+    const selectedSavedBankCard = selectedSavedBank
+      ? `
+        <div class="wallet-instructions verified-bank-card">
+          <span>${escapeHtml(selectedSavedBank.bankName || "Bank")}</span>
+          <strong>${escapeHtml(selectedSavedBank.accountName || "")}</strong>
+          <code>${escapeHtml(selectedSavedBank.maskedAccountNumber || selectedSavedBank.accountNumber || "")}</code>
+        </div>
+      `
+      : "";
+    const newBankForm = `
+      ${amountField("Amount (Naira)", "1")}
+      <label class="stack-label">
+        <span>Bank</span>
+        <select id="wallet-bank-code-input">
+          <option value="">Choose bank</option>
+          ${bankOptions}
+        </select>
+      </label>
+      <label class="stack-label">
+        <span>Account number</span>
+        <input id="wallet-account-input" type="text" inputmode="numeric" maxlength="10" placeholder="10 digits" value="${escapeHtml(bankMode === "new" ? (resolvedBank?.accountNumber || "") : "")}" />
+      </label>
+      <label class="save-account-row inline-check">
+        <input id="wallet-save-bank-input" type="checkbox" checked />
+        <span>Save account</span>
+      </label>
+      <button class="button-secondary shimmer-button" id="wallet-resolve-bank-btn" type="button">${icon("bank")} Resolve</button>
+      ${
+        bankMode === "new" && resolvedBank?.verified
+          ? `
+            <div class="wallet-instructions verified-bank-card">
+              <span>${escapeHtml(resolvedBank.bankName || "Bank")}</span>
+              <strong>${escapeHtml(resolvedBank.accountName || "")}</strong>
+              <code>${escapeHtml(resolvedBank.maskedAccountNumber || resolvedBank.accountNumber || "")}</code>
+            </div>
+          `
+          : `<p class="muted-copy">Resolve account to continue.</p>`
+      }
+      ${savedBanks.length ? `<button class="button-ghost compact-link" id="wallet-use-saved-bank-btn" type="button">Use saved account</button>` : ""}
+    `;
+    const withdrawalForm = currency === "NGN"
+      ? bankMode === "saved" && savedBanks.length
+        ? `
+          ${savedBankList}
+          ${selectedSavedBankCard}
+          ${amountField("Amount (Naira)", "1")}
+          <button class="button-ghost compact-link" id="wallet-use-new-bank-btn" type="button">New account</button>
+        `
+        : newBankForm
       : currency === "USDT"
         ? `
-          <label class="stack-label">
-            <span>Amount (USDT)</span>
-            <input id="wallet-amount-input" type="number" min="0" step="0.00000001" placeholder="Enter amount" />
-          </label>
-          <p class="wallet-equivalent-preview" id="wallet-equivalent-preview">Equivalent: --</p>
+          ${amountField("Amount (USDT)", "0.00000001")}
           <label class="stack-label">
             <span>Wallet address</span>
             <input id="wallet-address-input" type="text" placeholder="USDT address" />
@@ -3118,9 +3193,20 @@ async function refreshDashboardLiveData() {
 
   const refreshTasks = isFuturesMode()
     ? [loadFuturesDashboard()]
-    : [refreshTradeMarketData(), refreshTradeStatusData()];
+    : state.user?.role === "admin"
+      ? [
+          loadFinancialDashboard(),
+          loadAdminFinanceQueues(),
+          api("/api/admin/users").then((payload) => {
+            state.users = payload.users || [];
+          }),
+          refreshTradeStatusData(),
+          refreshTradeMarketData(),
+        ]
+      : [refreshTradeMarketData(), refreshTradeStatusData(), loadFinancialDashboard()];
   tradeRefreshPromise = Promise.allSettled(refreshTasks).finally(() => {
     tradeRefreshPromise = null;
+    render();
   });
 
   return tradeRefreshPromise;
@@ -3362,8 +3448,9 @@ async function loadDashboardData() {
 
   const cachedSnapshot = getCachedAccountSnapshot(getActiveExchange());
   applyAccountSnapshot(cachedSnapshot);
+  const accountRefreshParam = state.user.role === "admin" ? "&refresh=1" : "";
   const accountPromise = state.user.exchangeConnected
-    ? api(`/api/exchange/account?exchange=${encodeURIComponent(getActiveExchange())}`)
+    ? api(`/api/exchange/account?exchange=${encodeURIComponent(getActiveExchange())}${accountRefreshParam}`)
         .then((account) => {
           applyAccountSnapshot(account);
           state.user = {
@@ -3648,6 +3735,12 @@ async function submitUserBankAccount(form) {
     state.financialDashboard = {
       ...(state.financialDashboard || {}),
       bankAccount: payload.bankAccount,
+      bankAccounts: [
+        payload.bankAccount,
+        ...((state.financialDashboard?.bankAccounts || []).filter(
+          (account) => account.id !== payload.bankAccount.id
+        )),
+      ],
     };
     state.resolvedBankAccount = payload.bankAccount;
     render();
@@ -3670,21 +3763,27 @@ async function resolveSelectedBankAccount() {
         bankName: bank?.name || "",
         bankCode,
         accountNumber,
+        saveBankAccount: document.getElementById("wallet-save-bank-input")?.checked !== false,
       }),
     });
     state.resolvedBankAccount = payload.bankAccount;
+    const nextBankAccounts = payload.saved && payload.bankAccount?.id
+      ? [
+          payload.bankAccount,
+          ...((state.financialDashboard?.bankAccounts || []).filter(
+            (account) => account.id !== payload.bankAccount.id
+          )),
+        ]
+      : (state.financialDashboard?.bankAccounts || []);
     state.financialDashboard = {
       ...(state.financialDashboard || {}),
-      bankAccount: payload.bankAccount,
-      bankAccounts: [
-        payload.bankAccount,
-        ...((state.financialDashboard?.bankAccounts || []).filter(
-          (account) => account.id !== payload.bankAccount.id
-        )),
-      ],
+      bankAccount: payload.saved ? payload.bankAccount : state.financialDashboard?.bankAccount,
+      bankAccounts: nextBankAccounts,
     };
     state.actionModal = {
       ...state.actionModal,
+      bankMode: payload.saved ? "saved" : "new",
+      bankAccountId: payload.saved ? payload.bankAccount?.id || "" : "",
       bankCode,
     };
     render();
@@ -5951,16 +6050,74 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.actionModal = {
+      const nextCurrency = button.dataset.walletCurrency;
+      const savedBanks = getSavedBankAccounts();
+      const nextModal = {
         ...state.actionModal,
-        currency: button.dataset.walletCurrency,
+        currency: nextCurrency,
       };
-      if (button.dataset.walletCurrency === "NGN" && state.actionModal?.type === "withdraw") {
+      if (state.actionModal?.type === "withdraw" && nextCurrency === "NGN") {
+        nextModal.bankMode = savedBanks.length ? "saved" : "new";
+        nextModal.bankAccountId = savedBanks[0]?.id || "";
+        state.resolvedBankAccount = savedBanks[0] || null;
+      }
+      if (state.actionModal?.type === "withdraw" && nextCurrency !== "NGN") {
+        state.resolvedBankAccount = null;
+      }
+      state.actionModal = {
+        ...nextModal,
+      };
+      if (nextCurrency === "NGN" && state.actionModal?.type === "withdraw") {
         void loadPaymentBanks().then(() => render()).catch((error) => showError(error.message));
       }
       render();
     });
   });
+
+  document.querySelectorAll("[data-saved-bank-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const savedBank = getSavedBankAccounts().find((account) => account.id === button.dataset.savedBankId);
+      if (!savedBank) {
+        return;
+      }
+      state.resolvedBankAccount = savedBank;
+      state.actionModal = {
+        ...state.actionModal,
+        bankMode: "saved",
+        bankAccountId: savedBank.id,
+      };
+      render();
+    });
+  });
+
+  const useNewBankButton = document.getElementById("wallet-use-new-bank-btn");
+  if (useNewBankButton) {
+    useNewBankButton.addEventListener("click", () => {
+      state.resolvedBankAccount = null;
+      state.actionModal = {
+        ...state.actionModal,
+        bankMode: "new",
+        bankAccountId: "",
+        bankCode: "",
+      };
+      void loadPaymentBanks().then(() => render()).catch((error) => showError(error.message));
+      render();
+    });
+  }
+
+  const useSavedBankButton = document.getElementById("wallet-use-saved-bank-btn");
+  if (useSavedBankButton) {
+    useSavedBankButton.addEventListener("click", () => {
+      const savedBanks = getSavedBankAccounts();
+      state.resolvedBankAccount = savedBanks[0] || null;
+      state.actionModal = {
+        ...state.actionModal,
+        bankMode: "saved",
+        bankAccountId: savedBanks[0]?.id || "",
+      };
+      render();
+    });
+  }
 
   const bankCodeInput = document.getElementById("wallet-bank-code-input");
   if (bankCodeInput) {
@@ -5968,6 +6125,7 @@ function bindDashboardActions() {
       state.resolvedBankAccount = null;
       state.actionModal = {
         ...state.actionModal,
+        bankMode: "new",
         bankCode: bankCodeInput.value,
       };
       render();
@@ -6022,10 +6180,31 @@ function bindDashboardActions() {
         showError("Enter wallet address and network.");
         return;
       }
-      const bankAccount = state.resolvedBankAccount || (getSavedBankAccount()?.verified ? getSavedBankAccount() : null);
-      if (mode === "withdraw" && currency === "NGN" && !bankAccount?.id) {
-        showError("Resolve your bank account first.");
-        return;
+      const savedBank = getSavedBankAccounts().find((account) => account.id === state.actionModal?.bankAccountId);
+      const bankAccount = state.resolvedBankAccount || savedBank || null;
+      const withdrawalPayload = {
+        currency,
+        amount,
+        destination,
+      };
+      if (mode === "withdraw" && currency === "NGN") {
+        const useSavedBank = state.actionModal?.bankMode !== "new" && savedBank?.id;
+        const bankCode = document.getElementById("wallet-bank-code-input")?.value || bankAccount?.bankCode || "";
+        const accountNumber = document.getElementById("wallet-account-input")?.value?.replace(/\D/g, "").trim()
+          || bankAccount?.accountNumber
+          || "";
+        if (useSavedBank) {
+          withdrawalPayload.bankAccountId = savedBank.id;
+        } else {
+          if (!bankAccount?.verified || !bankCode || !/^\d{10}$/.test(accountNumber)) {
+            showError("Resolve your bank account first.");
+            return;
+          }
+          withdrawalPayload.bankName = bankAccount.bankName || "";
+          withdrawalPayload.bankCode = bankCode;
+          withdrawalPayload.accountNumber = accountNumber;
+          withdrawalPayload.saveBankAccount = document.getElementById("wallet-save-bank-input")?.checked !== false;
+        }
       }
 
       await withLoading(async () => {
@@ -6046,12 +6225,7 @@ function bindDashboardActions() {
         await api("/api/withdrawals", {
           method: "POST",
           headers,
-          body: JSON.stringify({
-            currency,
-            amount,
-            destination,
-            bankAccountId: currency === "NGN" ? bankAccount.id : "",
-          }),
+          body: JSON.stringify(withdrawalPayload),
         });
         await loadFinancialDashboard();
         clearActionModal();
