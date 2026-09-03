@@ -237,6 +237,10 @@ function getActiveExchange() {
   return state.user?.activeExchange || state.selectedExchange || state.authExchange || "bybit";
 }
 
+function getAdminDashboardExchange() {
+  return state.user?.role === "admin" && state.user.bybitConnected ? "bybit" : getActiveExchange();
+}
+
 function setSelectedExchange(exchange) {
   state.selectedExchange = EXCHANGE_OPTIONS.some((item) => item.id === exchange) ? exchange : "bybit";
   localStorage.setItem("tradeflow-selected-exchange", state.selectedExchange);
@@ -1553,7 +1557,7 @@ async function loadFinancialDashboard() {
   }
   const endpoint = state.user.role === "admin" ? "/api/admin/dashboard" : "/api/user/dashboard";
   const url = state.user.role === "admin"
-    ? `${endpoint}?exchange=${encodeURIComponent(getActiveExchange())}&refresh=1`
+    ? `${endpoint}?exchange=${encodeURIComponent(getAdminDashboardExchange())}&refresh=1`
     : endpoint;
   state.financialDashboard = await api(url);
   state.notifications = state.financialDashboard?.notifications || [];
@@ -3387,7 +3391,10 @@ async function loadDashboardData() {
   });
 
   state.loadingWatchlist = !state.watchlistSeed.length;
-  state.loadingAccount = !!(state.user.exchangeConnected && !state.balances.length);
+  const accountConnected = state.user.role === "admin"
+    ? !!(state.user.bybitConnected || state.user.exchangeConnected)
+    : !!state.user.exchangeConnected;
+  state.loadingAccount = !!(accountConnected && !state.balances.length);
   state.loadingTrades = !state.trades.length;
   state.loadingUsers = !!(state.user.role === "admin" && !state.users.length);
   state.loadingFinancial = !state.financialDashboard;
@@ -3446,11 +3453,16 @@ async function loadDashboardData() {
       render();
     });
 
-  const cachedSnapshot = getCachedAccountSnapshot(getActiveExchange());
-  applyAccountSnapshot(cachedSnapshot);
   const accountRefreshParam = state.user.role === "admin" ? "&refresh=1" : "";
-  const accountPromise = state.user.exchangeConnected
-    ? api(`/api/exchange/account?exchange=${encodeURIComponent(getActiveExchange())}${accountRefreshParam}`)
+  const accountExchange = state.user.role === "admin" ? getAdminDashboardExchange() : getActiveExchange();
+  const cachedSnapshot = getCachedAccountSnapshot(accountExchange);
+  applyAccountSnapshot(cachedSnapshot);
+  const accountPromise = state.user.role === "admin"
+    ? Promise.resolve().then(() => {
+        state.loadingAccount = false;
+      })
+    : accountConnected
+    ? api(`/api/exchange/account?exchange=${encodeURIComponent(accountExchange)}${accountRefreshParam}`)
         .then((account) => {
           applyAccountSnapshot(account);
           state.user = {
@@ -4038,9 +4050,12 @@ function renderMarketModeSwitch() {
 function renderSummaryCard() {
   const isAdmin = state.user?.role === "admin";
   const adminStats = state.financialDashboard || {};
+  const adminAccountSnapshot = isAdmin ? state.financialDashboard?.accountSnapshot : null;
   const futuresAccount = state.futuresAccount || {};
   const portfolioBalance = isFuturesMode()
     ? Number(futuresAccount.totalMarginBalance || futuresAccount.totalWalletBalance || 0)
+    : isAdmin && adminAccountSnapshot
+      ? Number(adminAccountSnapshot.totalUsdt || 0)
     : Number(state.totalUsdt || 0);
   const usdtWallet = getFinancialWallet("USDT");
   const ngnWallet = getFinancialWallet("NGN");
@@ -4059,9 +4074,13 @@ function renderSummaryCard() {
   const exchangeLabel = getExchangeLabel(getActiveExchange());
   const todayValue = isFuturesMode()
     ? Number(futuresAccount.totalUnrealizedProfit || 0)
+    : isAdmin && adminAccountSnapshot
+      ? Number(adminAccountSnapshot.todayPnlValue || 0)
     : Number(state.todayPnlValue || 0);
   const todayPercent = isFuturesMode()
     ? (portfolioBalance ? (todayValue / portfolioBalance) * 100 : 0)
+    : isAdmin && adminAccountSnapshot
+      ? Number(adminAccountSnapshot.todayPnlPercent || 0)
     : Number(state.todayPnlPercent || 0);
   const todayTone = todayValue > 0 ? "positive" : todayValue < 0 ? "negative" : "neutral";
   const userMirroredPnlPercentage = Number(state.financialDashboard?.performance?.todayPercentage || 0);
@@ -4072,18 +4091,20 @@ function renderSummaryCard() {
   if (isAdmin) {
     const adminBalanceNgn = configuredRate ? portfolioBalance * configuredRate : Number(state.totalNgn || 0);
     const adminPnlNgn = configuredRate ? todayValue * configuredRate : 0;
+    const adminWalletLinked = !!(state.user.bybitConnected || state.user.exchangeConnected || adminAccountSnapshot);
+    const adminExchangeLabel = getExchangeLabel(adminAccountSnapshot?.exchange || getAdminDashboardExchange());
     return `
       <section class="balance-carousel" data-section="wallet">
         <article class="summary-hero balance-slide fintech-card">
-          ${state.loadingFinancial || accountLoading ? renderSectionLoadingOverlay("Loading wallet", `Syncing ${exchangeLabel}`) : ""}
+          ${state.loadingFinancial || accountLoading ? renderSectionLoadingOverlay("Loading wallet", `Syncing ${adminExchangeLabel}`) : ""}
           <div class="fintech-card-pattern" aria-hidden="true"></div>
           <div class="fintech-card-top">
             <span class="card-icon">${icon("card")}</span>
             <span>Admin Wallet</span>
           </div>
-          <h2>${state.user.exchangeConnected ? formatUsdt(portfolioBalance) : "--"}</h2>
+          <h2>${adminWalletLinked ? formatUsdt(portfolioBalance) : "--"}</h2>
           <div class="fintech-balance-row">
-            <span>${exchangeLabel}</span>
+            <span>${adminExchangeLabel}</span>
             <span>${formatNaira(adminBalanceNgn)}</span>
           </div>
           <p class="muted-bright">
