@@ -1916,6 +1916,48 @@ function getTradeReportKey(trade, period) {
   return date.toISOString().slice(0, 10);
 }
 
+function getTradeReportExitPrice(trade) {
+  if (String(trade.lifecycleStatus || "").toUpperCase() !== "CLOSED") {
+    return Number(getTradeCurrentMarket(trade.symbol)?.price || 0);
+  }
+  const filledExitExecutions = (trade.exitOrders || [])
+    .map((exitOrder) => ({
+      execution: getTradeExitExecutionSnapshot(exitOrder),
+      fallbackPrice: Number(exitOrder?.price || 0),
+    }))
+    .filter(({ execution }) => ["FILLED", "PARTIALLY_FILLED"].includes(String(execution?.status || "").toUpperCase()));
+  const totalExitQuantity = filledExitExecutions.reduce((sum, { execution }) => sum + Number(execution?.executedQty || 0), 0);
+  const totalExitValue = filledExitExecutions.reduce((sum, { execution, fallbackPrice }) => {
+    const qty = Number(execution?.executedQty || 0);
+    return sum + qty * getExecutionAveragePrice(execution, fallbackPrice);
+  }, 0);
+  return totalExitQuantity && totalExitValue
+    ? totalExitValue / totalExitQuantity
+    : Number(getTradeCurrentMarket(trade.symbol)?.price || 0);
+}
+
+function buildProfitLossTradeBreakdown(trade, pnlValue) {
+  const pnlPercent = String(trade.lifecycleStatus || "").toUpperCase() === "CLOSED"
+    ? getTradeStaticPnlPercent(trade)
+    : getTradePnlPercent(trade);
+  const investedUsdt = state.user?.role === "user" && trade.userInvestment?.amountUsdt
+    ? Number(trade.userInvestment.amountUsdt || 0)
+    : getTradeEntryPrice(trade) * getTradeExecutedQuantity(trade);
+  return {
+    id: trade.id,
+    symbol: trade.symbol || "-",
+    side: trade.side || "-",
+    status: trade.lifecycleStatus || "-",
+    entryPrice: getTradeEntryPrice(trade),
+    exitPrice: getTradeReportExitPrice(trade),
+    quantity: getTradeExecutedQuantity(trade),
+    investedUsdt,
+    pnlPercent,
+    pnlValue,
+    createdAt: trade.createdAt || "",
+  };
+}
+
 function getProfitLossReportRows(period = state.reportPeriod) {
   const groups = new Map();
   for (const trade of getHistoryTrades()) {
@@ -1926,6 +1968,7 @@ function getProfitLossReportRows(period = state.reportPeriod) {
       pnlValue: 0,
       wins: 0,
       losses: 0,
+      items: [],
     };
     const pnlValue = getTradeReportPnlValue(trade);
     current.trades += 1;
@@ -1935,9 +1978,15 @@ function getProfitLossReportRows(period = state.reportPeriod) {
     } else if (pnlValue < 0) {
       current.losses += 1;
     }
+    current.items.push(buildProfitLossTradeBreakdown(trade, pnlValue));
     groups.set(key, current);
   }
-  return [...groups.values()].sort((a, b) => b.key.localeCompare(a.key));
+  return [...groups.values()]
+    .map((row) => ({
+      ...row,
+      items: row.items.sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)),
+    }))
+    .sort((a, b) => b.key.localeCompare(a.key));
 }
 
 function getReportPeriodLabel(period = state.reportPeriod) {
@@ -1952,22 +2001,143 @@ function escapePdfText(value) {
   return String(value || "").replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
-function createSimplePdfBlob(lines) {
-  const content = [
+function pdfRgb(color) {
+  return color.map((value) => Math.max(0, Math.min(1, Number(value || 0))).toFixed(3)).join(" ");
+}
+
+function pdfText(text, x, y, { size = 9, font = "F1", color = [0.08, 0.1, 0.14], max = 64 } = {}) {
+  return [
+    `${pdfRgb(color)} rg`,
     "BT",
-    "/F1 14 Tf",
-    "50 790 Td",
-    ...lines.flatMap((line, index) => [
-      `${index === 0 ? "" : "0 -20 Td"}(${escapePdfText(line).slice(0, 96)}) Tj`,
-    ]),
+    `/${font} ${size} Tf`,
+    `${x} ${y} Td`,
+    `(${escapePdfText(String(text || "").slice(0, max))}) Tj`,
     "ET",
   ].join("\n");
+}
+
+function pdfRect(x, y, width, height, color, stroke = null) {
+  const commands = [
+    `${pdfRgb(color)} rg`,
+    `${x} ${y} ${width} ${height} re f`,
+  ];
+  if (stroke) {
+    commands.push(`${pdfRgb(stroke)} RG`, `${x} ${y} ${width} ${height} re S`);
+  }
+  return commands.join("\n");
+}
+
+function getPdfPnlColor(value) {
+  if (value > 0) {
+    return [0.02, 0.5, 0.22];
+  }
+  if (value < 0) {
+    return [0.74, 0.12, 0.12];
+  }
+  return [0.42, 0.46, 0.52];
+}
+
+function createProfitLossPdfBlob(rows, period) {
+  const pageWidth = 612;
+  const pageHeight = 842;
+  const margin = 36;
+  const rowHeight = 22;
+  const columns = [
+    { label: "Trade", x: 46, width: 82 },
+    { label: "Side", x: 130, width: 38 },
+    { label: "Entry", x: 172, width: 70 },
+    { label: "Exit/Now", x: 244, width: 70 },
+    { label: "Size", x: 316, width: 74 },
+    { label: "P&L %", x: 392, width: 62 },
+    { label: "P&L", x: 456, width: 104 },
+  ];
+  const pages = [];
+  let commands = [];
+  let y = 790;
+  const total = rows.reduce((sum, row) => sum + row.pnlValue, 0);
+
+  function pushPage() {
+    pages.push(commands.join("\n"));
+    commands = [];
+    y = 790;
+  }
+
+  function ensureSpace(height = rowHeight) {
+    if (y - height < margin) {
+      pushPage();
+      renderPageHeader(false);
+    }
+  }
+
+  function renderPageHeader(isFirstPage = false) {
+    commands.push(pdfRect(0, 0, pageWidth, pageHeight, [0.98, 0.99, 1]));
+    commands.push(pdfText("Netrue Trade P&L Report", 46, y, { size: 18, font: "F2", color: [0.04, 0.1, 0.22], max: 80 }));
+    y -= 24;
+    if (isFirstPage) {
+      commands.push(pdfText(`${getReportPeriodLabel(period)} report  |  Generated ${new Date().toLocaleString()}`, 46, y, { size: 9, color: [0.38, 0.43, 0.5], max: 100 }));
+      y -= 22;
+      commands.push(pdfRect(46, y - 12, 520, 34, total >= 0 ? [0.91, 0.98, 0.94] : [1, 0.94, 0.94], [0.84, 0.88, 0.93]));
+      commands.push(pdfText("Total P&L", 60, y, { size: 9, font: "F2", color: [0.38, 0.43, 0.5] }));
+      commands.push(pdfText(`${total >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(total))}`, 142, y, { size: 14, font: "F2", color: getPdfPnlColor(total), max: 40 }));
+      y -= 38;
+    } else {
+      commands.push(pdfText("continued", 46, y, { size: 9, color: [0.38, 0.43, 0.5] }));
+      y -= 24;
+    }
+  }
+
+  function renderTableHeader() {
+    commands.push(pdfRect(46, y - 14, 520, 20, [0.08, 0.12, 0.2]));
+    columns.forEach((column) => {
+      commands.push(pdfText(column.label, column.x, y - 8, { size: 8, font: "F2", color: [1, 1, 1], max: 16 }));
+    });
+    y -= 24;
+  }
+
+  renderPageHeader(true);
+  if (!rows.length) {
+    commands.push(pdfText("No trade history available.", 46, y, { size: 11, color: [0.38, 0.43, 0.5] }));
+  }
+
+  rows.forEach((group) => {
+    ensureSpace(58);
+    commands.push(pdfRect(46, y - 14, 520, 26, [0.93, 0.96, 1], [0.84, 0.88, 0.93]));
+    commands.push(pdfText(group.key, 58, y - 4, { size: 11, font: "F2", color: [0.04, 0.1, 0.22], max: 32 }));
+    commands.push(pdfText(`${group.trades} trades  |  ${group.wins} wins  |  ${group.losses} losses`, 170, y - 4, { size: 8, color: [0.38, 0.43, 0.5], max: 48 }));
+    commands.push(pdfText(`${group.pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(group.pnlValue))}`, 456, y - 4, { size: 10, font: "F2", color: getPdfPnlColor(group.pnlValue), max: 28 }));
+    y -= 34;
+    renderTableHeader();
+
+    (group.items || []).forEach((item, index) => {
+      ensureSpace(rowHeight + 4);
+      commands.push(pdfRect(46, y - 14, 520, 20, index % 2 ? [0.99, 0.995, 1] : [1, 1, 1], [0.9, 0.92, 0.95]));
+      commands.push(pdfText(item.symbol, columns[0].x, y - 8, { size: 8, font: "F2", max: 16 }));
+      commands.push(pdfText(item.side, columns[1].x, y - 8, { size: 8, max: 8 }));
+      commands.push(pdfText(item.entryPrice ? formatNumber(item.entryPrice, 6) : "-", columns[2].x, y - 8, { size: 8, max: 14 }));
+      commands.push(pdfText(item.exitPrice ? formatNumber(item.exitPrice, 6) : "-", columns[3].x, y - 8, { size: 8, max: 14 }));
+      commands.push(pdfText(item.investedUsdt ? formatUsdtUnit(item.investedUsdt) : formatNumber(item.quantity, 6), columns[4].x, y - 8, { size: 8, max: 18 }));
+      commands.push(pdfText(`${item.pnlPercent >= 0 ? "+" : ""}${formatNumber(item.pnlPercent, 2)}%`, columns[5].x, y - 8, { size: 8, font: "F2", color: getPdfPnlColor(item.pnlValue), max: 12 }));
+      commands.push(pdfText(`${item.pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(item.pnlValue))}`, columns[6].x, y - 8, { size: 8, font: "F2", color: getPdfPnlColor(item.pnlValue), max: 24 }));
+      y -= rowHeight;
+    });
+    y -= 8;
+  });
+
+  if (commands.length) {
+    pushPage();
+  }
+
+  const pageObjects = pages.map((content, index) =>
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${5 + index} 0 R >>`
+  );
+  const contentObjects = pages.map((content) => `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    `<< /Type /Pages /Kids [${pageObjects.map((_, index) => `${5 + pages.length + index} 0 R`).join(" ")}] /Count ${pages.length} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    ...contentObjects,
+    ...pageObjects,
   ];
   let body = "%PDF-1.4\n";
   const offsets = [0];
@@ -1984,17 +2154,7 @@ function createSimplePdfBlob(lines) {
 
 function downloadProfitLossReport() {
   const rows = getProfitLossReportRows(state.reportPeriod);
-  const total = rows.reduce((sum, row) => sum + row.pnlValue, 0);
-  const lines = [
-    `Trade Profit/Loss Report - ${getReportPeriodLabel(state.reportPeriod)}`,
-    `Generated: ${new Date().toLocaleString()}`,
-    `Total P/L: ${total >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(total))}`,
-    "",
-    ...(rows.length
-      ? rows.map((row) => `${row.key}: ${row.pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(row.pnlValue))} | Trades ${row.trades} | Wins ${row.wins} | Losses ${row.losses}`)
-      : ["No trade history available."]),
-  ];
-  const blob = createSimplePdfBlob(lines);
+  const blob = createProfitLossPdfBlob(rows, state.reportPeriod);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
