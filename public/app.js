@@ -127,6 +127,8 @@ const state = {
   loadingAdminFinance: false,
   loadingFinancial: false,
   watchlistSeed: [],
+  spotSymbols: [],
+  spotSymbolsLoadedAt: 0,
   signalChart: {
     symbol: "",
     interval: "15m",
@@ -1187,7 +1189,8 @@ function renderPasswordField({ label, name, placeholder, autocomplete, value = "
 
 function getWatchlist() {
   const base = new Map((state.watchlistSeed || []).map((item) => [item.symbol, item]));
-  const symbols = [...new Set([...(state.watchlistSeed || []).map((item) => item.symbol), ...WATCH_SYMBOLS])];
+  const sourceSymbols = state.watchlistSeed.length ? state.watchlistSeed.map((item) => item.symbol) : WATCH_SYMBOLS;
+  const symbols = [...new Set(sourceSymbols)].slice(0, 10);
   return symbols.map((symbol) => {
     const seed = base.get(symbol) || { symbol, price: 0, changePercent: 0, volume24h: 0, turnover24h: 0 };
     const live = state.liveMap[symbol] || {};
@@ -1202,7 +1205,7 @@ function getWatchlist() {
 }
 
 function getSymbolData(symbol) {
-  return getWatchlist().find((item) => item.symbol === symbol) || { symbol, price: 0, changePercent: 0 };
+  return state.tradeMarketMap[symbol] || getWatchlist().find((item) => item.symbol === symbol) || { symbol, price: 0, changePercent: 0 };
 }
 
 function getTradeFormDefaults() {
@@ -1227,11 +1230,7 @@ function getDisplayedBalances() {
 }
 
 function getDisplayedWatchlist() {
-  const list = getWatchlist();
-  if (state.showAllWatchlist) {
-    return list;
-  }
-  return list.slice(0, 5);
+  return getWatchlist().slice(0, 10);
 }
 
 function getConnectedExchanges(user) {
@@ -1301,6 +1300,7 @@ function getDetectedSpotHoldings() {
 
 function getTradeSymbolSuggestions() {
   return [...new Set([
+    ...state.spotSymbols,
     ...WATCH_SYMBOLS,
     ...(state.watchlistSeed || []).map((item) => item.symbol),
     ...(state.trades || []).map((trade) => trade.symbol),
@@ -3225,6 +3225,7 @@ async function refreshTradeMarketData() {
     ...state.trades.map((trade) => trade.symbol),
     ...(state.openOrders || []).map((order) => order.symbol),
     ...getDetectedSpotHoldings().map((holding) => holding.symbol),
+    state.user?.role === "admin" ? String(tradeDraft.symbol || "").trim().toUpperCase() : "",
   ].filter(Boolean))];
   if (!symbols.length) {
     return;
@@ -3244,6 +3245,32 @@ async function refreshTradeMarketData() {
     render();
   } catch {
     // keep the current snapshot if the lightweight live refresh fails
+  }
+}
+
+async function refreshSingleMarketSymbol(symbol) {
+  const normalizedSymbol = String(symbol || "").trim().toUpperCase();
+  if (!normalizedSymbol) {
+    return;
+  }
+  try {
+    const payload = await api(`/api/market/prices?symbols=${encodeURIComponent(normalizedSymbol)}`);
+    const price = (payload.prices || [])[0];
+    if (!price?.symbol) {
+      return;
+    }
+    state.tradeMarketMap = {
+      ...state.tradeMarketMap,
+      [price.symbol]: {
+        price: Number(price.price || 0),
+        changePercent: Number(price.changePercent || 0),
+        volume24h: Number(price.volume24h || 0),
+        turnover24h: Number(price.turnover24h || 0),
+      },
+    };
+    render();
+  } catch {
+    // The backend validates the symbol again when the trade is submitted.
   }
 }
 
@@ -3295,6 +3322,24 @@ async function loadWatchlistSeed() {
   } catch {
     state.watchlistSeed = [];
   }
+}
+
+async function loadSpotSymbols({ force = false } = {}) {
+  if (!state.user || state.user.role !== "admin") {
+    state.spotSymbols = [];
+    state.spotSymbolsLoadedAt = 0;
+    return [];
+  }
+  const isFresh = state.spotSymbols.length && Date.now() - Number(state.spotSymbolsLoadedAt || 0) < 10 * 60 * 1000;
+  if (!force && isFresh) {
+    return state.spotSymbols;
+  }
+  const payload = await api("/api/market/symbols?exchange=bybit");
+  state.spotSymbols = (payload.symbols || [])
+    .map((item) => String(item.symbol || "").trim().toUpperCase())
+    .filter(Boolean);
+  state.spotSymbolsLoadedAt = Date.now();
+  return state.spotSymbols;
 }
 
 function hydrateWatchlistFromSeed() {
@@ -3612,6 +3657,15 @@ async function loadDashboardData() {
       connectWatchSocket();
       render();
     });
+  const spotSymbolsPromise = state.user.role === "admin"
+    ? loadSpotSymbols()
+        .then(() => {
+          render();
+        })
+        .catch(() => {
+          state.spotSymbols = [];
+        })
+    : Promise.resolve();
 
   const accountRefreshParam = state.user.role === "admin" ? "&refresh=1" : "";
   const accountExchange = state.user.role === "admin" ? getAdminDashboardExchange() : getActiveExchange();
@@ -3673,6 +3727,7 @@ async function loadDashboardData() {
   void signalAutoTradePromise;
   void futuresPromise;
   void watchlistPromise;
+  void spotSymbolsPromise;
   void financialPromise;
   void adminFinancePromise;
 }
@@ -4331,9 +4386,9 @@ function renderTradeTicket() {
     <section class="trade-ticket">
       <div class="ticket-head">
         <div>
-          <input id="trade-symbol" class="ticket-symbol" list="trade-symbol-list" value="${tradeDraft.symbol}" placeholder="Type pair e.g. PEPEUSDT" />
+          <input id="trade-symbol" class="ticket-symbol" list="trade-symbol-list" value="${tradeDraft.symbol}" placeholder="Search Bybit spot pair" />
           <datalist id="trade-symbol-list">
-            ${symbolSuggestions.map((symbol) => `<option value="${symbol}"></option>`).join("")}
+            ${symbolSuggestions.map((symbol) => `<option value="${escapeHtml(symbol)}"></option>`).join("")}
           </datalist>
           <p class="ticket-change ${livePositive ? "positive" : "negative"}">${livePositive ? "+" : ""}${formatNumber(summary.live.changePercent, 2)}%</p>
         </div>
@@ -4430,10 +4485,9 @@ function renderWatchlistSection() {
       ${state.loadingWatchlist ? renderSectionLoadingOverlay("Loading watchlist", "Refreshing live market movers") : ""}
       <div class="section-head">
         <div>
-          <h3>Live Crypto Watchlist</h3>
-          <p class="muted-copy">Live price with true 24h move from ${getExchangeLabel(getActiveExchange())}.</p>
+          <h3>Hot Spot Coins</h3>
+          <p class="muted-copy">Top 10 by live ${getExchangeLabel(getActiveExchange())} spot activity.</p>
         </div>
-        <button id="toggle-watchlist-btn" class="text-link" type="button">${state.showAllWatchlist ? "See less" : "See more"}</button>
       </div>
       <div class="compact-list" data-watchlist-host="dashboard">${renderWatchlistRows(watchlist)}</div>
     </section>
@@ -6813,8 +6867,17 @@ function bindTradeTicketActions() {
   const submitButton = document.getElementById("trade-submit-btn");
   const bboButton = document.getElementById("use-live-price-btn");
 
-  if (symbolInput) symbolInput.addEventListener("change", () => { updateTradeDraft({ symbol: symbolInput.value }); render(); });
-  if (symbolInput) symbolInput.addEventListener("input", () => { updateTradeDraft({ symbol: symbolInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "") }); });
+  if (symbolInput) symbolInput.addEventListener("change", () => {
+    const symbol = symbolInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    updateTradeDraft({ symbol });
+    render();
+    void refreshSingleMarketSymbol(symbol);
+  });
+  if (symbolInput) symbolInput.addEventListener("input", () => {
+    const symbol = symbolInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    symbolInput.value = symbol;
+    updateTradeDraft({ symbol });
+  });
   if (typeInput) typeInput.addEventListener("change", () => { updateTradeDraft({ type: typeInput.value }); render(); });
   if (priceInput) priceInput.addEventListener("input", () => updateTradeDraft({ price: priceInput.value, quoteOrderQty: "" }));
   if (quantityInput) quantityInput.addEventListener("input", () => updateTradeDraft({ quantity: quantityInput.value, quoteOrderQty: "" }));
@@ -6834,7 +6897,8 @@ function bindTradeTicketActions() {
   });
   if (takeProfitInput) takeProfitInput.addEventListener("input", () => updateTradeDraft({ takeProfitPrice: takeProfitInput.value }));
   if (submitButton) submitButton.addEventListener("click", submitTrade);
-  if (bboButton) bboButton.addEventListener("click", () => {
+  if (bboButton) bboButton.addEventListener("click", async () => {
+    await refreshSingleMarketSymbol(tradeDraft.symbol);
     const live = getSymbolData(tradeDraft.symbol);
     updateTradeDraft({ price: live.price ? String(live.price) : tradeDraft.price });
     render();
