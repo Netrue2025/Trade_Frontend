@@ -111,6 +111,7 @@ const state = {
   totalUsdt: 0,
   previousTotalUsdt: 0,
   totalNgn: 0,
+  accountTotalAvailableBalance: 0,
   usdtNgnRate: 0,
   todayPnlValue: 0,
   todayPnlPercent: 0,
@@ -187,6 +188,7 @@ let watchlistRefreshPromise = null;
 let tradeRefreshPromise = null;
 let futuresRefreshPromise = null;
 let signalChartRefreshTimer = null;
+let tradeSymbolRefreshTimer = null;
 let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
 const seenSignalIds = new Set();
@@ -1212,7 +1214,7 @@ function getTradeFormDefaults() {
   return {
     symbol: "PEPEUSDT",
     side: "BUY",
-    type: "LIMIT",
+    type: "MARKET",
     price: "",
     quantity: "",
     quoteOrderQty: "",
@@ -1265,6 +1267,15 @@ function getStablecoinBuyingBalance(balances = []) {
     }
     return sum + Number(balance.free ?? balance.total ?? 0);
   }, 0);
+}
+
+function getUnifiedQuoteBalance(quoteAsset = "USDT") {
+  const normalizedQuote = String(quoteAsset || "USDT").trim().toUpperCase();
+  const walletBalance = Number(getBalanceForAsset(normalizedQuote)?.free ?? getBalanceForAsset(normalizedQuote)?.total ?? 0);
+  const stablecoinBalance = normalizedQuote === "USDT" ? getStablecoinBuyingBalance(state.balances || []) : walletBalance;
+  const accountAvailable = normalizedQuote === "USDT" ? Number(state.accountTotalAvailableBalance || 0) : 0;
+  const candidates = [walletBalance, stablecoinBalance, accountAvailable].filter((value) => Number(value) > 0);
+  return candidates.length ? Math.max(...candidates) : 0;
 }
 
 function getDetectedSpotHoldings() {
@@ -1328,15 +1339,22 @@ function renderWatchlistRows(items) {
 }
 
 function getBalanceForAsset(asset) {
-  return state.balances.find((item) => item.asset === asset);
+  const normalizedAsset = String(asset || "").trim().toUpperCase();
+  return state.balances.find((item) => String(item.asset || "").toUpperCase() === normalizedAsset);
+}
+
+function getQuoteAssetFromSymbol(symbol) {
+  const normalizedSymbol = normalizeTradeSymbolValue(symbol);
+  const quoteAsset = KNOWN_QUOTE_ASSETS.find(
+    (item) => normalizedSymbol.endsWith(item) && normalizedSymbol.length > item.length
+  );
+  return quoteAsset || "USDT";
 }
 
 function getBaseAssetFromSymbol(symbol) {
   const normalizedSymbol = String(symbol || "").trim().toUpperCase();
-  const quoteAsset = KNOWN_QUOTE_ASSETS.find(
-    (item) => normalizedSymbol.endsWith(item) && normalizedSymbol.length > item.length
-  );
-  return quoteAsset ? normalizedSymbol.slice(0, -quoteAsset.length) : normalizedSymbol;
+  const quoteAsset = getQuoteAssetFromSymbol(normalizedSymbol);
+  return normalizedSymbol.endsWith(quoteAsset) ? normalizedSymbol.slice(0, -quoteAsset.length) : normalizedSymbol;
 }
 
 function hasActiveOpenOrderForSymbol(symbol) {
@@ -1385,7 +1403,7 @@ function isTradeVisibleOnHome(trade) {
   if (state.user?.role === "user") {
     return ["OPEN", "PENDING"].includes(status) && trade.userInvestment?.status === "ACTIVE";
   }
-  return isTradeStrictlyOpen(trade);
+  return status === "OPEN" || isTradeStrictlyOpen(trade);
 }
 
 function isTradeClearableFromHistory(trade) {
@@ -1403,7 +1421,8 @@ function getHistoryTrades() {
 
 function getCurrentTradeSummary() {
   const symbol = tradeDraft.symbol || "PEPEUSDT";
-  const baseAsset = symbol.replace(/USDT$/, "");
+  const quoteAsset = getQuoteAssetFromSymbol(symbol);
+  const baseAsset = getBaseAssetFromSymbol(symbol);
   const live = getSymbolData(symbol);
   const effectivePrice = Number(tradeDraft.price || live.price || 0);
   const amount = Number(tradeDraft.quantity || 0);
@@ -1412,9 +1431,10 @@ function getCurrentTradeSummary() {
     ? Number(tradeDraft.quoteOrderQty || 0)
     : effectivePrice * amount;
   const baseBalance = getBalanceForAsset(baseAsset)?.total || 0;
-  const usdtBalance = getBalanceForAsset("USDT")?.total || 0;
+  const usdtBalance = getUnifiedQuoteBalance(quoteAsset);
   return {
     baseAsset,
+    quoteAsset,
     live,
     effectivePrice,
     total,
@@ -3248,7 +3268,38 @@ async function refreshTradeMarketData() {
   }
 }
 
-async function refreshSingleMarketSymbol(symbol) {
+function normalizeTradeSymbolValue(value) {
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function syncMarketBuySpendFromBalance({ force = false } = {}) {
+  const summary = getCurrentTradeSummary();
+  const available = Number(summary.usdtBalance || 0);
+  if (tradeDraft.side !== "BUY" || tradeDraft.type !== "MARKET" || available <= 0) {
+    return;
+  }
+  const currentSpend = Number(tradeDraft.quoteOrderQty || 0);
+  if (!force && currentSpend > 0 && currentSpend <= available) {
+    return;
+  }
+  updateTradeDraft({
+    quantity: "",
+    quoteOrderQty: formatDecimalInput(available),
+  });
+}
+
+function scheduleTradeSymbolMarketRefresh(symbol) {
+  clearTimeout(tradeSymbolRefreshTimer);
+  const normalizedSymbol = normalizeTradeSymbolValue(symbol);
+  if (normalizedSymbol.length < 5) {
+    return;
+  }
+  tradeSymbolRefreshTimer = setTimeout(() => {
+    void refreshSingleMarketSymbol(normalizedSymbol, { fillSpend: true });
+  }, 350);
+}
+
+async function refreshSingleMarketSymbol(symbol, { renderAfter = true, fillSpend = false } = {}) {
   const normalizedSymbol = String(symbol || "").trim().toUpperCase();
   if (!normalizedSymbol) {
     return;
@@ -3268,7 +3319,12 @@ async function refreshSingleMarketSymbol(symbol) {
         turnover24h: Number(price.turnover24h || 0),
       },
     };
-    render();
+    if (fillSpend && normalizeTradeSymbolValue(tradeDraft.symbol) === price.symbol) {
+      syncMarketBuySpendFromBalance({ force: true });
+    }
+    if (renderAfter) {
+      render();
+    }
   } catch {
     // The backend validates the symbol again when the trade is submitted.
   }
@@ -3428,6 +3484,7 @@ function applyAccountSnapshot(account) {
     state.totalUsdt = Number(account.totalUsdt || 0);
     state.previousTotalUsdt = Number(account.previousTotalUsdt || 0);
     state.totalNgn = Number(account.totalNgn || 0);
+    state.accountTotalAvailableBalance = Number(account.accountTotalAvailableBalance || account.availableBalance || 0);
     state.usdtNgnRate = Number(account.usdtNgnRate || 0);
     state.todayPnlValue = Number(account.todayPnlValue || 0);
     state.todayPnlPercent = Number(account.todayPnlPercent || 0);
@@ -3445,6 +3502,7 @@ function applyAccountSnapshot(account) {
   state.totalUsdt = 0;
   state.previousTotalUsdt = 0;
   state.totalNgn = 0;
+  state.accountTotalAvailableBalance = 0;
   state.usdtNgnRate = 0;
   state.todayPnlValue = 0;
   state.todayPnlPercent = 0;
@@ -4381,6 +4439,8 @@ function renderTradeTicket() {
   const summary = getCurrentTradeSummary();
   const livePositive = Number(summary.live.changePercent || 0) >= 0;
   const symbolSuggestions = getTradeSymbolSuggestions();
+  const livePrice = Number(summary.live.price || 0);
+  const quoteBalance = Number(summary.usdtBalance || 0);
 
   return `
     <section class="trade-ticket">
@@ -4391,6 +4451,7 @@ function renderTradeTicket() {
             ${symbolSuggestions.map((symbol) => `<option value="${escapeHtml(symbol)}"></option>`).join("")}
           </datalist>
           <p class="ticket-change ${livePositive ? "positive" : "negative"}">${livePositive ? "+" : ""}${formatNumber(summary.live.changePercent, 2)}%</p>
+          <p class="muted-copy">Live ${livePrice ? formatNumber(livePrice, 8) : "-"} | Avail ${formatNumber(quoteBalance, 8)} ${summary.quoteAsset}</p>
         </div>
         <span class="ticket-badge">Admin</span>
       </div>
@@ -4407,7 +4468,7 @@ function renderTradeTicket() {
       </label>
       <div class="ticket-grid">
         <label class="ticket-box">
-          <span>Price (USDT)</span>
+          <span>Price (${summary.quoteAsset})</span>
           <div class="step-input">
             <button type="button" class="step-btn" data-step-field="price" data-step-dir="-1">-</button>
             <input id="trade-price" value="${tradeDraft.price}" placeholder="${summary.live.price ? formatNumber(summary.live.price, 8) : "0.00000000"}" />
@@ -4428,11 +4489,11 @@ function renderTradeTicket() {
         ${[25, 50, 75, 100].map((value) => `<button type="button" class="slider-pill" data-alloc="${value}">${value}%</button>`).join("")}
       </div>
       <label class="ticket-box">
-        <span>Total (USDT)</span>
+        <span>Total (${summary.quoteAsset})</span>
         <input id="trade-total" value="${tradeDraft.quoteOrderQty || (summary.total ? summary.total.toFixed(8) : "")}" placeholder="Auto calculated" />
       </label>
       <label class="ticket-box soft">
-        <span>Take Profit (USDT)</span>
+        <span>Take Profit (${summary.quoteAsset})</span>
         <input id="trade-tp" value="${tradeDraft.takeProfitPrice}" placeholder="Optional take profit price" />
       </label>
       <button id="trade-submit-btn" class="button-primary shimmer-button ticket-submit" type="button">Place Spot Trade</button>
@@ -4946,7 +5007,8 @@ function renderExternalHoldingDisclosure(holding) {
 }
 
 function renderOpenOrdersSection() {
-    const openTrades = state.trades.filter(isTradeVisibleOnHome).slice(0, 5);
+    const visibleTrades = state.trades.filter(isTradeVisibleOnHome);
+    const openTrades = state.user?.role === "admin" ? visibleTrades : visibleTrades.slice(0, 5);
     const detectedHoldings = state.user?.role === "user" ? [] : getDetectedSpotHoldings().slice(0, 5);
     const openOrders = (state.openOrders || []).slice(0, 5);
     const canManageTrades = state.user?.role === "admin";
@@ -6681,7 +6743,12 @@ function applyAllocation(percent) {
   if (tradeDraft.side === "BUY") {
     const budget = summary.usdtBalance * (percent / 100);
     const price = Number(tradeDraft.price || summary.live.price || 0);
-    if (price) {
+    if (tradeDraft.type === "MARKET") {
+      updateTradeDraft({
+        quantity: "",
+        quoteOrderQty: formatDecimalInput(budget),
+      });
+    } else if (price) {
       updateTradeDraft({
         quantity: String(budget / price),
         quoteOrderQty: "",
@@ -6709,12 +6776,16 @@ function bumpField(field, direction) {
 
 async function submitTrade() {
   const symbol = String(tradeDraft.symbol || "").trim().toUpperCase();
+  const summary = getCurrentTradeSummary();
+  const fallbackSpend = tradeDraft.side === "BUY" && tradeDraft.type === "MARKET" && !Number(tradeDraft.quoteOrderQty || 0)
+    ? formatDecimalInput(summary.usdtBalance)
+    : "";
   const payload = {
     symbol,
     side: tradeDraft.side,
     type: tradeDraft.type,
     quantity: tradeDraft.quantity,
-    quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? tradeDraft.quoteOrderQty : "",
+    quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? tradeDraft.quoteOrderQty || fallbackSpend : "",
     price: tradeDraft.type === "LIMIT" ? tradeDraft.price : "",
     takeProfitPrice: tradeDraft.takeProfitPrice,
   };
@@ -6868,17 +6939,22 @@ function bindTradeTicketActions() {
   const bboButton = document.getElementById("use-live-price-btn");
 
   if (symbolInput) symbolInput.addEventListener("change", () => {
-    const symbol = symbolInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
-    updateTradeDraft({ symbol });
-    render();
-    void refreshSingleMarketSymbol(symbol);
-  });
-  if (symbolInput) symbolInput.addEventListener("input", () => {
-    const symbol = symbolInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const symbol = normalizeTradeSymbolValue(symbolInput.value);
     symbolInput.value = symbol;
     updateTradeDraft({ symbol });
+    void refreshSingleMarketSymbol(symbol, { fillSpend: true });
   });
-  if (typeInput) typeInput.addEventListener("change", () => { updateTradeDraft({ type: typeInput.value }); render(); });
+  if (symbolInput) symbolInput.addEventListener("input", () => {
+    const symbol = normalizeTradeSymbolValue(symbolInput.value);
+    symbolInput.value = symbol;
+    updateTradeDraft({ symbol });
+    scheduleTradeSymbolMarketRefresh(symbol);
+  });
+  if (typeInput) typeInput.addEventListener("change", () => {
+    updateTradeDraft({ type: typeInput.value });
+    syncMarketBuySpendFromBalance();
+    render();
+  });
   if (priceInput) priceInput.addEventListener("input", () => updateTradeDraft({ price: priceInput.value, quoteOrderQty: "" }));
   if (quantityInput) quantityInput.addEventListener("input", () => updateTradeDraft({ quantity: quantityInput.value, quoteOrderQty: "" }));
   if (totalInput) totalInput.addEventListener("input", () => {
@@ -6898,7 +6974,7 @@ function bindTradeTicketActions() {
   if (takeProfitInput) takeProfitInput.addEventListener("input", () => updateTradeDraft({ takeProfitPrice: takeProfitInput.value }));
   if (submitButton) submitButton.addEventListener("click", submitTrade);
   if (bboButton) bboButton.addEventListener("click", async () => {
-    await refreshSingleMarketSymbol(tradeDraft.symbol);
+    await refreshSingleMarketSymbol(tradeDraft.symbol, { renderAfter: false, fillSpend: true });
     const live = getSymbolData(tradeDraft.symbol);
     updateTradeDraft({ price: live.price ? String(live.price) : tradeDraft.price });
     render();
@@ -6907,6 +6983,7 @@ function bindTradeTicketActions() {
   document.querySelectorAll("[data-side]").forEach((button) => {
     button.addEventListener("click", () => {
       updateTradeDraft({ side: button.dataset.side, quoteOrderQty: "" });
+      syncMarketBuySpendFromBalance({ force: button.dataset.side === "BUY" });
       render();
     });
   });
