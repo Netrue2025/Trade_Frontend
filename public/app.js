@@ -4190,7 +4190,7 @@ async function submitAdminUserTradeJoin(form, userId) {
   await withLoading(async () => {
     const payload = await api(`/api/admin/users/${encodeURIComponent(userId)}/trades/${encodeURIComponent(data.tradeId)}/join`, {
       method: "POST",
-      body: JSON.stringify({ amountUsdt: data.amountUsdt }),
+      body: JSON.stringify({}),
     });
     if (payload.user?.id) {
       updateUserInStateUsers(payload.user);
@@ -5223,7 +5223,6 @@ function renderAdminUserCard(user) {
                   : `<option value="">No open trade</option>`
               }
             </select>
-            <input name="amountUsdt" type="number" min="0" step="0.00000001" placeholder="USDT" required />
             <button class="micro-btn primary" type="submit" ${tradeOptions.some((trade) => trade.isJoinable) ? "" : "disabled"}>${icon("signals")} Join</button>
           </form>
           <form class="inline-admin-form message-form" data-admin-message-form="${user.id}">
