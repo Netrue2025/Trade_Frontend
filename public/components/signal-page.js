@@ -64,8 +64,9 @@
                   .map((trade) => {
                     const lifecycleStatus = String(trade.lifecycleStatus || "Open").toUpperCase();
                     const isQueued = lifecycleStatus === "PENDING";
-                    const canJoin = lifecycleStatus === "OPEN";
                     const pnlPercent = typeof getTradePnlPercent === "function" ? getTradePnlPercent(trade) : 0;
+                    const adminIsPositive = pnlPercent >= 0;
+                    const canJoin = lifecycleStatus === "OPEN" && adminIsPositive;
                     const currentValue = typeof getTradeCurrentValue === "function" ? getTradeCurrentValue(trade) : 0;
                     const entryPrice = typeof getTradeEntryPrice === "function" ? getTradeEntryPrice(trade) : Number(trade.price || 0);
                     const currentPrice = typeof getTradeCurrentMarket === "function" ? Number(getTradeCurrentMarket(trade.symbol)?.price || 0) : 0;
@@ -74,7 +75,7 @@
                     const joinedDelta = isJoined ? pnlPercent - Number(investment.baselinePnlPercent || 0) : 0;
                     const joinedPnl = isJoined ? Number(investment.amountUsdt || 0) * (joinedDelta / 100) : 0;
                     return `
-                      <div class="signal-list-row signal-open-trade-row">
+                      <div class="signal-list-row signal-open-trade-row" data-trade-id="${trade.id}">
                         <div class="signal-row-open signal-open-trade-main">
                           <div class="signal-list-main">
                             <div class="signal-row-top">
@@ -99,7 +100,7 @@
                                     ? `<button class="mini-action danger" data-stop-trade-investment="${trade.id}" type="button">Stop</button>`
                                     : canJoin
                                       ? `<button class="mini-action" data-join-trade="${trade.id}" type="button">Join</button>`
-                                      : `<button class="mini-action muted" type="button" disabled>Queued</button>`
+                                      : `<button class="mini-action muted" type="button" disabled>${isQueued ? "Queued" : "Hold"}</button>`
                                 }
                               </div>
                             `

@@ -4004,6 +4004,9 @@ async function submitAdminDepositSettings(form) {
         exchangeRate: {
           usdtToNgn: data.usdtToNgn || getUsdtToNgnRate(),
         },
+        telegram: {
+          channelUsername: data.telegramChannelUsername || "",
+        },
       }),
     });
     state.financialDashboard = {
@@ -5125,10 +5128,16 @@ function renderOpenOrdersSection() {
 function getAdminTradeOptionsForUsers() {
   return (state.trades || [])
     .filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()))
-    .map((trade) => ({
-      ...trade,
-      isJoinable: String(trade.lifecycleStatus || "").toUpperCase() === "OPEN",
-    }))
+    .map((trade) => {
+      const lifecycleStatus = String(trade.lifecycleStatus || "").toUpperCase();
+      const pnlPercent = getTradePnlPercent(trade);
+      const isJoinable = lifecycleStatus === "OPEN" && pnlPercent >= 0;
+      return {
+        ...trade,
+        isJoinable,
+        joinLabel: isJoinable ? "Open" : lifecycleStatus === "PENDING" ? "Queue" : "Hold",
+      };
+    })
     .sort((a, b) => Number(b.isJoinable) - Number(a.isJoinable));
 }
 
@@ -5215,7 +5224,7 @@ function renderAdminUserCard(user) {
                       .map(
                         (trade) => `
                           <option value="${trade.id}" ${trade.isJoinable ? "" : "disabled"}>
-                            ${trade.symbol} ${trade.isJoinable ? "Open" : "Queue"}
+                            ${trade.symbol} ${trade.joinLabel}
                           </option>
                         `
                       )
@@ -5546,6 +5555,7 @@ function renderSettingsPane() {
   const financeSettings = getFinancialSettings();
   const depositSettings = financeSettings.deposit || {};
   const exchangeRateSettings = financeSettings.exchangeRate || {};
+  const telegramSettings = financeSettings.telegram || {};
   const adminDepositSettingsDraft = state.adminDepositSettingsDraft || {};
   const savedBank = getSavedBankAccount();
   const settingsBankOptions = (state.paymentBanks || [])
@@ -5668,6 +5678,7 @@ function renderSettingsPane() {
                 <label>USDT address <input name="usdtAddress" value="${escapeHtml(depositSettingValue("usdtAddress", depositSettings.usdtAddress || ""))}" placeholder="Wallet address" /></label>
                 <label>USDT network <input name="usdtNetwork" value="${escapeHtml(depositSettingValue("usdtNetwork", depositSettings.usdtNetwork || "TRC20"))}" placeholder="TRC20" /></label>
                 <label>USDT to Naira <input name="usdtToNgn" type="number" min="1" step="0.01" value="${escapeHtml(depositSettingValue("usdtToNgn", exchangeRateSettings.usdtToNgn || getUsdtToNgnRate() || ""))}" placeholder="1600" /></label>
+                <label>Telegram channel <input name="telegramChannelUsername" value="${escapeHtml(depositSettingValue("telegramChannelUsername", telegramSettings.channelUsername || "netruesignal"))}" placeholder="netruesignal" /></label>
                 <button class="button-secondary shimmer-button" type="submit">${icon("bank")} Save</button>
               </form>
             </section>
@@ -5884,9 +5895,19 @@ function formatWalletRequestStatus(status) {
 
 function applyRouteTarget() {
   const pathname = String(window.location?.pathname || "");
+  const params = new URLSearchParams(window.location?.search || "");
   if (/^\/admin\/withdrawals\/[^/]+\/?$/.test(pathname) && state.user?.role === "admin") {
     state.activeTab = "settings";
     state.routeScrollSection = "finance";
+    return;
+  }
+  if (params.get("tab") === "signals") {
+    const tradeId = String(params.get("trade") || "").trim();
+    state.activeTab = "signals";
+    if (tradeId) {
+      state.expandedTradeIds = [...new Set([...state.expandedTradeIds, tradeId])];
+      state.routeScrollSection = `trade:${tradeId}`;
+    }
   }
 }
 
@@ -5895,9 +5916,26 @@ function scrollToRouteSection() {
   if (!section) {
     return;
   }
-  state.routeScrollSection = "";
   requestAnimationFrame(() => {
-    document.querySelector(`[data-section="${section}"]`)?.scrollIntoView({
+    if (section.startsWith("trade:")) {
+      const tradeId = section.slice("trade:".length);
+      const target = document.querySelector(`[data-trade-id="${tradeId}"]`);
+      if (!target) {
+        return;
+      }
+      state.routeScrollSection = "";
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      return;
+    }
+    const target = document.querySelector(`[data-section="${section}"]`);
+    if (!target) {
+      return;
+    }
+    state.routeScrollSection = "";
+    target.scrollIntoView({
       behavior: "smooth",
       block: "start",
     });
