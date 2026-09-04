@@ -802,6 +802,18 @@ textarea {
   min-height: 78px;
 }
 
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.check-row input {
+  width: auto;
+}
+
 .password-field {
   position: relative;
   display: block;

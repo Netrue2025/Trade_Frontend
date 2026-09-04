@@ -2687,6 +2687,7 @@ function renderAuthPane() {
     return `
       <form id="register-form" class="auth-form">
         <label>Name <input name="name" placeholder="Full name or username" autocomplete="name" required /></label>
+        <label>Email <input name="email" type="email" placeholder="Email address" autocomplete="email" required /></label>
         ${renderPasswordField({
           label: "Password",
           name: "password",
@@ -2707,7 +2708,7 @@ function renderAuthPane() {
 
   return `
     <form id="login-form" class="auth-form">
-      <label>Email <input name="email" type="text" placeholder="Email or username" autocomplete="username" required /></label>
+      <label>Email <input name="email" type="email" placeholder="Email address" autocomplete="email" required /></label>
       ${renderPasswordField({
         label: "Password",
         name: "password",
@@ -2720,6 +2721,7 @@ function renderAuthPane() {
           <option value="admin">Admin</option>
         </select>
       </label>
+      <label class="check-row auth-check"><input name="remember" type="checkbox" /> <span>Remember me</span></label>
       <button class="button-primary shimmer-button" type="submit">Sign in</button>
     </form>
     <p class="auth-footnote">Not a user? <button class="text-link inline-link" data-auth-mode="register" type="button">Signup</button></p>
@@ -3912,6 +3914,19 @@ async function submitAdminPasswordReset(userId) {
     setAdminPasswordDraft(userId, "");
     await loadDashboardData();
     showNotice("User password updated");
+  }).catch((error) => showError(error.message));
+}
+
+async function submitAdminEmailUpdate(form, userId) {
+  const payload = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    const result = await api(`/api/admin/users/${encodeURIComponent(userId)}/email`, {
+      method: "POST",
+      body: JSON.stringify({ email: payload.email }),
+    });
+    updateUserInStateUsers(result.user);
+    render();
+    showNotice("User email updated");
   }).catch((error) => showError(error.message));
 }
 
@@ -5188,6 +5203,10 @@ function renderAdminUserCard(user) {
             <input name="note" type="text" placeholder="Note" />
             <button class="micro-btn primary" type="submit">${icon("gift")} Add</button>
           </form>
+          <form class="inline-admin-form" data-admin-email-form="${user.id}">
+            <input name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="Email" required />
+            <button class="micro-btn primary" type="submit">${icon("edit")} Email</button>
+          </form>
           <form class="inline-admin-form" data-admin-user-trade-form="${user.id}">
             <select name="tradeId" aria-label="Trade">
               ${
@@ -6287,6 +6306,13 @@ function bindDashboardActions() {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       submitAdminUserMessage(form, form.dataset.adminMessageForm);
+    });
+  });
+
+  document.querySelectorAll("[data-admin-email-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminEmailUpdate(form, form.dataset.adminEmailForm);
     });
   });
 
