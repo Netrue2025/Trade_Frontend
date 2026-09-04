@@ -1230,6 +1230,15 @@ function getSymbolData(symbol) {
   return state.tradeMarketMap[symbol] || getWatchlist().find((item) => item.symbol === symbol) || { symbol, price: 0, changePercent: 0 };
 }
 
+function buildMarketPricesPath(symbols) {
+  const normalizedSymbols = Array.isArray(symbols) ? symbols.join(",") : String(symbols || "");
+  const params = new URLSearchParams({
+    symbols: normalizedSymbols,
+    exchange: getActiveExchange(),
+  });
+  return `/api/market/prices?${params.toString()}`;
+}
+
 function getTradeFormDefaults() {
   return {
     symbol: "PEPEUSDT",
@@ -1295,7 +1304,7 @@ function getUnifiedQuoteBalance(quoteAsset = "USDT") {
   const stablecoinBalance = normalizedQuote === "USDT" ? getStablecoinBuyingBalance(state.balances || []) : walletBalance;
   const accountAvailable = normalizedQuote === "USDT" ? Number(state.accountTotalAvailableBalance || 0) : 0;
   const candidates = [walletBalance, stablecoinBalance, accountAvailable].filter((value) => Number(value) > 0);
-  return candidates.length ? Math.max(...candidates) : 0;
+  return candidates.length ? Math.min(...candidates) : 0;
 }
 
 function getDetectedSpotHoldings() {
@@ -3274,7 +3283,7 @@ async function refreshTradeMarketData() {
   }
 
   try {
-    const payload = await api(`/api/market/prices?symbols=${encodeURIComponent(symbols.join(","))}`);
+    const payload = await api(buildMarketPricesPath(symbols));
     state.tradeMarketMap = Object.fromEntries(
       (payload.prices || []).map((item) => [
         item.symbol,
@@ -3317,17 +3326,17 @@ function scheduleTradeSymbolMarketRefresh(symbol) {
     return;
   }
   tradeSymbolRefreshTimer = setTimeout(() => {
-    void refreshSingleMarketSymbol(normalizedSymbol, { fillSpend: true });
+    void refreshSingleMarketSymbol(normalizedSymbol, { fillSpend: true, fillPrice: true });
   }, 350);
 }
 
-async function refreshSingleMarketSymbol(symbol, { renderAfter = true, fillSpend = false } = {}) {
+async function refreshSingleMarketSymbol(symbol, { renderAfter = true, fillSpend = false, fillPrice = false, forcePrice = false } = {}) {
   const normalizedSymbol = String(symbol || "").trim().toUpperCase();
   if (!normalizedSymbol) {
     return;
   }
   try {
-    const payload = await api(`/api/market/prices?symbols=${encodeURIComponent(normalizedSymbol)}`);
+    const payload = await api(buildMarketPricesPath(normalizedSymbol));
     const price = (payload.prices || [])[0];
     if (!price?.symbol) {
       return;
@@ -3341,8 +3350,17 @@ async function refreshSingleMarketSymbol(symbol, { renderAfter = true, fillSpend
         turnover24h: Number(price.turnover24h || 0),
       },
     };
-    if (fillSpend && normalizeTradeSymbolValue(tradeDraft.symbol) === price.symbol) {
-      syncMarketBuySpendFromBalance({ force: true });
+    if (normalizeTradeSymbolValue(tradeDraft.symbol) === price.symbol) {
+      const draftPatch = {};
+      if (fillPrice && Number(price.price || 0) > 0 && (forcePrice || !tradeDraft.price)) {
+        draftPatch.price = String(price.price);
+      }
+      if (Object.keys(draftPatch).length) {
+        updateTradeDraft(draftPatch);
+      }
+      if (fillSpend) {
+        syncMarketBuySpendFromBalance({ force: true });
+      }
     }
     if (renderAfter) {
       render();
@@ -3387,7 +3405,7 @@ function stopTradeRefreshTimer() {
 
 async function loadWatchlistSeed() {
   try {
-    const payload = await api("/api/market/watchlist");
+    const payload = await api(`/api/market/watchlist?exchange=${encodeURIComponent(getActiveExchange())}`);
     state.watchlistSeed = (payload.watchlist || []).map((item) => ({
       ...item,
       changePercent: Number(item.changePercent ?? item.priceChangePercent ?? 0),
@@ -3412,7 +3430,7 @@ async function loadSpotSymbols({ force = false } = {}) {
   if (!force && isFresh) {
     return state.spotSymbols;
   }
-  const payload = await api("/api/market/symbols?exchange=bybit");
+  const payload = await api(`/api/market/symbols?exchange=${encodeURIComponent(getActiveExchange())}`);
   state.spotSymbols = (payload.symbols || [])
     .map((item) => String(item.symbol || "").trim().toUpperCase())
     .filter(Boolean);
@@ -4479,12 +4497,13 @@ function renderTradeTicket() {
   const symbolSuggestions = getTradeSymbolSuggestions();
   const livePrice = Number(summary.live.price || 0);
   const quoteBalance = Number(summary.usdtBalance || 0);
+  const exchangeLabel = getExchangeLabel(getActiveExchange());
 
   return `
     <section class="trade-ticket">
       <div class="ticket-head">
         <div>
-          <input id="trade-symbol" class="ticket-symbol" list="trade-symbol-list" value="${tradeDraft.symbol}" placeholder="Search Bybit spot pair" />
+          <input id="trade-symbol" class="ticket-symbol" list="trade-symbol-list" value="${tradeDraft.symbol}" placeholder="Search ${exchangeLabel} spot pair" />
           <datalist id="trade-symbol-list">
             ${symbolSuggestions.map((symbol) => `<option value="${escapeHtml(symbol)}"></option>`).join("")}
           </datalist>
@@ -6821,6 +6840,24 @@ function updateTradeDraft(patch) {
   }
 }
 
+function updateTradeSymbol(symbol) {
+  const normalizedSymbol = normalizeTradeSymbolValue(symbol);
+  const previousSymbol = normalizeTradeSymbolValue(tradeDraft.symbol);
+  if (normalizedSymbol && normalizedSymbol !== previousSymbol) {
+    updateTradeDraft({
+      symbol: normalizedSymbol,
+      price: "",
+      quantity: "",
+      quoteOrderQty: "",
+      takeProfitPrice: "",
+    });
+    return normalizedSymbol;
+  }
+
+  updateTradeDraft({ symbol: normalizedSymbol });
+  return normalizedSymbol;
+}
+
 function applyAllocation(percent) {
   const summary = getCurrentTradeSummary();
   if (tradeDraft.side === "BUY") {
@@ -6862,7 +6899,18 @@ function bumpField(field, direction) {
 
 async function submitTrade() {
   const symbol = String(tradeDraft.symbol || "").trim().toUpperCase();
+  await refreshSingleMarketSymbol(symbol, {
+    renderAfter: false,
+    fillSpend: tradeDraft.side === "BUY" && tradeDraft.type === "MARKET",
+    fillPrice: true,
+  });
   const summary = getCurrentTradeSummary();
+  const marketSpend = tradeDraft.side === "BUY" && tradeDraft.type === "MARKET" && Number(tradeDraft.quoteOrderQty || 0) > 0
+    ? formatMarketSpendInput(tradeDraft.quoteOrderQty, {
+        fullBalance: Number(tradeDraft.quoteOrderQty || 0) >= Number(summary.usdtBalance || 0),
+        quoteAsset: summary.quoteAsset,
+      })
+    : "";
   const fallbackSpend = tradeDraft.side === "BUY" && tradeDraft.type === "MARKET" && !Number(tradeDraft.quoteOrderQty || 0)
     ? formatMarketSpendInput(summary.usdtBalance, { fullBalance: true, quoteAsset: summary.quoteAsset })
     : "";
@@ -6871,7 +6919,7 @@ async function submitTrade() {
     side: tradeDraft.side,
     type: tradeDraft.type,
     quantity: tradeDraft.quantity,
-    quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? tradeDraft.quoteOrderQty || fallbackSpend : "",
+    quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? marketSpend || fallbackSpend : "",
     price: tradeDraft.type === "LIMIT" ? tradeDraft.price : "",
     takeProfitPrice: tradeDraft.takeProfitPrice,
   };
@@ -7025,15 +7073,13 @@ function bindTradeTicketActions() {
   const bboButton = document.getElementById("use-live-price-btn");
 
   if (symbolInput) symbolInput.addEventListener("change", () => {
-    const symbol = normalizeTradeSymbolValue(symbolInput.value);
+    const symbol = updateTradeSymbol(symbolInput.value);
     symbolInput.value = symbol;
-    updateTradeDraft({ symbol });
-    void refreshSingleMarketSymbol(symbol, { fillSpend: true });
+    void refreshSingleMarketSymbol(symbol, { fillSpend: true, fillPrice: true });
   });
   if (symbolInput) symbolInput.addEventListener("input", () => {
-    const symbol = normalizeTradeSymbolValue(symbolInput.value);
+    const symbol = updateTradeSymbol(symbolInput.value);
     symbolInput.value = symbol;
-    updateTradeDraft({ symbol });
     scheduleTradeSymbolMarketRefresh(symbol);
   });
   if (typeInput) typeInput.addEventListener("change", () => {
@@ -7060,7 +7106,7 @@ function bindTradeTicketActions() {
   if (takeProfitInput) takeProfitInput.addEventListener("input", () => updateTradeDraft({ takeProfitPrice: takeProfitInput.value }));
   if (submitButton) submitButton.addEventListener("click", submitTrade);
   if (bboButton) bboButton.addEventListener("click", async () => {
-    await refreshSingleMarketSymbol(tradeDraft.symbol, { renderAfter: false, fillSpend: true });
+    await refreshSingleMarketSymbol(tradeDraft.symbol, { renderAfter: false, fillSpend: true, fillPrice: true, forcePrice: true });
     const live = getSymbolData(tradeDraft.symbol);
     updateTradeDraft({ price: live.price ? String(live.price) : tradeDraft.price });
     render();
