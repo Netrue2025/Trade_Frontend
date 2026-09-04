@@ -611,6 +611,26 @@ function formatDecimalInput(value, digits = 8) {
   return num.toFixed(digits).replace(/\.?0+$/, "");
 }
 
+function formatMarketSpendInput(value, { fullBalance = false, quoteAsset = "USDT" } = {}) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num) || num <= 0) {
+    return "";
+  }
+  const stableQuote = STABLECOIN_ASSETS.includes(String(quoteAsset || "USDT").toUpperCase());
+  const digits = stableQuote ? 2 : 8;
+  const unit = 10 ** -digits;
+  const shouldBuffer = fullBalance && num > 10;
+  const buffer = shouldBuffer
+    ? stableQuote
+      ? Math.max(unit, Math.min(1, num * 0.001))
+      : Math.max(unit, num * 0.0005)
+    : 0;
+  const adjusted = Math.max(num - buffer, unit);
+  const scale = 10 ** digits;
+  const floored = Math.floor((adjusted + Number.EPSILON) * scale) / scale;
+  return formatDecimalInput(floored, digits);
+}
+
 function formatUsdt(value) {
   return `$${Number(value || 0).toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -3286,7 +3306,7 @@ function syncMarketBuySpendFromBalance({ force = false } = {}) {
   }
   updateTradeDraft({
     quantity: "",
-    quoteOrderQty: formatDecimalInput(available),
+    quoteOrderQty: formatMarketSpendInput(available, { fullBalance: true, quoteAsset: summary.quoteAsset }),
   });
 }
 
@@ -6809,7 +6829,10 @@ function applyAllocation(percent) {
     if (tradeDraft.type === "MARKET") {
       updateTradeDraft({
         quantity: "",
-        quoteOrderQty: formatDecimalInput(budget),
+        quoteOrderQty: formatMarketSpendInput(budget, {
+          fullBalance: percent >= 100 || budget >= summary.usdtBalance,
+          quoteAsset: summary.quoteAsset,
+        }),
       });
     } else if (price) {
       updateTradeDraft({
@@ -6841,7 +6864,7 @@ async function submitTrade() {
   const symbol = String(tradeDraft.symbol || "").trim().toUpperCase();
   const summary = getCurrentTradeSummary();
   const fallbackSpend = tradeDraft.side === "BUY" && tradeDraft.type === "MARKET" && !Number(tradeDraft.quoteOrderQty || 0)
-    ? formatDecimalInput(summary.usdtBalance)
+    ? formatMarketSpendInput(summary.usdtBalance, { fullBalance: true, quoteAsset: summary.quoteAsset })
     : "";
   const payload = {
     symbol,
