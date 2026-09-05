@@ -8885,6 +8885,18 @@ async function submitTrade() {
     fillPrice: true,
   });
   const summary = getCurrentTradeSummary();
+  const livePrice = Number(summary.live.price || 0);
+  const limitPrice = Number(tradeDraft.price || 0);
+  if (tradeDraft.type === "LIMIT" && livePrice && limitPrice) {
+    if (tradeDraft.side === "BUY" && limitPrice >= livePrice) {
+      showError(`Limit buy would fill immediately at live price ${formatNumber(livePrice, 8)}. Set your limit below live price or use Market.`);
+      return;
+    }
+    if (tradeDraft.side === "SELL" && limitPrice <= livePrice) {
+      showError(`Limit sell would fill immediately at live price ${formatNumber(livePrice, 8)}. Set your limit above live price or use Market.`);
+      return;
+    }
+  }
   const marketSpend = tradeDraft.side === "BUY" && tradeDraft.type === "MARKET" && Number(tradeDraft.quoteOrderQty || 0) > 0
     ? formatMarketSpendInput(tradeDraft.quoteOrderQty, {
         fullBalance: Number(tradeDraft.quoteOrderQty || 0) >= Number(summary.usdtBalance || 0),
