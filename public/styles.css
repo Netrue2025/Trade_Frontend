@@ -1997,6 +1997,28 @@ body[data-theme="dark"] .section-loading-card {
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
+.admin-user-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--input-bg);
+}
+
+.admin-user-search .nav-icon {
+  color: var(--muted);
+}
+
+.admin-user-search input {
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0;
+  background: transparent;
+}
+
 .admin-users-table-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 150px 44px;

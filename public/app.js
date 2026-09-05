@@ -98,6 +98,8 @@ const state = {
   expandedFuturesOrderIds: [],
   reportPeriod: "days",
   users: [],
+  adminUserSearch: "",
+  adminUsersModalScrollTop: 0,
   adminDepositSettingsDraft: null,
   adminDeposits: [],
   adminWithdrawals: [],
@@ -529,6 +531,10 @@ function showActionModal(modal) {
     window.SignalPage.destroyActiveChart();
   }
   stopSignalChartRefreshTimer();
+  if (modal?.type === "admin-users") {
+    state.adminUsersModalScrollTop = 0;
+    state.adminUserSearch = "";
+  }
   state.actionModal = modal;
   render();
 }
@@ -2301,6 +2307,26 @@ function renderErrorModal() {
   `;
 }
 
+function getFilteredAdminUsers() {
+  const query = String(state.adminUserSearch || "").trim().toLowerCase();
+  if (!query) {
+    return state.users || [];
+  }
+  return (state.users || []).filter((user) =>
+    [
+      user.name,
+      user.email,
+      user.id,
+      user.activeExchange,
+      user.mirrorEnabled ? "mirror active" : "mirror off",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(query)
+  );
+}
+
 function renderActionModal() {
   if (!state.actionModal) {
     return "";
@@ -2338,20 +2364,25 @@ function renderActionModal() {
 
   if (state.actionModal.type === "admin-users") {
     const totalUsers = Number(state.users?.length || 0);
+    const filteredUsers = getFilteredAdminUsers();
+    const query = String(state.adminUserSearch || "");
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card admin-users-modal">
           <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
           <p class="modal-eyebrow neutral">Users</p>
           <h3>${totalUsers.toLocaleString()} registered</h3>
-          <p class="modal-text">Select a user row to manage balance, bonus, email, trade access, messages, and password.</p>
+          <div class="admin-user-search">
+            <span>${icon("profile")}</span>
+            <input id="admin-user-search-input" type="search" value="${escapeHtml(query)}" placeholder="Search users" autocomplete="off" />
+          </div>
           <div class="admin-users-table-head">
             <span>User</span>
             <span>Balance</span>
             <span>Edit</span>
           </div>
           <div class="admin-users-modal-list">
-            ${state.users.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No users linked yet.</p>`}
+            ${filteredUsers.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No matching users.</p>`}
           </div>
         </div>
       </div>
@@ -2898,6 +2929,25 @@ function bindModalActions() {
     blockedSignalButton.addEventListener("click", () => {
       state.actionModal = null;
       state.activeTab = "signals";
+      render();
+    });
+  }
+
+  const adminUsersList = document.querySelector(".admin-users-modal-list");
+  if (adminUsersList) {
+    adminUsersList.addEventListener("scroll", () => {
+      state.adminUsersModalScrollTop = adminUsersList.scrollTop;
+    });
+  }
+
+  const adminUserSearchInput = document.getElementById("admin-user-search-input");
+  if (adminUserSearchInput) {
+    adminUserSearchInput.addEventListener("input", () => {
+      state.adminUserSearch = adminUserSearchInput.value;
+      state.adminUsersModalScrollTop = 0;
+      if (adminUsersList) {
+        adminUsersList.scrollTop = 0;
+      }
       render();
     });
   }
@@ -6377,6 +6427,20 @@ function renderHomePane() {
 }
 
 function renderDashboardShell() {
+  const adminUsersList = document.querySelector(".admin-users-modal-list");
+  const adminUsersSearch = document.getElementById("admin-user-search-input");
+  const restoreAdminUsersModal = state.actionModal?.type === "admin-users"
+    ? {
+        scrollTop: adminUsersList ? adminUsersList.scrollTop : state.adminUsersModalScrollTop,
+        searchFocused: document.activeElement === adminUsersSearch,
+        selectionStart: adminUsersSearch?.selectionStart ?? null,
+        selectionEnd: adminUsersSearch?.selectionEnd ?? null,
+      }
+    : null;
+  if (adminUsersList) {
+    state.adminUsersModalScrollTop = adminUsersList.scrollTop;
+  }
+
   const paneMap = {
     home: renderHomePane(),
     settings: renderSettingsPane(),
@@ -6400,6 +6464,22 @@ function renderDashboardShell() {
 
   bindDashboardActions();
   bindModalActions();
+  if (restoreAdminUsersModal) {
+    requestAnimationFrame(() => {
+      const nextList = document.querySelector(".admin-users-modal-list");
+      if (nextList) {
+        nextList.scrollTop = restoreAdminUsersModal.scrollTop || 0;
+        state.adminUsersModalScrollTop = nextList.scrollTop;
+      }
+      const nextSearch = document.getElementById("admin-user-search-input");
+      if (nextSearch && restoreAdminUsersModal.searchFocused) {
+        nextSearch.focus();
+        if (restoreAdminUsersModal.selectionStart !== null && restoreAdminUsersModal.selectionEnd !== null) {
+          nextSearch.setSelectionRange(restoreAdminUsersModal.selectionStart, restoreAdminUsersModal.selectionEnd);
+        }
+      }
+    });
+  }
   scrollToRouteSection();
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -6586,7 +6666,9 @@ function bindDashboardActions() {
   });
 
   document.querySelectorAll("[data-admin-balance-open]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
       showActionModal({ type: "admin-balance", userId: button.dataset.adminBalanceOpen });
     });
   });
