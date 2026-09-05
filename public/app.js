@@ -102,6 +102,7 @@ const state = {
   adminDeposits: [],
   adminWithdrawals: [],
   adminTransactions: [],
+  adminGiftCards: [],
   paymentBanks: [],
   paymentBanksLoadedAt: 0,
   resolvedBankAccount: null,
@@ -554,7 +555,7 @@ async function openWalletActionModal(type) {
       });
       return;
     }
-    showActionModal({ type, currency: "" });
+    showActionModal({ type, currency: "", depositMode: "manual" });
   }).catch((error) => showError(error.message));
 }
 
@@ -1635,16 +1636,19 @@ async function loadAdminFinanceQueues() {
     state.adminDeposits = [];
     state.adminWithdrawals = [];
     state.adminTransactions = [];
+    state.adminGiftCards = [];
     return;
   }
-  const [depositPayload, withdrawalPayload, transactionPayload] = await Promise.all([
+  const [depositPayload, withdrawalPayload, transactionPayload, giftCardPayload] = await Promise.all([
     api("/api/admin/deposits"),
     api("/api/admin/withdrawals"),
     api("/api/admin/transactions"),
+    api("/api/admin/gift-cards"),
   ]);
   state.adminDeposits = depositPayload.deposits || [];
   state.adminWithdrawals = withdrawalPayload.withdrawals || [];
   state.adminTransactions = transactionPayload.transactions || [];
+  state.adminGiftCards = giftCardPayload.giftCards || [];
   syncFinanceHistorySelection();
 }
 
@@ -2385,6 +2389,7 @@ function renderActionModal() {
 
   if (state.actionModal.type === "deposit" || state.actionModal.type === "withdraw") {
     const isDeposit = state.actionModal.type === "deposit";
+    const isGiftRedeem = isDeposit && state.actionModal.depositMode === "gift";
     const settings = getFinancialSettings();
     const depositSettings = settings.deposit || {};
     const withdrawalSettings = settings.withdrawal || {};
@@ -2405,10 +2410,12 @@ function renderActionModal() {
     const liveAvailableNgn = Number(liveBalance.liveNgnEquivalent || liveBalance.ngnEquivalent || ngnWallet?.availableBalance || 0);
     const currency = ["NGN", "USDT"].includes(state.actionModal.currency) ? state.actionModal.currency : "";
     const currencyLabel = currency === "NGN" ? "Naira" : currency;
-    const title = isDeposit ? "Deposit" : "Withdraw";
+    const title = isGiftRedeem ? "Redeem Gift Card" : isDeposit ? "Deposit" : "Withdraw";
     const eyebrow = isDeposit ? "Wallet" : "Cashout";
-    const buttonLabel = isDeposit ? "Submit deposit" : "Submit withdrawal";
-    const note = !currency
+    const buttonLabel = isGiftRedeem ? "Redeem" : isDeposit ? "Submit deposit" : "Submit withdrawal";
+    const note = isGiftRedeem
+      ? "Enter 14 digits."
+      : !currency
       ? "Choose currency."
       : isDeposit
         ? currency === "NGN"
@@ -2419,10 +2426,10 @@ function renderActionModal() {
         : currency === "NGN"
           ? `Available ${formatNaira(liveAvailableNgn)}`
           : `Available: ${formatUsdtUnit(liveAvailableUsdt)}.`;
-    const amountField = (label, step) => `
+    const amountField = (label, step, min = "0") => `
       <label class="stack-label wallet-amount-field">
         <span>${label}</span>
-        <input id="wallet-amount-input" class="wallet-amount-input" type="number" min="0" step="${step}" placeholder="0.00" />
+        <input id="wallet-amount-input" class="wallet-amount-input" type="number" min="${min}" step="${step}" placeholder="${min === "0" ? "0.00" : min}" />
       </label>
       <p class="wallet-equivalent-preview" id="wallet-equivalent-preview">Equivalent: --</p>
     `;
@@ -2432,6 +2439,14 @@ function renderActionModal() {
         <button class="wallet-choice ${currency === "USDT" ? "active" : ""}" data-wallet-currency="USDT" type="button">USDT</button>
       </div>
     `;
+    const depositModeSwitch = isDeposit
+      ? `
+        <div class="wallet-choice-row">
+          <button class="wallet-choice ${!isGiftRedeem ? "active" : ""}" id="wallet-manual-deposit-btn" type="button">Deposit</button>
+          <button class="wallet-choice ${isGiftRedeem ? "active" : ""}" id="wallet-gift-redeem-btn" type="button">${icon("gift")} Gift Card</button>
+        </div>
+      `
+      : "";
     const bankDetails = `
       <div class="wallet-instructions">
         <span>Bank</span>
@@ -2446,7 +2461,7 @@ function renderActionModal() {
     const depositForm = currency === "NGN"
       ? `
         ${bankDetails}
-        ${amountField("Amount (Naira)", "1")}
+        ${amountField("Amount (Naira)", "1", depositSettings.minNgn || "0")}
         <label class="stack-label">
           <span>Sender name</span>
           <input id="wallet-sender-input" type="text" placeholder="Name on payment" value="${escapeHtml(state.user?.name || "")}" />
@@ -2458,7 +2473,7 @@ function renderActionModal() {
       `
       : currency === "USDT"
         ? `
-          ${amountField("Amount (USDT)", "0.00000001")}
+          ${amountField("Amount (USDT)", "0.00000001", depositSettings.minUsdt || "0")}
           <div class="wallet-instructions">
             <span>Send to</span>
             <code>${escapeHtml(depositSettings.usdtAddress || "Deposit address not configured")}</code>
@@ -2494,7 +2509,7 @@ function renderActionModal() {
       `
       : "";
     const newBankForm = `
-      ${amountField("Amount (Naira)", "1")}
+      ${amountField("Amount (Naira)", "1", "500")}
       <label class="stack-label">
         <span>Bank</span>
         <select id="wallet-bank-code-input">
@@ -2529,13 +2544,13 @@ function renderActionModal() {
         ? `
           ${savedBankList}
           ${selectedSavedBankCard}
-          ${amountField("Amount (Naira)", "1")}
+          ${amountField("Amount (Naira)", "1", "500")}
           <button class="button-ghost compact-link" id="wallet-use-new-bank-btn" type="button">New account</button>
         `
         : newBankForm
       : currency === "USDT"
         ? `
-          ${amountField("Amount (USDT)", "0.00000001")}
+          ${amountField("Amount (USDT)", "0.00000001", "50")}
           <label class="stack-label">
             <span>Wallet address</span>
             <input id="wallet-address-input" type="text" placeholder="USDT address" />
@@ -2546,6 +2561,15 @@ function renderActionModal() {
           </label>
         `
         : "";
+    const giftRedeemForm = `
+      <label class="stack-label wallet-amount-field">
+        <span>Card number</span>
+        <input id="gift-card-code-input" class="wallet-amount-input gift-card-code-input" type="text" inputmode="numeric" maxlength="17" placeholder="0000 0000 0000 00" />
+      </label>
+      <p class="wallet-equivalent-preview">One use only</p>
+    `;
+    const actionFields = isGiftRedeem ? giftRedeemForm : isDeposit ? depositForm : withdrawalForm;
+    const canSubmit = isGiftRedeem || !!currency;
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card">
@@ -2553,16 +2577,17 @@ function renderActionModal() {
           <p class="modal-eyebrow neutral">${eyebrow}</p>
           <h3>${currencyLabel ? `${title} ${currencyLabel}` : title}</h3>
           <p class="modal-text">${note}</p>
-          ${currencyChoices}
+          ${depositModeSwitch}
+          ${isGiftRedeem ? "" : currencyChoices}
           <div class="stack-form wallet-action-fields">
-            ${isDeposit ? depositForm : withdrawalForm}
+            ${actionFields}
           </div>
           ${
-            currency
+            canSubmit
               ? `
                 <div class="modal-actions">
                   <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
-                  <button class="button-primary shimmer-button" id="wallet-submit-btn" data-wallet-mode="${state.actionModal.type}" data-wallet-currency-selected="${currency}" type="button">${buttonLabel}</button>
+                  <button class="button-primary shimmer-button" id="wallet-submit-btn" data-wallet-mode="${isGiftRedeem ? "gift-card" : state.actionModal.type}" data-wallet-currency-selected="${currency}" type="button">${buttonLabel}</button>
                 </div>
               `
               : ""
@@ -4022,6 +4047,23 @@ async function submitAdminFinanceAction(kind, id) {
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
     render();
     showNotice("Finance queue updated");
+  }).catch((error) => showError(error.message));
+}
+
+async function submitAdminGiftCard(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    await api("/api/admin/gift-cards", {
+      method: "POST",
+      body: JSON.stringify({
+        amount: data.amount,
+        currency: data.currency || "NGN",
+        note: data.note || "",
+      }),
+    });
+    await loadAdminFinanceQueues();
+    render();
+    showNotice("Gift card generated");
   }).catch((error) => showError(error.message));
 }
 
@@ -5542,6 +5584,53 @@ function renderAdminTransactionCard(transaction) {
   `;
 }
 
+function formatGiftCardCode(code) {
+  return String(code || "").replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 ").trim();
+}
+
+function renderAdminGiftCardCard(card) {
+  const used = String(card.status || "").toUpperCase() === "USED";
+  return `
+    <div class="asset-card admin-finance-card gift-card-row">
+      <div>
+        <strong>${formatCurrencyAmount(card.amount, card.currency || "NGN")}</strong>
+        <p class="muted-copy">${escapeHtml(card.note || "Netrue Gift Card")}</p>
+        <code>${escapeHtml(formatGiftCardCode(card.code))}</code>
+      </div>
+      <div class="asset-values">
+        <span class="wallet-status-badge ${used ? "wallet-status-success" : "wallet-status-pending"}">${used ? "Used" : "Unused"}</span>
+        <p class="muted-copy">${used ? escapeHtml(card.redeemedByName || card.redeemedByEmail || "Redeemed") : "Ready"}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminGiftCardsPanel() {
+  const usedCount = (state.adminGiftCards || []).filter((card) => String(card.status || "").toUpperCase() === "USED").length;
+  return `
+    <div class="admin-gift-card-panel">
+      <div class="section-head compact">
+        <div>
+          <p class="eyebrow">Gift Cards</p>
+          <p class="muted-copy">${usedCount}/${state.adminGiftCards.length} used.</p>
+        </div>
+      </div>
+      <form class="inline-admin-form" id="admin-gift-card-form">
+        <select name="currency" aria-label="Gift card currency">
+          <option value="NGN">Naira</option>
+          <option value="USDT">USDT</option>
+        </select>
+        <input name="amount" type="number" min="1" step="0.00000001" placeholder="Amount" required />
+        <input name="note" type="text" placeholder="Note" />
+        <button class="micro-btn primary" type="submit">${icon("gift")} Generate</button>
+      </form>
+      <div class="compact-list">
+        ${(state.adminGiftCards || []).slice(0, 30).map(renderAdminGiftCardCard).join("") || `<p class="muted-copy">No gift cards yet.</p>`}
+      </div>
+    </div>
+  `;
+}
+
 function renderAdminFinancePanel() {
   if (state.user.role !== "admin") {
     return "";
@@ -5566,6 +5655,7 @@ function renderAdminFinancePanel() {
         </div>
       </div>
       <div class="card-list">
+        ${renderAdminGiftCardsPanel()}
         <div>
           <p class="eyebrow">Deposits</p>
           ${(state.adminDeposits || []).map(renderAdminDepositCard).join("") || `<p class="muted-copy">No deposits yet.</p>`}
@@ -6421,6 +6511,14 @@ function bindDashboardActions() {
     });
   }
 
+  const adminGiftCardForm = document.getElementById("admin-gift-card-form");
+  if (adminGiftCardForm) {
+    adminGiftCardForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminGiftCard(adminGiftCardForm);
+    });
+  }
+
   const balancesToggle = document.getElementById("toggle-balances-btn");
   if (balancesToggle) {
     balancesToggle.addEventListener("click", () => {
@@ -6445,6 +6543,29 @@ function bindDashboardActions() {
   const withdrawButton = document.getElementById("netrue-withdraw-btn");
   if (withdrawButton) {
     withdrawButton.addEventListener("click", () => openWalletActionModal("withdraw"));
+  }
+
+  const manualDepositButton = document.getElementById("wallet-manual-deposit-btn");
+  if (manualDepositButton) {
+    manualDepositButton.addEventListener("click", () => {
+      state.actionModal = {
+        ...state.actionModal,
+        depositMode: "manual",
+      };
+      render();
+    });
+  }
+
+  const giftRedeemButton = document.getElementById("wallet-gift-redeem-btn");
+  if (giftRedeemButton) {
+    giftRedeemButton.addEventListener("click", () => {
+      state.actionModal = {
+        ...state.actionModal,
+        depositMode: "gift",
+        currency: "",
+      };
+      render();
+    });
   }
 
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
@@ -6552,10 +6673,39 @@ function bindDashboardActions() {
         updateWalletEquivalentPreview(amountInput, walletSubmitButton.dataset.walletCurrencySelected || state.actionModal?.currency || "USDT");
       });
     }
+    const giftCodeInput = document.getElementById("gift-card-code-input");
+    if (giftCodeInput) {
+      giftCodeInput.addEventListener("input", () => {
+        const digits = giftCodeInput.value.replace(/\D/g, "").slice(0, 14);
+        giftCodeInput.value = digits.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
+      });
+    }
     walletSubmitButton.addEventListener("click", async () => {
       const mode = walletSubmitButton.dataset.walletMode || "deposit";
       const currency = walletSubmitButton.dataset.walletCurrencySelected || state.actionModal?.currency || "USDT";
       const amount = amountInput?.value?.trim();
+
+      if (mode === "gift-card") {
+        const code = document.getElementById("gift-card-code-input")?.value?.replace(/\D/g, "").trim() || "";
+        if (!/^\d{14}$/.test(code)) {
+          showError("Enter a valid 14 digit gift card number.");
+          return;
+        }
+        await withLoading(async () => {
+          const headers = { "Idempotency-Key": `gift-card-${Date.now()}-${Math.random().toString(16).slice(2)}` };
+          await api("/api/gift-cards/redeem", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ code }),
+          });
+          await loadFinancialDashboard();
+          clearActionModal();
+          showNotice("Gift card redeemed.");
+          render();
+        }).catch((error) => showError(error.message));
+        return;
+      }
+
       const depositPayload = {
         currency,
         amount,
@@ -6574,6 +6724,13 @@ function bindDashboardActions() {
       if (!amount || Number(amount) <= 0) {
         showError("Enter a valid amount.");
         return;
+      }
+      if (mode === "withdraw") {
+        const minimum = currency === "NGN" ? 500 : 50;
+        if (Number(amount) < minimum) {
+          showError(`Minimum withdrawal is ${currency === "NGN" ? formatNaira(minimum) : formatUsdtUnit(minimum)}.`);
+          return;
+        }
       }
       if (mode === "withdraw" && currency === "USDT" && (!destination.address || !destination.network)) {
         showError("Enter wallet address and network.");

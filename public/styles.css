@@ -2420,6 +2420,26 @@ body[data-theme="dark"] .mirror-guide-pill {
   letter-spacing: 0;
 }
 
+.gift-card-code-input {
+  text-align: center;
+}
+
+.admin-gift-card-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.section-head.compact {
+  margin-bottom: 0;
+}
+
+.gift-card-row code {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+}
+
 .saved-bank-list {
   display: grid;
   gap: 8px;
