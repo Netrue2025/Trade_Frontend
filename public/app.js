@@ -1192,6 +1192,8 @@ function icon(name) {
       '<path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v11A2.5 2.5 0 0 1 16.5 20h-9A2.5 2.5 0 0 1 5 17.5v-11Z"/><path d="m8 8 4 3 4-3"/>' ,
     download:
       '<path d="M12 3v10"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/>',
+    whatsapp:
+      '<path d="M20 11.6a8.2 8.2 0 0 1-12.1 7.2L4 20l1.3-3.7A8.2 8.2 0 1 1 20 11.6Z"/><path d="M9.2 8.3c.2-.5.4-.5.7-.5h.5c.2 0 .4.1.5.4l.7 1.7c.1.2.1.4 0 .5l-.4.5c-.1.1-.2.3-.1.5.4.8 1.1 1.5 2.1 2 .2.1.3.1.5-.1l.7-.8c.2-.2.4-.2.6-.1l1.7.8c.2.1.4.3.4.5 0 .6-.4 1.4-.9 1.7-.5.3-1.5.4-3.1-.3-2.6-1.1-4.4-3.7-4.6-4-.1-.2-1.1-1.5-1.1-2.8 0-1.2.7-1.8 1-2Z"/>',
     copy:
       '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/>',
     chevronDown:
@@ -4411,6 +4413,44 @@ async function submitAdminUserMessage(form, userId) {
   }).catch((error) => showError(error.message));
 }
 
+async function submitUserPasswordChange(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  const newPassword = String(data.newPassword || "").trim();
+  const confirmPassword = String(data.confirmPassword || "").trim();
+  if (newPassword !== confirmPassword) {
+    showError("New passwords do not match.");
+    return;
+  }
+  await withLoading(async () => {
+    await api("/api/user/password", {
+      method: "POST",
+      body: JSON.stringify({
+        currentPassword: data.currentPassword || "",
+        newPassword,
+      }),
+    });
+    form.reset();
+    render();
+    showNotice("Password updated");
+  }).catch((error) => showError(error.message));
+}
+
+async function submitUserSupportMessage(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    await api("/api/support/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Support message",
+        message: data.message || "",
+      }),
+    });
+    form.reset();
+    render();
+    showNotice("Message sent to admin");
+  }).catch((error) => showError(error.message));
+}
+
 async function submitAdminUserTradeJoin(form, userId) {
   const data = Object.fromEntries(new FormData(form).entries());
   if (!data.tradeId) {
@@ -6142,13 +6182,52 @@ function renderSettingsPane() {
         <div class="section-head">
           <div>
             <h3>Support</h3>
-            <p class="muted-copy">Contact and session actions grouped inside settings.</p>
+            <p class="muted-copy">Security and help.</p>
           </div>
+        </div>
+        <form id="user-password-form" class="stack-form subtle-form">
+          ${renderPasswordField({
+            label: "Current password",
+            name: "currentPassword",
+            placeholder: "Current password",
+            autocomplete: "current-password",
+          })}
+          ${renderPasswordField({
+            label: "New password",
+            name: "newPassword",
+            placeholder: "New password",
+            autocomplete: "new-password",
+          })}
+          ${renderPasswordField({
+            label: "Confirm password",
+            name: "confirmPassword",
+            placeholder: "Confirm password",
+            autocomplete: "new-password",
+          })}
+          <button class="button-secondary shimmer-button" type="submit">${icon("lock")} Update password</button>
+        </form>
+        <div class="support-action-grid">
+          <a class="support-action-card whatsapp" href="https://wa.me/2347062671100" target="_blank" rel="noopener noreferrer">
+            ${icon("whatsapp")}
+            <span>WhatsApp</span>
+          </a>
+          ${
+            state.user.role === "user"
+              ? `
+                <form id="user-support-message-form" class="support-message-card">
+                  <label>
+                    <span>Message admin</span>
+                    <textarea name="message" rows="3" placeholder="Type message" required></textarea>
+                  </label>
+                  <button class="button-primary shimmer-button" type="submit">${icon("contact")} Send</button>
+                </form>
+              `
+              : ""
+          }
         </div>
         <div class="contact-card">
           <p><strong>Email:</strong> support@trade.local</p>
-          <p><strong>Desk hours:</strong> 09:00 - 18:00</p>
-          <p><strong>Mode:</strong> Crypto spot operations only</p>
+          <p><strong>Hours:</strong> 09:00 - 18:00</p>
           <button id="logout-btn" class="button-secondary shimmer-button" type="button">Logout</button>
         </div>
       </section>
@@ -6778,6 +6857,22 @@ function bindDashboardActions() {
         render();
         showNotice("Mirror preference updated");
       }).catch((error) => showError(error.message));
+    });
+  }
+
+  const userPasswordForm = document.getElementById("user-password-form");
+  if (userPasswordForm) {
+    userPasswordForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitUserPasswordChange(userPasswordForm);
+    });
+  }
+
+  const userSupportMessageForm = document.getElementById("user-support-message-form");
+  if (userSupportMessageForm) {
+    userSupportMessageForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitUserSupportMessage(userSupportMessageForm);
     });
   }
 

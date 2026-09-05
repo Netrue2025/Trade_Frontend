@@ -2151,6 +2151,51 @@ body[data-theme="dark"] .section-loading-card {
   grid-template-columns: 1fr;
 }
 
+.support-action-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.support-action-card,
+.support-message-card {
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--soft-surface);
+  color: var(--text);
+  padding: 14px;
+}
+
+.support-action-card {
+  min-height: 126px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  text-decoration: none;
+  font-weight: 900;
+}
+
+.support-action-card.whatsapp {
+  color: #128c7e;
+  background: rgba(37, 211, 102, 0.12);
+}
+
+.support-action-card .nav-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.support-message-card {
+  display: grid;
+  gap: 10px;
+}
+
+.support-message-card textarea {
+  min-height: 82px;
+}
+
 .admin-finance-toolbar {
   margin: 12px 0 4px;
 }
@@ -2306,6 +2351,10 @@ body[data-theme="dark"] .mirror-guide-pill {
 
   .admin-user-summary-actions {
     justify-content: space-between;
+  }
+
+  .support-action-grid {
+    grid-template-columns: 1fr;
   }
 
 }
