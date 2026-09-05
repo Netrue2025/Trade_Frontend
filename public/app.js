@@ -148,6 +148,7 @@ const state = {
   expandedTradeIds: [],
   expandedPendingOrderIds: [],
   expandedAdminUserIds: [],
+  expandedListKeys: [],
   selectedHistoryTradeIds: [],
   selectedFinanceHistoryIds: [],
   adminPasswordDrafts: {},
@@ -1191,6 +1192,12 @@ function icon(name) {
       '<path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v11A2.5 2.5 0 0 1 16.5 20h-9A2.5 2.5 0 0 1 5 17.5v-11Z"/><path d="m8 8 4 3 4-3"/>' ,
     download:
       '<path d="M12 3v10"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/>',
+    copy:
+      '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/>',
+    chevronDown:
+      '<path d="m6 9 6 6 6-6"/>',
+    chevronUp:
+      '<path d="m18 15-6-6-6 6"/>',
     home:
       '<path d="M4 11.5 12 5l8 6.5V20h-5v-4h-6v4H4z"/>',
   };
@@ -2327,6 +2334,69 @@ function getFilteredAdminUsers() {
   );
 }
 
+function isListExpanded(key) {
+  return state.expandedListKeys.includes(key);
+}
+
+function getRecordTime(record = {}) {
+  const value = record.createdAt || record.submittedAt || record.completedAt || record.updatedAt || record.generatedAt || record.redeemedAt || 0;
+  return Date.parse(value) || 0;
+}
+
+function sortRecent(records = []) {
+  return [...records].sort((a, b) => getRecordTime(b) - getRecordTime(a));
+}
+
+function getPreviewRecords(records = [], key, limit = 3) {
+  const sorted = sortRecent(records);
+  return isListExpanded(key) ? sorted : sorted.slice(0, limit);
+}
+
+function renderListToggle(key, total, limit = 3) {
+  if (total <= limit) {
+    return "";
+  }
+  const expanded = isListExpanded(key);
+  return `
+    <button class="view-more-btn" data-list-toggle="${escapeHtml(key)}" type="button" aria-expanded="${expanded ? "true" : "false"}">
+      ${icon(expanded ? "chevronUp" : "chevronDown")}
+      <span>${expanded ? "Less" : "More"}</span>
+    </button>
+  `;
+}
+
+function renderCopyButton(value, label = "Copy") {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  return `
+    <button class="copy-icon-btn" data-copy-text="${escapeHtml(text)}" type="button" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+      ${icon("copy")}
+    </button>
+  `;
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) {
+    return;
+  }
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
 function renderActionModal() {
   if (!state.actionModal) {
     return "";
@@ -2505,7 +2575,10 @@ function renderActionModal() {
         <span>Bank</span>
         <strong>${escapeHtml(depositSettings.bankName || "Bank not configured")}</strong>
         <span>Account</span>
-        <code>${escapeHtml(depositSettings.accountNumber || "Not configured")}</code>
+        <div class="copy-value-row">
+          <code>${escapeHtml(depositSettings.accountNumber || "Not configured")}</code>
+          ${renderCopyButton(depositSettings.accountNumber, "Copy account number")}
+        </div>
         <span>Name</span>
         <strong>${escapeHtml(depositSettings.accountName || "Not configured")}</strong>
         ${depositSettings.bankNote ? `<p>${escapeHtml(depositSettings.bankNote)}</p>` : ""}
@@ -2529,7 +2602,10 @@ function renderActionModal() {
           ${amountField("Amount (USDT)", "0.00000001", depositSettings.minUsdt || "0")}
           <div class="wallet-instructions">
             <span>Send to</span>
-            <code>${escapeHtml(depositSettings.usdtAddress || "Deposit address not configured")}</code>
+            <div class="copy-value-row">
+              <code>${escapeHtml(depositSettings.usdtAddress || "Deposit address not configured")}</code>
+              ${renderCopyButton(depositSettings.usdtAddress, "Copy wallet address")}
+            </div>
             <span>Network</span>
             <strong>${escapeHtml(depositSettings.usdtNetwork || "Not configured")}</strong>
           </div>
@@ -5240,9 +5316,14 @@ function renderExternalHoldingDisclosure(holding) {
 
 function renderOpenOrdersSection() {
     const visibleTrades = state.trades.filter(isTradeVisibleOnHome);
-    const openTrades = state.user?.role === "admin" ? visibleTrades : visibleTrades.slice(0, 5);
-    const detectedHoldings = state.user?.role === "user" ? [] : getDetectedSpotHoldings().slice(0, 5);
-    const openOrders = (state.openOrders || []).slice(0, 5);
+    const openTrades = state.user?.role === "admin" ? sortRecent(visibleTrades) : visibleTrades.slice(0, 5);
+    const detectedHoldings = state.user?.role === "user" ? [] : getDetectedSpotHoldings();
+    const openTradeLimit = isListExpanded("home-open-trades") ? openTrades.length : 3;
+    const visibleOpenTrades = openTrades.slice(0, openTradeLimit);
+    const remainingOpenSlots = isListExpanded("home-open-trades") ? detectedHoldings.length : Math.max(0, 3 - visibleOpenTrades.length);
+    const visibleDetectedHoldings = detectedHoldings.slice(0, remainingOpenSlots);
+    const openOrders = sortRecent(state.openOrders || []);
+    const visibleOpenOrders = getPreviewRecords(openOrders, "home-open-orders");
     const canManageTrades = state.user?.role === "admin";
     return `
       <section class="mobile-card split-card${loadingClass(state.loadingTrades)}">
@@ -5253,9 +5334,10 @@ function renderOpenOrdersSection() {
             <h3>Open Trades</h3>
             <p class="muted-copy">${state.user?.role === "user" ? "Joined trade investments." : "Live spot positions you are managing."}</p>
           </div>
+          ${renderListToggle("home-open-trades", openTrades.length + detectedHoldings.length)}
         </div>
         <div class="compact-list">
-            ${openTrades
+            ${visibleOpenTrades
               .map(
                 (trade) => {
                   const pnlPercent = getTradePnlPercent(trade);
@@ -5320,7 +5402,7 @@ function renderOpenOrdersSection() {
                 }
               )
             .join("")}
-            ${detectedHoldings.map((holding) => renderExternalHoldingDisclosure(holding)).join("")}
+            ${visibleDetectedHoldings.map((holding) => renderExternalHoldingDisclosure(holding)).join("")}
             ${!openTrades.length && !detectedHoldings.length ? `<p class="muted-copy">No open trades yet.</p>` : ""}
         </div>
       </div>
@@ -5330,9 +5412,10 @@ function renderOpenOrdersSection() {
             <h3>Open Orders</h3>
             <p class="muted-copy">Live ${getExchangeLabel(getActiveExchange())} spot orders that are still waiting to fill.</p>
           </div>
+          ${renderListToggle("home-open-orders", openOrders.length)}
         </div>
         <div class="compact-list">
-          ${openOrders.map((order) => renderPendingOrderDisclosure(order, { showCancel: true })).join("") || `<p class="muted-copy">No open orders.</p>`}
+          ${visibleOpenOrders.map((order) => renderPendingOrderDisclosure(order, { showCancel: true })).join("") || `<p class="muted-copy">No open orders.</p>`}
         </div>
       </div>
     </section>
@@ -5657,7 +5740,7 @@ function renderAdminWithdrawalCard(withdrawal) {
   const canFinalize = ["PENDING", "PROCESSING"].includes(withdrawal.status) && !isNgnBankWithdrawal;
   const canReject = withdrawal.status === "PENDING";
   return `
-    <div class="asset-card admin-finance-card">
+    <div class="asset-card admin-finance-card" data-finance-withdrawal-id="${escapeHtml(withdrawal.id || "")}">
       <label class="history-checkbox finance-history-checkbox" aria-label="Select withdrawal">
         <input type="checkbox" data-finance-history-kind="withdrawal" data-finance-history-id="${withdrawal.id}" ${
           state.selectedFinanceHistoryIds.includes(historyKey) ? "checked" : ""
@@ -5728,7 +5811,10 @@ function renderAdminGiftCardCard(card) {
       <div>
         <strong>${formatCurrencyAmount(card.amount, card.currency || "NGN")}</strong>
         <p class="muted-copy">${escapeHtml(card.note || "Netrue Gift Card")}</p>
-        <code>${escapeHtml(formatGiftCardCode(card.code))}</code>
+        <div class="copy-value-row">
+          <code>${escapeHtml(formatGiftCardCode(card.code))}</code>
+          ${renderCopyButton(card.code, "Copy gift card number")}
+        </div>
       </div>
       <div class="asset-values">
         <span class="wallet-status-badge ${used ? "wallet-status-success" : "wallet-status-pending"}">${used ? "Used" : "Unused"}</span>
@@ -5740,6 +5826,8 @@ function renderAdminGiftCardCard(card) {
 
 function renderAdminGiftCardsPanel() {
   const usedCount = (state.adminGiftCards || []).filter((card) => String(card.status || "").toUpperCase() === "USED").length;
+  const cards = sortRecent(state.adminGiftCards || []);
+  const visibleCards = getPreviewRecords(cards, "admin-gift-cards");
   return `
     <div class="admin-gift-card-panel">
       <div class="section-head compact">
@@ -5747,6 +5835,7 @@ function renderAdminGiftCardsPanel() {
           <p class="eyebrow">Gift Cards</p>
           <p class="muted-copy">${usedCount}/${state.adminGiftCards.length} used.</p>
         </div>
+        ${renderListToggle("admin-gift-cards", cards.length)}
       </div>
       <form class="inline-admin-form" id="admin-gift-card-form">
         <select name="currency" aria-label="Gift card currency">
@@ -5758,7 +5847,7 @@ function renderAdminGiftCardsPanel() {
         <button class="micro-btn primary" type="submit">${icon("gift")} Generate</button>
       </form>
       <div class="compact-list">
-        ${(state.adminGiftCards || []).slice(0, 30).map(renderAdminGiftCardCard).join("") || `<p class="muted-copy">No gift cards yet.</p>`}
+        ${visibleCards.map(renderAdminGiftCardCard).join("") || `<p class="muted-copy">No gift cards yet.</p>`}
       </div>
     </div>
   `;
@@ -5813,6 +5902,12 @@ function renderAdminFinancePanel() {
   const historyKeys = getFinanceHistoryKeys();
   const selectedCount = state.selectedFinanceHistoryIds.length;
   const allSelected = !!historyKeys.length && selectedCount === historyKeys.length;
+  const deposits = sortRecent(state.adminDeposits || []);
+  const withdrawals = sortRecent(state.adminWithdrawals || []);
+  const transactions = sortRecent(state.adminTransactions || []);
+  const visibleDeposits = getPreviewRecords(deposits, "admin-deposits");
+  const visibleWithdrawals = getPreviewRecords(withdrawals, "admin-withdrawals");
+  const visibleTransactions = getPreviewRecords(transactions, "admin-ledger");
   return `
     <section class="mobile-card settings-card${loadingClass(state.loadingAdminFinance)}" data-section="finance">
       ${state.loadingAdminFinance ? renderSectionLoadingOverlay("Loading finance queue", "Checking pending deposits and withdrawals") : ""}
@@ -5831,16 +5926,25 @@ function renderAdminFinancePanel() {
       </div>
       <div class="card-list">
         <div>
-          <p class="eyebrow">Deposits</p>
-          ${(state.adminDeposits || []).map(renderAdminDepositCard).join("") || `<p class="muted-copy">No deposits yet.</p>`}
+          <div class="list-section-head">
+            <p class="eyebrow">Deposits</p>
+            ${renderListToggle("admin-deposits", deposits.length)}
+          </div>
+          ${visibleDeposits.map(renderAdminDepositCard).join("") || `<p class="muted-copy">No deposits yet.</p>`}
         </div>
         <div>
-          <p class="eyebrow">Withdrawals</p>
-          ${(state.adminWithdrawals || []).map(renderAdminWithdrawalCard).join("") || `<p class="muted-copy">No withdrawals yet.</p>`}
+          <div class="list-section-head">
+            <p class="eyebrow">Withdrawals</p>
+            ${renderListToggle("admin-withdrawals", withdrawals.length)}
+          </div>
+          ${visibleWithdrawals.map(renderAdminWithdrawalCard).join("") || `<p class="muted-copy">No withdrawals yet.</p>`}
         </div>
         <div>
-          <p class="eyebrow">Ledger</p>
-          ${(state.adminTransactions || []).slice(0, 80).map(renderAdminTransactionCard).join("") || `<p class="muted-copy">No ledger records yet.</p>`}
+          <div class="list-section-head">
+            <p class="eyebrow">Ledger</p>
+            ${renderListToggle("admin-ledger", transactions.length)}
+          </div>
+          ${visibleTransactions.map(renderAdminTransactionCard).join("") || `<p class="muted-copy">No ledger records yet.</p>`}
         </div>
       </div>
     </section>
@@ -6095,6 +6199,7 @@ function renderHomeOpenTradeSection() {
 
 function renderProfitLossReportCard() {
   const rows = getProfitLossReportRows(state.reportPeriod);
+  const visibleRows = isListExpanded("profit-loss-report") ? rows : rows.slice(0, 3);
   const monthValue = Number(state.monthPnlValue || 0);
   const reportTotal = rows.reduce((sum, row) => sum + row.pnlValue, 0);
   return `
@@ -6118,10 +6223,10 @@ function renderProfitLossReportCard() {
           </select>
         </label>
         <strong class="${reportTotal > 0 ? "positive" : reportTotal < 0 ? "negative" : "neutral"}">${reportTotal >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(reportTotal))}</strong>
+        ${renderListToggle("profit-loss-report", rows.length)}
       </div>
       <div class="compact-list report-list">
-        ${rows
-          .slice(0, 8)
+        ${visibleRows
           .map(
             (row) => `
               <div class="asset-card report-row">
@@ -6220,6 +6325,17 @@ function applyRouteTarget() {
       state.expandedTradeIds = [...new Set([...state.expandedTradeIds, tradeId])];
       state.routeScrollSection = `trade:${tradeId}`;
     }
+    return;
+  }
+  if (params.get("tab") === "history" && state.user?.role === "admin") {
+    const withdrawalId = String(params.get("withdrawal") || "").trim();
+    state.activeTab = "history";
+    if (withdrawalId) {
+      state.expandedListKeys = [...new Set([...state.expandedListKeys, "admin-withdrawals"])];
+      state.routeScrollSection = `finance-withdrawal:${withdrawalId}`;
+      return;
+    }
+    state.routeScrollSection = String(params.get("section") || "finance").trim() || "finance";
   }
 }
 
@@ -6241,6 +6357,21 @@ function scrollToRouteSection() {
         block: "center",
       });
       return;
+    }
+    if (section.startsWith("finance-withdrawal:")) {
+      const withdrawalId = section.slice("finance-withdrawal:".length);
+      const escapedWithdrawalId = window.CSS?.escape ? CSS.escape(withdrawalId) : withdrawalId.replace(/"/g, '\\"');
+      const target = document.querySelector(`[data-finance-withdrawal-id="${escapedWithdrawalId}"]`);
+      if (target) {
+        state.routeScrollSection = "";
+        target.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+        target.classList.add("history-row-focus");
+        setTimeout(() => target.classList.remove("history-row-focus"), 1800);
+        return;
+      }
     }
     const target = document.querySelector(`[data-section="${section}"]`);
     if (!target) {
@@ -6265,10 +6396,15 @@ function renderWalletHistorySection({
   description = "Deposits, withdrawals, and ledger updates.",
   requestsOnly = false,
   showMore = false,
+  showToggle = false,
+  listKey = "wallet-history",
 } = {}) {
   const source = (state.financialDashboard?.walletHistory || [])
     .filter((item) => !requestsOnly || isWalletRequestHistoryItem(item));
-  const walletHistory = source.slice(0, limit);
+  const sortedSource = sortRecent(source);
+  const walletHistory = showToggle
+    ? getPreviewRecords(sortedSource, listKey, 3)
+    : sortedSource.slice(0, limit);
   if (!walletHistory.length) {
     return "";
   }
@@ -6280,6 +6416,7 @@ function renderWalletHistorySection({
           <p class="muted-copy">${description}</p>
         </div>
         ${showMore ? `<button class="text-link" data-tab="history" type="button">See more</button>` : ""}
+        ${showToggle ? renderListToggle(listKey, sortedSource.length, 3) : ""}
       </div>
       <div class="compact-list">
         ${walletHistory.map(renderWalletHistoryRow).join("")}
@@ -6291,18 +6428,22 @@ function renderWalletHistorySection({
 function renderHistoryContent() {
   const trades = getHistoryTrades();
   const canClearHistory = state.user?.role === "admin";
+  const pendingOrders = sortRecent(state.openOrders || []);
+  const visiblePendingOrders = getPreviewRecords(pendingOrders, "pending-orders-history");
+  const visibleTrades = getPreviewRecords(trades, "trade-timeline-history");
   return `
     <div class="card-list">
-      ${renderWalletHistorySection()}
+      ${renderWalletHistorySection({ showToggle: true, listKey: "wallet-history-page", limit: 3 })}
       <section class="mobile-card">
         <div class="section-head">
           <div>
             <h3>Pending Orders</h3>
             <p class="muted-copy">All live exchange orders still waiting to fill or cancel.</p>
           </div>
+          ${renderListToggle("pending-orders-history", pendingOrders.length)}
         </div>
         <div class="compact-list">
-          ${(state.openOrders || []).map((order) => renderPendingOrderDisclosure(order, { showCancel: true })).join("") || `<p class="muted-copy">No pending orders right now.</p>`}
+          ${visiblePendingOrders.map((order) => renderPendingOrderDisclosure(order, { showCancel: true })).join("") || `<p class="muted-copy">No pending orders right now.</p>`}
         </div>
       </section>
       <section class="mobile-card">
@@ -6311,8 +6452,9 @@ function renderHistoryContent() {
             <h3>Trade Timeline</h3>
             <p class="muted-copy">Open, pending, canceled, and closed trades all stay visible here.</p>
           </div>
+          ${renderListToggle("trade-timeline-history", trades.length)}
         </div>
-      ${trades
+      ${visibleTrades
         .map((trade) => {
           const canSelectTrade = canClearHistory && isTradeClearableFromHistory(trade);
           const entryPrice = getTradeEntryPrice(trade);
@@ -6541,6 +6683,27 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-notification-open]").forEach((button) => {
     button.addEventListener("click", () => {
       openNotification(button.dataset.notificationOpen);
+    });
+  });
+
+  document.querySelectorAll("[data-list-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.listToggle;
+      if (!key) {
+        return;
+      }
+      state.expandedListKeys = isListExpanded(key)
+        ? state.expandedListKeys.filter((item) => item !== key)
+        : [...new Set([...state.expandedListKeys, key])];
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-copy-text]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await copyTextToClipboard(button.dataset.copyText).then(() => showNotice("Copied")).catch((error) => showError(error.message || "Copy failed"));
     });
   });
 
