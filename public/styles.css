@@ -2918,6 +2918,189 @@ body[data-theme="dark"] .mirror-guide-pill {
   margin-right: 6px;
 }
 
+.quest-promo-card,
+.quest-world,
+.quest-admin-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 18px;
+  color: #ffffff;
+  background:
+    linear-gradient(135deg, rgba(10, 18, 34, 0.94), rgba(26, 57, 99, 0.92)),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 11px);
+  box-shadow: var(--shadow);
+}
+
+.quest-promo-card h3,
+.quest-world h2,
+.quest-admin-hero h3,
+.quest-promo-card p,
+.quest-world p,
+.quest-admin-hero p {
+  margin: 0;
+}
+
+.quest-promo-card .eyebrow,
+.quest-world .eyebrow,
+.quest-admin-hero .eyebrow {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.quest-world {
+  display: grid;
+  gap: 14px;
+}
+
+.quest-world-grid,
+.quest-pill-nav,
+.quest-option-grid,
+.quest-actions,
+.admin-quest-actions,
+.quest-code-grid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quest-world-grid {
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scroll-snap-type: x mandatory;
+}
+
+.quest-world-grid span {
+  flex: 0 0 38%;
+  min-width: 120px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  scroll-snap-align: start;
+  font-weight: 900;
+}
+
+.quest-pill-nav button,
+.quest-option {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 900;
+}
+
+.quest-pill-nav button {
+  min-height: 34px;
+  padding: 7px 12px;
+}
+
+.quest-card {
+  display: grid;
+  gap: 14px;
+}
+
+.quest-stage-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.quest-option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quest-option {
+  min-height: 52px;
+  padding: 10px;
+  text-align: left;
+}
+
+.quest-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.quest-reward-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  color: #ffffff;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(22, 196, 127, 0.35), transparent 34%),
+    linear-gradient(135deg, #111827, #254064);
+  box-shadow: var(--shadow);
+}
+
+.quest-reward-card p,
+.quest-reward-card strong {
+  margin: 0;
+}
+
+.quest-scratch-mask {
+  display: grid;
+  place-items: center;
+  min-height: 82px;
+  border: 1px dashed rgba(255, 255, 255, 0.42);
+  border-radius: 16px;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.24) 0 8px, rgba(255, 255, 255, 0.1) 8px 16px);
+  color: rgba(255, 255, 255, 0.86);
+  font-weight: 900;
+}
+
+.quest-code-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.quest-code-grid span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.admin-quest-row {
+  align-items: center;
+}
+
+.admin-quest-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.quest-json-input {
+  min-height: 180px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.quest-answer-input {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+}
+
+@media (max-width: 520px) {
+  .quest-promo-card,
+  .quest-admin-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .quest-option-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .wallet-status-pending {
   background: rgba(245, 158, 11, 0.14);
   color: #b45309;

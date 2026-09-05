@@ -163,6 +163,16 @@ const state = {
     statusMessage: "Realtime settings sync is offline.",
   },
   signalAutoTrade: getDefaultSignalAutoTradeState(),
+  quest: {
+    status: null,
+    rewards: [],
+    history: [],
+    admin: null,
+    selectedAnswer: "",
+    view: "play",
+    loading: false,
+    draft: null,
+  },
   socket: null,
   socketRetry: null,
   socketRefreshTimer: null,
@@ -227,9 +237,9 @@ function shouldRefreshTradeLive() {
     return false;
   }
   if (state.user.role === "admin") {
-    return ["home", "history", "settings", "signals"].includes(state.activeTab);
+    return ["home", "history", "settings", "signals", "adminQuests"].includes(state.activeTab);
   }
-  return ["home", "history", "signals"].includes(state.activeTab);
+  return ["home", "history", "signals", "quest"].includes(state.activeTab);
 }
 
 function getExchangeLabel(exchange) {
@@ -1200,6 +1210,14 @@ function icon(name) {
       '<path d="m6 9 6 6 6-6"/>',
     chevronUp:
       '<path d="m18 15-6-6-6 6"/>',
+    play:
+      '<path d="M8 5v14l11-7Z"/>',
+    trash:
+      '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+    copyPlus:
+      '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/><path d="M13.5 11.5v4"/><path d="M11.5 13.5h4"/>',
+    star:
+      '<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16.9l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z"/>',
     home:
       '<path d="M4 11.5 12 5l8 6.5V20h-5v-4h-6v4H4z"/>',
   };
@@ -1665,6 +1683,75 @@ async function loadAdminFinanceQueues() {
   state.adminTransactions = transactionPayload.transactions || [];
   state.adminGiftCards = giftCardPayload.giftCards || [];
   syncFinanceHistorySelection();
+}
+
+async function loadQuestData() {
+  if (!state.user || state.user.role !== "user") {
+    state.quest.status = null;
+    state.quest.rewards = [];
+    state.quest.history = [];
+    return;
+  }
+  const [statusPayload, rewardsPayload, historyPayload] = await Promise.all([
+    api("/api/quest/my-status"),
+    api("/api/quest/rewards").catch(() => ({ rewards: [] })),
+    api("/api/quest/history").catch(() => ({ history: [] })),
+  ]);
+  state.quest.status = statusPayload;
+  state.quest.rewards = rewardsPayload.rewards || [];
+  state.quest.history = historyPayload.history || [];
+}
+
+async function loadAdminQuestData() {
+  if (!state.user || state.user.role !== "admin") {
+    state.quest.admin = null;
+    return;
+  }
+  state.quest.admin = await api("/api/admin/quests");
+}
+
+function buildFrontendPath(path) {
+  const normalizedPath = String(path || "/").startsWith("/") ? String(path || "/") : `/${path}`;
+  return `${window.location.origin}${normalizedPath}`;
+}
+
+function getQuestDraft() {
+  return state.quest.draft || {
+    id: "",
+    title: "",
+    category: "crypto",
+    difficulty: "easy",
+    description: "",
+    active: true,
+    stagesJson: JSON.stringify([
+      {
+        type: "multiple-choice",
+        prompt: "What does P&L show?",
+        options: ["Profit and loss", "Password and login", "Payment limit"],
+        correctAnswer: "Profit and loss",
+        explanation: "P&L tracks profit and loss after entry.",
+      },
+    ], null, 2),
+  };
+}
+
+function setQuestDraftFromQuest(quest) {
+  state.quest.draft = {
+    id: quest.id || "",
+    title: quest.title || "",
+    category: quest.category || "crypto",
+    difficulty: quest.difficulty || "easy",
+    description: quest.description || "",
+    active: quest.active !== false,
+    stagesJson: JSON.stringify((quest.stages || []).map((stage) => ({
+      type: stage.type || "multiple-choice",
+      prompt: stage.prompt || "",
+      options: stage.options || [],
+      correctAnswer: stage.correctAnswer || "",
+      explanation: stage.explanation || "",
+      hint: stage.hint || "",
+    })), null, 2),
+  };
 }
 
 function formatMonthLabel(monthKey) {
@@ -3942,6 +4029,13 @@ async function loadDashboardData() {
       state.loadingAdminFinance = false;
       render();
     });
+  const questPromise = (state.user.role === "admin" ? loadAdminQuestData() : loadQuestData())
+    .then(() => {
+      render();
+    })
+    .catch(() => {
+      render();
+    });
   const settingsPromise = loadSavedExchangeSettings(getActiveExchange()).then(() => {
     render();
   });
@@ -4048,6 +4142,7 @@ async function loadDashboardData() {
   void spotSymbolsPromise;
   void financialPromise;
   void adminFinancePromise;
+  void questPromise;
 }
 
 function bindHistoryActions() {
@@ -4254,11 +4349,180 @@ async function submitAdminGiftCard(form) {
         amount: data.amount,
         currency: data.currency || "NGN",
         note: data.note || "",
+        rewardPool: data.rewardPool || "standard",
+        isQuestReward: data.rewardPool === "quest",
       }),
     });
-    await loadAdminFinanceQueues();
+    await Promise.all([loadAdminFinanceQueues(), loadAdminQuestData().catch(() => undefined)]);
     render();
     showNotice("Gift card generated");
+  }).catch((error) => showError(error.message));
+}
+
+async function refreshQuestData() {
+  await withLoading(async () => {
+    await (state.user?.role === "admin" ? loadAdminQuestData() : loadQuestData());
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function startQuest(questId) {
+  await withLoading(async () => {
+    const payload = await api(`/api/quest/${encodeURIComponent(questId)}/start`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.quest.status = {
+      ...(state.quest.status || {}),
+      activeQuest: payload.quest,
+      activeSession: payload.session,
+    };
+    state.quest.selectedAnswer = "";
+    await loadQuestData();
+    showNotice("Quest started");
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function submitQuestAnswer() {
+  const sessionId = state.quest.status?.activeSession?.id;
+  const answer = getQuestAnswerInput();
+  if (!sessionId || !answer) {
+    showError("Choose an answer.");
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/quest/session/${encodeURIComponent(sessionId)}/answer`, {
+      method: "POST",
+      body: JSON.stringify({ answer }),
+    });
+    if (!payload.correct) {
+      showError(payload.message || "Try again.");
+      return;
+    }
+    state.quest.selectedAnswer = "";
+    await loadQuestData();
+    if (payload.completed) {
+      showNotice("Quest complete. Unlock your reward.");
+    }
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+function getQuestAnswerInput() {
+  const stage = state.quest.status?.activeSession?.currentStage || {};
+  const raw = document.getElementById("quest-free-answer-input")?.value?.trim();
+  if (raw) {
+    if (stage.type === "sequence") {
+      return raw.split(",").map((item) => item.trim()).filter(Boolean);
+    }
+    if (stage.type === "matching") {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        showError("Enter matching answers as JSON.");
+        return "";
+      }
+    }
+    return raw;
+  }
+  return state.quest.selectedAnswer;
+}
+
+async function completeQuestReward() {
+  const sessionId = state.quest.status?.activeSession?.id;
+  if (!sessionId) {
+    return;
+  }
+  await withLoading(async () => {
+    await api(`/api/quest/session/${encodeURIComponent(sessionId)}/complete`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await loadQuestData();
+    showNotice("Reward unlocked");
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function revealQuestReward() {
+  const sessionId = state.quest.status?.activeSession?.id;
+  if (!sessionId) {
+    return;
+  }
+  await withLoading(async () => {
+    await api(`/api/quest/session/${encodeURIComponent(sessionId)}/reveal`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await loadQuestData();
+    showNotice("Gift card revealed");
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function redeemQuestReward() {
+  const sessionId = state.quest.status?.activeSession?.id;
+  if (!sessionId) {
+    return;
+  }
+  await withLoading(async () => {
+    await api(`/api/quest/session/${encodeURIComponent(sessionId)}/redeem`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await Promise.all([loadQuestData(), loadFinancialDashboard()]);
+    showNotice("Reward added to wallet");
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function submitAdminQuest(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  let stages = [];
+  try {
+    stages = JSON.parse(data.stagesJson || "[]");
+  } catch {
+    showError("Stages JSON is not valid.");
+    return;
+  }
+  const payload = {
+    title: data.title,
+    category: data.category,
+    difficulty: data.difficulty,
+    description: data.description,
+    active: data.active === "on",
+    stages,
+  };
+  const id = String(data.id || "").trim();
+  await withLoading(async () => {
+    await api(id ? `/api/admin/quests/${encodeURIComponent(id)}` : "/api/admin/quests", {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(payload),
+    });
+    state.quest.draft = null;
+    await loadAdminQuestData();
+    showNotice(id ? "Quest saved" : "Quest created");
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function adminQuestAction(action, questId, active = false) {
+  const endpoint = action === "delete"
+    ? `/api/admin/quests/${encodeURIComponent(questId)}`
+    : `/api/admin/quests/${encodeURIComponent(questId)}/${action === "toggle" ? (active ? "activate" : "disable") : action}`;
+  const method = action === "delete" ? "DELETE" : "POST";
+  if (action === "delete" && !window.confirm("Delete this quest?")) {
+    return;
+  }
+  await withLoading(async () => {
+    await api(endpoint, {
+      method,
+      body: JSON.stringify({}),
+    });
+    await loadAdminQuestData();
+    render();
+    showNotice("Quest updated");
   }).catch((error) => showError(error.message));
 }
 
@@ -5947,6 +6211,7 @@ function renderAdminGiftCardCard(card) {
           <code>${escapeHtml(formatGiftCardCode(card.code))}</code>
           ${renderCopyButton(card.code, "Copy gift card number")}
         </div>
+        ${card.isQuestReward || card.rewardPool === "quest" ? `<p class="muted-copy">Quest pool${card.pin ? ` | PIN ${escapeHtml(card.pin)}` : ""}</p>` : ""}
       </div>
       <div class="asset-values">
         <span class="wallet-status-badge ${used ? "wallet-status-success" : "wallet-status-pending"}">${used ? "Used" : "Unused"}</span>
@@ -5973,6 +6238,10 @@ function renderAdminGiftCardsPanel() {
         <select name="currency" aria-label="Gift card currency">
           <option value="NGN">Naira</option>
           <option value="USDT">USDT</option>
+        </select>
+        <select name="rewardPool" aria-label="Gift card pool">
+          <option value="standard">Standard</option>
+          <option value="quest">Quest reward</option>
         </select>
         <input name="amount" type="number" min="1" step="0.00000001" placeholder="Amount" required />
         <input name="note" type="text" placeholder="Note" />
@@ -6017,11 +6286,290 @@ function renderAdminSettingsOverview() {
           <strong>${activeGiftCards.toLocaleString()}</strong>
           <small>Gift cards</small>
         </div>
+        <button class="admin-control-tile" data-tab="adminQuests" type="button">
+          <span class="card-icon">${icon("star")}</span>
+          <strong>Quest</strong>
+          <small>Rewards</small>
+        </button>
         <div class="admin-control-tile passive">
           <span class="card-icon">${icon("settings")}</span>
           <strong>${getExchangeLabel(getAdminDashboardExchange())}</strong>
           <small>Exchange</small>
         </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderQuestPromoBanner() {
+  if (state.user?.role !== "user") {
+    return "";
+  }
+  const status = state.quest.status || {};
+  const count = Number(status.rewardPool?.available || 0);
+  const cooldown = Number(status.cooldownRemainingMs || 0);
+  const cooldownHours = cooldown > 0 ? Math.ceil(cooldown / (60 * 60 * 1000)) : 0;
+  const label = status.canStart ? "Play now" : cooldownHours ? `${cooldownHours}h left` : count ? "Resume" : "Rewards loading";
+  return `
+    <section class="quest-promo-card">
+      <div>
+        <p class="eyebrow">Netrue Quest</p>
+        <h3>Play to win gift cards</h3>
+        <p>${count ? `${count} rewards live` : "Fresh rewards will appear here."}</p>
+      </div>
+      <button class="micro-btn primary" data-open-quest type="button">${icon("play")} ${label}</button>
+    </section>
+  `;
+}
+
+function renderQuestRewardCard(reward = {}) {
+  const revealed = !!reward.code;
+  const used = ["USED", "REDEEMED"].includes(String(reward.status || "").toUpperCase());
+  return `
+    <div class="quest-reward-card ${revealed ? "revealed" : ""}">
+      <div>
+        <p class="eyebrow">Reward</p>
+        <strong>${formatCurrencyAmount(reward.amount || "0", reward.currency || "NGN")}</strong>
+        <p>${escapeHtml(reward.note || "Netrue Quest Gift Card")}</p>
+      </div>
+      ${
+        revealed
+          ? `
+            <div class="quest-code-grid">
+              <span>Card <b>${escapeHtml(formatGiftCardCode(reward.code))}</b></span>
+              <span>PIN <b>${escapeHtml(reward.pin || "------")}</b></span>
+            </div>
+          `
+          : `<div class="quest-scratch-mask">Scratch</div>`
+      }
+      <div class="quest-actions">
+        ${!revealed ? `<button class="button-secondary shimmer-button" data-quest-reveal type="button">View reward</button>` : ""}
+        ${revealed && !used ? `<button class="button-primary shimmer-button" data-quest-redeem type="button">${icon("gift")} Add to wallet</button>` : ""}
+        ${used ? `<span class="wallet-status-badge wallet-status-success">Credited</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderQuestStage(session) {
+  const stage = session?.currentStage;
+  if (!stage) {
+    return `
+      <section class="mobile-card quest-card">
+        <h3>Quest complete</h3>
+        <p class="muted-copy">Your reward is waiting.</p>
+        <button class="button-primary shimmer-button" data-quest-complete type="button">${icon("gift")} Unlock reward</button>
+      </section>
+    `;
+  }
+  const selected = state.quest.selectedAnswer;
+  const choiceOptions = stage.type === "true-false"
+    ? (stage.options?.length ? stage.options : ["True", "False"])
+    : (stage.options || []);
+  const needsFreeAnswer = ["matching", "sequence"].includes(stage.type) || !choiceOptions.length;
+  return `
+    <section class="mobile-card quest-card">
+      <div class="quest-stage-meta">
+        <span>${session.currentStageIndex + 1}/${session.totalStages}</span>
+        <span>${escapeHtml(stage.type || "quiz")}</span>
+      </div>
+      <h3>${escapeHtml(stage.prompt || "Quest stage")}</h3>
+      ${
+        needsFreeAnswer
+          ? `<textarea id="quest-free-answer-input" class="quest-answer-input" rows="3" placeholder="${stage.type === "sequence" ? "A, B, C" : stage.type === "matching" ? "{\"A\":\"B\"}" : "Answer"}">${escapeHtml(selected)}</textarea>`
+          : `
+            <div class="quest-option-grid">
+              ${choiceOptions.map((option) => `
+                <button class="quest-option ${selected === option ? "active" : ""}" data-quest-answer="${escapeHtml(option)}" type="button">
+                  ${escapeHtml(option)}
+                </button>
+              `).join("")}
+            </div>
+          `
+      }
+      <button class="button-primary shimmer-button" data-quest-submit-answer type="button" ${selected || needsFreeAnswer ? "" : "disabled"}>${icon("play")} Submit</button>
+    </section>
+  `;
+}
+
+function renderQuestHistoryList() {
+  const rewards = state.quest.rewards || [];
+  const history = state.quest.history || [];
+  return `
+    <section class="mobile-card">
+      <div class="section-head compact">
+        <div>
+          <h3>Rewards</h3>
+          <p class="muted-copy">${rewards.length} earned.</p>
+        </div>
+      </div>
+      <div class="compact-list">
+        ${rewards.slice(0, 8).map((reward) => `
+          <div class="asset-card">
+            <div>
+              <strong>${formatCurrencyAmount(reward.amount || "0", reward.currency || "NGN")}</strong>
+              <p class="muted-copy">${reward.redeemedAt ? "Credited" : formatWalletRequestStatus(reward.status)}</p>
+            </div>
+            <span class="wallet-status-badge ${reward.redeemedAt ? "wallet-status-success" : "wallet-status-pending"}">${reward.redeemedAt ? "Used" : "Open"}</span>
+          </div>
+        `).join("") || `<p class="muted-copy">No rewards yet.</p>`}
+      </div>
+    </section>
+    <section class="mobile-card">
+      <div class="section-head compact">
+        <div>
+          <h3>Quest History</h3>
+          <p class="muted-copy">Recent plays.</p>
+        </div>
+      </div>
+      <div class="compact-list">
+        ${history.slice(0, 8).map((item) => `
+          <div class="asset-card">
+            <div>
+              <strong>${escapeHtml(item.questTitle || "Quest")}</strong>
+              <p class="muted-copy">${item.startedAt ? new Date(item.startedAt).toLocaleString() : ""}</p>
+            </div>
+            <span class="wallet-status-badge ${item.status === "REDEEMED" ? "wallet-status-success" : "wallet-status-pending"}">${escapeHtml(formatWalletRequestStatus(item.status))}</span>
+          </div>
+        `).join("") || `<p class="muted-copy">No quest history yet.</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderQuestPane() {
+  const status = state.quest.status;
+  if (["rewards", "history"].includes(state.quest.view)) {
+    return `
+      <section class="mobile-card quest-admin-hero">
+        <div>
+          <p class="eyebrow">Netrue Quest</p>
+          <h3>${state.quest.view === "rewards" ? "Rewards" : "History"}</h3>
+        </div>
+        <button class="micro-btn" data-quest-view="play" type="button">${icon("play")} Play</button>
+      </section>
+      ${renderQuestHistoryList()}
+    `;
+  }
+  if (!status) {
+    return `
+      <section class="mobile-card quest-card">
+        <h3>Netrue Quest</h3>
+        <p class="muted-copy">Loading rewards.</p>
+        <button class="button-secondary shimmer-button" data-quest-refresh type="button">Refresh</button>
+      </section>
+    `;
+  }
+  const activeSession = status.activeSession;
+  const reward = state.quest.rewards.find((item) => item.id === status.reward?.id) || status.reward;
+  const cooldown = Number(status.cooldownRemainingMs || 0);
+  const cooldownHours = Math.ceil(cooldown / (60 * 60 * 1000));
+  return `
+    <section class="quest-world">
+      <div class="quest-hero">
+        <p class="eyebrow">Netrue Quest</p>
+        <h2>Play. Scratch. Credit.</h2>
+        <p>${status.rewardPool?.available || 0} gift cards ready.</p>
+      </div>
+      <div class="quest-world-grid">
+        <span>Tech</span><span>AI</span><span>Farm</span><span>Crypto</span>
+      </div>
+      <div class="quest-pill-nav">
+        <button data-quest-view="rewards" type="button">Rewards</button>
+        <button data-quest-view="history" type="button">History</button>
+      </div>
+    </section>
+    ${
+      !activeSession && status.canStart
+        ? `
+          <section class="mobile-card quest-card">
+            <h3>${escapeHtml(status.activeQuest?.title || "Daily Quest")}</h3>
+            <p class="muted-copy">${escapeHtml(status.activeQuest?.description || "One play every 12 hours.")}</p>
+            <button class="button-primary shimmer-button" data-quest-start="${escapeHtml(status.activeQuest?.id || "")}" type="button">${icon("play")} Start quest</button>
+          </section>
+        `
+        : ""
+    }
+    ${
+      !activeSession && !status.canStart
+        ? `
+          <section class="mobile-card quest-card">
+            <h3>${cooldown ? "Come back soon" : "Rewards paused"}</h3>
+            <p class="muted-copy">${cooldown ? `Next quest opens in about ${cooldownHours}h.` : "Admin needs to load Quest gift cards."}</p>
+            <button class="button-secondary shimmer-button" data-quest-refresh type="button">Refresh</button>
+          </section>
+        `
+        : ""
+    }
+    ${activeSession && ["IN_PROGRESS", "STARTED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestStage(activeSession) : ""}
+    ${activeSession && String(activeSession.status || "").toUpperCase() === "COMPLETED" ? renderQuestStage(activeSession) : ""}
+    ${activeSession && ["REWARD_ASSIGNED", "REVEALED", "REDEEMED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestRewardCard(reward || {}) : ""}
+    ${renderQuestHistoryList()}
+  `;
+}
+
+function renderAdminQuestPane() {
+  const payload = state.quest.admin || {};
+  const quests = payload.quests || [];
+  const vault = payload.rewardVault || {};
+  const stats = payload.statistics || {};
+  const draft = getQuestDraft();
+  return `
+    <section class="mobile-card quest-admin-hero">
+      <div>
+        <p class="eyebrow">Quest Admin</p>
+        <h3>${Number(vault.available || 0)} cards ready</h3>
+        <p class="muted-copy">${Number(stats.totalCompleted || 0)} completed. ${vault.lowInventory ? "Low inventory." : "Inventory healthy."}</p>
+      </div>
+      <button class="micro-btn" data-tab="settings" type="button">${icon("settings")} Settings</button>
+    </section>
+    <section class="mobile-card">
+      <div class="section-head compact">
+        <div>
+          <h3>${draft.id ? "Edit Quest" : "Create Quest"}</h3>
+          <p class="muted-copy">Answers stay server-side.</p>
+        </div>
+        ${draft.id ? `<button class="text-link" data-admin-quest-new type="button">New</button>` : ""}
+      </div>
+      <form id="admin-quest-form" class="stack-form subtle-form">
+        <input type="hidden" name="id" value="${escapeHtml(draft.id || "")}" />
+        <label>Title <input name="title" value="${escapeHtml(draft.title)}" placeholder="Quest title" required /></label>
+        <label>
+          Category
+          <select name="category">
+            ${["technology", "AI", "IoT", "agriculture", "animals", "plants", "crypto"].map((category) => `<option value="${category}" ${draft.category === category ? "selected" : ""}>${category}</option>`).join("")}
+          </select>
+        </label>
+        <label>Difficulty <input name="difficulty" value="${escapeHtml(draft.difficulty)}" placeholder="easy" /></label>
+        <label>Description <textarea name="description" rows="2">${escapeHtml(draft.description)}</textarea></label>
+        <label>Stages JSON <textarea name="stagesJson" rows="8" class="quest-json-input">${escapeHtml(draft.stagesJson)}</textarea></label>
+        <label class="inline-check"><input name="active" type="checkbox" ${draft.active ? "checked" : ""} /> Active</label>
+        <button class="button-primary shimmer-button" type="submit">${icon("star")} ${draft.id ? "Save quest" : "Create quest"}</button>
+      </form>
+    </section>
+    <section class="mobile-card">
+      <div class="section-head compact">
+        <div>
+          <h3>Quest List</h3>
+          <p class="muted-copy">${quests.length} configured.</p>
+        </div>
+      </div>
+      <div class="compact-list">
+        ${quests.map((quest) => `
+          <div class="asset-card admin-quest-row">
+            <div>
+              <strong>${escapeHtml(quest.title)}</strong>
+              <p class="muted-copy">${escapeHtml(quest.category)} | ${(quest.stages || []).length} stages</p>
+            </div>
+            <div class="admin-quest-actions">
+              <span class="wallet-status-badge ${quest.active ? "wallet-status-success" : "wallet-status-pending"}">${quest.active ? "Active" : "Off"}</span>
+              <button class="icon-btn" data-admin-quest-edit="${escapeHtml(quest.id)}" type="button" title="Edit">${icon("edit")}</button>
+              <button class="icon-btn" data-admin-quest-toggle="${escapeHtml(quest.id)}" data-admin-quest-active="${quest.active ? "false" : "true"}" type="button" title="${quest.active ? "Disable" : "Activate"}">${icon("play")}</button>
+              <button class="icon-btn" data-admin-quest-duplicate="${escapeHtml(quest.id)}" type="button" title="Duplicate">${icon("copyPlus")}</button>
+              <button class="icon-btn danger" data-admin-quest-delete="${escapeHtml(quest.id)}" type="button" title="Delete">${icon("trash")}</button>
+            </div>
+          </div>
+        `).join("") || `<p class="muted-copy">No quests yet.</p>`}
       </div>
     </section>
   `;
@@ -6484,6 +7032,25 @@ function formatWalletRequestStatus(status) {
 function applyRouteTarget() {
   const pathname = String(window.location?.pathname || "");
   const params = new URLSearchParams(window.location?.search || "");
+  if (/^\/quest\/?$/.test(pathname) || params.get("tab") === "quest") {
+    state.activeTab = "quest";
+    state.quest.view = "play";
+    return;
+  }
+  if (/^\/quest\/rewards\/?$/.test(pathname)) {
+    state.activeTab = "quest";
+    state.quest.view = "rewards";
+    return;
+  }
+  if (/^\/quest\/history\/?$/.test(pathname)) {
+    state.activeTab = "quest";
+    state.quest.view = "history";
+    return;
+  }
+  if (/^\/admin\/quests\/?$/.test(pathname) && state.user?.role === "admin") {
+    state.activeTab = "adminQuests";
+    return;
+  }
   if (/^\/admin\/withdrawals\/[^/]+\/?$/.test(pathname) && state.user?.role === "admin") {
     state.activeTab = "history";
     state.routeScrollSection = "finance";
@@ -6731,7 +7298,7 @@ function renderHomePane() {
       ${renderSummaryCard()}
       ${
         state.user.role === "user"
-          ? userHomeContent
+          ? `${renderQuestPromoBanner()}${userHomeContent}`
           : isFuturesMode()
           ? renderFuturesDashboard()
           : renderAdminHomeDashboard()
@@ -6759,6 +7326,8 @@ function renderDashboardShell() {
     settings: renderSettingsPane(),
     signals: renderSignalsPane(),
     history: renderHistoryPane(),
+    quest: renderQuestPane(),
+    adminQuests: renderAdminQuestPane(),
   };
 
   app.innerHTML = `
@@ -6812,6 +7381,12 @@ function renderDashboardShell() {
       } else {
         disconnectSettingsUsersSocket();
       }
+      if (nextTab === "quest") {
+        await withLoading(loadQuestData).catch((error) => showError(error.message));
+      }
+      if (nextTab === "adminQuests") {
+        await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
+      }
     });
   });
 }
@@ -6855,6 +7430,103 @@ function bindDashboardActions() {
     button.addEventListener("click", () => {
       openNotification(button.dataset.notificationOpen);
     });
+  });
+
+  document.querySelectorAll("[data-open-quest]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.activeTab = "quest";
+      if (window.history?.pushState) {
+        window.history.pushState({}, "", "/quest");
+      }
+      render();
+      await refreshQuestData();
+    });
+  });
+
+  document.querySelectorAll("[data-quest-refresh]").forEach((button) => {
+    button.addEventListener("click", refreshQuestData);
+  });
+
+  document.querySelectorAll("[data-quest-start]").forEach((button) => {
+    button.addEventListener("click", () => startQuest(button.dataset.questStart));
+  });
+
+  document.querySelectorAll("[data-quest-answer]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.quest.selectedAnswer = button.dataset.questAnswer || "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-quest-submit-answer]").forEach((button) => {
+    button.addEventListener("click", submitQuestAnswer);
+  });
+
+  document.querySelectorAll("[data-quest-complete]").forEach((button) => {
+    button.addEventListener("click", completeQuestReward);
+  });
+
+  document.querySelectorAll("[data-quest-reveal]").forEach((button) => {
+    button.addEventListener("click", revealQuestReward);
+  });
+
+  document.querySelectorAll("[data-quest-redeem]").forEach((button) => {
+    button.addEventListener("click", redeemQuestReward);
+  });
+
+  document.querySelectorAll("[data-quest-view]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.quest.view = button.dataset.questView || "play";
+      if (window.history?.pushState) {
+        const nextPath = state.quest.view === "rewards"
+          ? "/quest/rewards"
+          : state.quest.view === "history"
+            ? "/quest/history"
+            : "/quest";
+        window.history.pushState({}, "", nextPath);
+      }
+      render();
+      await refreshQuestData();
+    });
+  });
+
+  const adminQuestForm = document.getElementById("admin-quest-form");
+  if (adminQuestForm) {
+    adminQuestForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminQuest(adminQuestForm);
+    });
+  }
+
+  document.querySelectorAll("[data-admin-quest-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const quest = (state.quest.admin?.quests || []).find((item) => item.id === button.dataset.adminQuestEdit);
+      if (quest) {
+        setQuestDraftFromQuest(quest);
+        render();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-admin-quest-new]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.quest.draft = null;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-admin-quest-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      adminQuestAction("toggle", button.dataset.adminQuestToggle, button.dataset.adminQuestActive === "true");
+    });
+  });
+
+  document.querySelectorAll("[data-admin-quest-duplicate]").forEach((button) => {
+    button.addEventListener("click", () => adminQuestAction("duplicate", button.dataset.adminQuestDuplicate));
+  });
+
+  document.querySelectorAll("[data-admin-quest-delete]").forEach((button) => {
+    button.addEventListener("click", () => adminQuestAction("delete", button.dataset.adminQuestDelete));
   });
 
   document.querySelectorAll("[data-list-toggle]").forEach((button) => {
