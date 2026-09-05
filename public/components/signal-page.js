@@ -46,21 +46,27 @@
     renderExchangeBadge,
     title = "Open Trades",
     description = "Select a trade to start P&L from the current market point.",
+    layout = "list",
+    limit = 0,
+    showMore = false,
   }) {
     const openTrades = (trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()));
+    const visibleTrades = limit > 0 ? openTrades.slice(0, limit) : openTrades;
+    const isCarousel = layout === "carousel";
 
     return `
-      <section class="signal-board-card investment-board">
+      <section class="signal-board-card investment-board ${isCarousel ? "home-open-trade-board" : ""}">
         <div class="signal-board-head">
           <div>
             <h4>${title}</h4>
             <p class="muted-copy">${description}</p>
           </div>
+          ${showMore && openTrades.length ? `<button class="text-link" data-tab="signals" type="button">See more</button>` : ""}
         </div>
-        <div class="signal-list open-trade-investment-list">
+        <div class="signal-list open-trade-investment-list ${isCarousel ? "is-carousel" : ""}">
           ${
-            openTrades.length
-              ? openTrades
+            visibleTrades.length
+              ? visibleTrades
                   .map((trade) => {
                     const lifecycleStatus = String(trade.lifecycleStatus || "Open").toUpperCase();
                     const isQueued = lifecycleStatus === "PENDING";

@@ -5905,7 +5905,10 @@ function renderHomeOpenTradeSection() {
         getTradeCurrentMarket,
         renderExchangeBadge,
         title: "Open Trades",
-        description: "Join or stop trades from the live signal board.",
+        description: "Live entries",
+        layout: "carousel",
+        limit: 10,
+        showMore: true,
       })
     : `<section class="mobile-card"><p class="muted-copy">Open trades are loading...</p></section>`;
 }
@@ -6220,9 +6223,9 @@ function renderHistoryPane() {
 function renderHomePane() {
     const userHomeContent = `
       ${renderWalletHistorySection({
-        limit: 10,
+        limit: 3,
         title: "Transactions",
-        description: "Latest deposits and withdrawals.",
+        description: "Recent activity",
         requestsOnly: true,
         showMore: true,
       })}
