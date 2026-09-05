@@ -171,6 +171,7 @@ const state = {
     selectedAnswer: "",
     view: "play",
     loading: false,
+    feedback: null,
     draft: null,
   },
   socket: null,
@@ -205,6 +206,7 @@ let signalChartRefreshTimer = null;
 let tradeSymbolRefreshTimer = null;
 let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
+let questCountdownTimer = null;
 const seenSignalIds = new Set();
 
 function normalizeUserPayload(user) {
@@ -535,6 +537,43 @@ function showError(message) {
 function clearError() {
   state.modalError = null;
   render();
+}
+
+function syncQuestCountdownTimer() {
+  const shouldTick = !!(
+    state.user?.role === "user" &&
+    state.activeTab === "quest" &&
+    !state.quest.status?.activeSession &&
+    Number(state.quest.status?.cooldownRemainingMs || 0) > 0
+  );
+  if (!shouldTick) {
+    if (questCountdownTimer) {
+      window.clearInterval(questCountdownTimer);
+      questCountdownTimer = null;
+    }
+    return;
+  }
+  if (questCountdownTimer) {
+    return;
+  }
+  questCountdownTimer = window.setInterval(() => {
+    if (!state.quest.status) {
+      syncQuestCountdownTimer();
+      return;
+    }
+    const nextMs = Math.max(0, Number(state.quest.status.cooldownRemainingMs || 0) - 1000);
+    state.quest.status = {
+      ...state.quest.status,
+      cooldownRemainingMs: nextMs,
+    };
+    if (nextMs <= 0) {
+      window.clearInterval(questCountdownTimer);
+      questCountdownTimer = null;
+      void refreshQuestData();
+      return;
+    }
+    render();
+  }, 1000);
 }
 
 function showActionModal(modal) {
@@ -4378,6 +4417,7 @@ async function startQuest(questId) {
       activeSession: payload.session,
     };
     state.quest.selectedAnswer = "";
+    state.quest.feedback = null;
     await loadQuestData();
     showNotice("Quest started");
     render();
@@ -4397,11 +4437,17 @@ async function submitQuestAnswer() {
       body: JSON.stringify({ answer }),
     });
     if (!payload.correct) {
-      showError(payload.message || "Try again.");
+      state.quest.feedback = { type: "wrong", text: payload.message || "Try again." };
+      state.quest.selectedAnswer = "";
+      render();
       return;
     }
     state.quest.selectedAnswer = "";
     await loadQuestData();
+    state.quest.feedback = {
+      type: "correct",
+      text: payload.completed ? "Complete" : "Correct",
+    };
     if (payload.completed) {
       showNotice("Quest complete. Unlock your reward.");
     }
@@ -6306,19 +6352,14 @@ function renderQuestPromoBanner() {
     return "";
   }
   const status = state.quest.status || {};
-  const count = Number(status.rewardPool?.available || 0);
   const cooldown = Number(status.cooldownRemainingMs || 0);
   const cooldownHours = cooldown > 0 ? Math.ceil(cooldown / (60 * 60 * 1000)) : 0;
-  const label = status.canStart ? "Play now" : cooldownHours ? `${cooldownHours}h left` : count ? "Resume" : "Rewards loading";
+  const label = status.canStart ? "Play now" : cooldownHours ? `${cooldownHours}h left` : status.activeSession ? "Resume" : "Check";
   return `
-    <section class="quest-promo-card">
-      <div>
-        <p class="eyebrow">Netrue Quest</p>
-        <h3>Play to win gift cards</h3>
-        <p>${count ? `${count} rewards live` : "Fresh rewards will appear here."}</p>
-      </div>
-      <button class="micro-btn primary" data-open-quest type="button">${icon("play")} ${label}</button>
-    </section>
+    <button class="quest-ad-card" data-open-quest type="button" aria-label="Open Netrue Quest">
+      <img src="/netrue-quest-ad.png" alt="Netrue Quest. Play to win Netrue gift cards." />
+      <span>${label}</span>
+    </button>
   `;
 }
 
@@ -6326,7 +6367,15 @@ function renderQuestRewardCard(reward = {}) {
   const revealed = !!reward.code;
   const used = ["USED", "REDEEMED"].includes(String(reward.status || "").toUpperCase());
   return `
+    <section class="quest-congrats-panel">
+      <span>${icon("star")}</span>
+      <strong>Congratulations</strong>
+      <small>Reward unlocked</small>
+    </section>
     <div class="quest-reward-card ${revealed ? "revealed" : ""}">
+      <div class="quest-ribbon ${revealed ? "open" : ""}">
+        <span>${revealed ? "Prize revealed" : "Pull ribbon"}</span>
+      </div>
       <div>
         <p class="eyebrow">Reward</p>
         <strong>${formatCurrencyAmount(reward.amount || "0", reward.currency || "NGN")}</strong>
@@ -6353,11 +6402,12 @@ function renderQuestRewardCard(reward = {}) {
 
 function renderQuestStage(session) {
   const stage = session?.currentStage;
+  const feedback = state.quest.feedback || null;
   if (!stage) {
     return `
-      <section class="mobile-card quest-card">
+      <section class="mobile-card quest-card quest-card-win">
+        <div class="quest-win-burst">${icon("star")}</div>
         <h3>Quest complete</h3>
-        <p class="muted-copy">Your reward is waiting.</p>
         <button class="button-primary shimmer-button" data-quest-complete type="button">${icon("gift")} Unlock reward</button>
       </section>
     `;
@@ -6368,12 +6418,13 @@ function renderQuestStage(session) {
     : (stage.options || []);
   const needsFreeAnswer = ["matching", "sequence"].includes(stage.type) || !choiceOptions.length;
   return `
-    <section class="mobile-card quest-card">
+    <section class="mobile-card quest-card quest-game-card ${feedback ? `quest-feedback-${feedback.type}` : ""}">
       <div class="quest-stage-meta">
         <span>${session.currentStageIndex + 1}/${session.totalStages}</span>
         <span>${escapeHtml(stage.type || "quiz")}</span>
       </div>
       <h3>${escapeHtml(stage.prompt || "Quest stage")}</h3>
+      ${feedback ? `<div class="quest-feedback-label">${escapeHtml(feedback.text || "")}</div>` : ""}
       ${
         needsFreeAnswer
           ? `<textarea id="quest-free-answer-input" class="quest-answer-input" rows="3" placeholder="${stage.type === "sequence" ? "A, B, C" : stage.type === "matching" ? "{\"A\":\"B\"}" : "Answer"}">${escapeHtml(selected)}</textarea>`
@@ -6388,6 +6439,39 @@ function renderQuestStage(session) {
           `
       }
       <button class="button-primary shimmer-button" data-quest-submit-answer type="button" ${selected || needsFreeAnswer ? "" : "disabled"}>${icon("play")} Submit</button>
+    </section>
+  `;
+}
+
+function formatCountdownTime(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(Number(ms || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function renderQuestCountdownCard(ms) {
+  return `
+    <section class="quest-countdown-screen">
+      <div class="quest-countdown-ring">
+        <span>${formatCountdownTime(ms)}</span>
+      </div>
+      <h2>More quest will be available for you after</h2>
+      <button class="button-secondary shimmer-button" data-quest-refresh type="button">Refresh</button>
+    </section>
+  `;
+}
+
+function renderQuestUnavailablePopup() {
+  return `
+    <section class="quest-unavailable-screen">
+      <div class="quest-unavailable-card">
+        <span>${icon("lock")}</span>
+        <h2>Quest not available now</h2>
+        <p>Check back later.</p>
+        <button class="button-secondary shimmer-button" data-quest-refresh type="button">Refresh</button>
+      </div>
     </section>
   `;
 }
@@ -6463,13 +6547,17 @@ function renderQuestPane() {
   const activeSession = status.activeSession;
   const reward = state.quest.rewards.find((item) => item.id === status.reward?.id) || status.reward;
   const cooldown = Number(status.cooldownRemainingMs || 0);
-  const cooldownHours = Math.ceil(cooldown / (60 * 60 * 1000));
+  if (!activeSession && cooldown > 0) {
+    return renderQuestCountdownCard(cooldown);
+  }
+  if (!activeSession && !status.canStart && !cooldown) {
+    return renderQuestUnavailablePopup();
+  }
   return `
     <section class="quest-world">
       <div class="quest-hero">
         <p class="eyebrow">Netrue Quest</p>
-        <h2>Play. Scratch. Credit.</h2>
-        <p>${status.rewardPool?.available || 0} gift cards ready.</p>
+        <h2>Choose. Win. Credit.</h2>
       </div>
       <div class="quest-world-grid">
         <span>Tech</span><span>AI</span><span>Farm</span><span>Crypto</span>
@@ -6486,17 +6574,6 @@ function renderQuestPane() {
             <h3>${escapeHtml(status.activeQuest?.title || "Daily Quest")}</h3>
             <p class="muted-copy">${escapeHtml(status.activeQuest?.description || "One play every 12 hours.")}</p>
             <button class="button-primary shimmer-button" data-quest-start="${escapeHtml(status.activeQuest?.id || "")}" type="button">${icon("play")} Start quest</button>
-          </section>
-        `
-        : ""
-    }
-    ${
-      !activeSession && !status.canStart
-        ? `
-          <section class="mobile-card quest-card">
-            <h3>${cooldown ? "Come back soon" : "Rewards paused"}</h3>
-            <p class="muted-copy">${cooldown ? `Next quest opens in about ${cooldownHours}h.` : "Admin needs to load Quest gift cards."}</p>
-            <button class="button-secondary shimmer-button" data-quest-refresh type="button">Refresh</button>
           </section>
         `
         : ""
@@ -7454,9 +7531,18 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-quest-answer]").forEach((button) => {
     button.addEventListener("click", () => {
       state.quest.selectedAnswer = button.dataset.questAnswer || "";
+      state.quest.feedback = null;
       render();
     });
   });
+
+  const questFreeAnswerInput = document.getElementById("quest-free-answer-input");
+  if (questFreeAnswerInput) {
+    questFreeAnswerInput.addEventListener("input", () => {
+      state.quest.selectedAnswer = questFreeAnswerInput.value;
+      state.quest.feedback = null;
+    });
+  }
 
   document.querySelectorAll("[data-quest-submit-answer]").forEach((button) => {
     button.addEventListener("click", submitQuestAnswer);
@@ -8620,6 +8706,7 @@ function render() {
     return;
   }
   renderDashboardShell();
+  syncQuestCountdownTimer();
   bindTradeTicketActions();
   refreshWatchlistDom();
   refreshTradeDom();

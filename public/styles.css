@@ -2918,7 +2918,64 @@ body[data-theme="dark"] .mirror-guide-pill {
   margin-right: 6px;
 }
 
-.quest-promo-card,
+.quest-ad-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #041712;
+  box-shadow: 0 22px 70px rgba(4, 23, 18, 0.24);
+  cursor: pointer;
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
+.quest-ad-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 20%, rgba(255, 255, 255, 0.22) 45%, transparent 65%);
+  transform: translateX(-120%);
+  animation: questAdShine 4.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.quest-ad-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1906 / 845;
+  object-fit: cover;
+  transform: scale(1.01);
+  transition: transform 220ms ease;
+}
+
+.quest-ad-card:hover img,
+.quest-ad-card:focus-visible img {
+  transform: scale(1.035);
+}
+
+.quest-ad-card span {
+  position: absolute;
+  right: 4.5%;
+  bottom: 10%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #17d46f, #0b8f49);
+  color: #ffffff;
+  font-size: clamp(0.8rem, 2.4vw, 1rem);
+  font-weight: 1000;
+  letter-spacing: 0;
+  box-shadow: 0 0 30px rgba(30, 255, 128, 0.52);
+  animation: questButtonPulse 1.7s ease-in-out infinite;
+}
+
 .quest-world,
 .quest-admin-hero {
   display: flex;
@@ -2935,16 +2992,13 @@ body[data-theme="dark"] .mirror-guide-pill {
   box-shadow: var(--shadow);
 }
 
-.quest-promo-card h3,
 .quest-world h2,
 .quest-admin-hero h3,
-.quest-promo-card p,
 .quest-world p,
 .quest-admin-hero p {
   margin: 0;
 }
 
-.quest-promo-card .eyebrow,
 .quest-world .eyebrow,
 .quest-admin-hero .eyebrow {
   color: rgba(255, 255, 255, 0.68);
@@ -2953,6 +3007,26 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-world {
   display: grid;
   gap: 14px;
+  position: relative;
+  overflow: hidden;
+  min-height: 210px;
+  background:
+    radial-gradient(circle at 82% 18%, rgba(250, 204, 21, 0.28), transparent 26%),
+    radial-gradient(circle at 12% 85%, rgba(22, 196, 127, 0.28), transparent 28%),
+    linear-gradient(145deg, #041712, #0f2f25 52%, #071019);
+}
+
+.quest-world::before {
+  content: "";
+  position: absolute;
+  inset: -35%;
+  background: conic-gradient(from 90deg, transparent, rgba(34, 197, 94, 0.18), transparent, rgba(250, 204, 21, 0.12), transparent);
+  animation: questWorldSpin 12s linear infinite;
+}
+
+.quest-world > * {
+  position: relative;
+  z-index: 1;
 }
 
 .quest-world-grid,
@@ -2980,6 +3054,20 @@ body[data-theme="dark"] .mirror-guide-pill {
   background: rgba(255, 255, 255, 0.12);
   scroll-snap-align: start;
   font-weight: 900;
+  backdrop-filter: blur(10px);
+  animation: questFloat 3.2s ease-in-out infinite;
+}
+
+.quest-world-grid span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.quest-world-grid span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.quest-world-grid span:nth-child(4) {
+  animation-delay: 0.6s;
 }
 
 .quest-pill-nav button,
@@ -3001,6 +3089,34 @@ body[data-theme="dark"] .mirror-guide-pill {
   gap: 14px;
 }
 
+.quest-game-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(34, 197, 94, 0.24);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, #16c47f 8%), var(--surface));
+  animation: questCardEnter 260ms ease both;
+}
+
+.quest-card-win {
+  place-items: center;
+  min-height: 280px;
+  text-align: center;
+}
+
+.quest-win-burst,
+.quest-congrats-panel span {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #facc15, #16c47f);
+  color: #ffffff;
+  box-shadow: 0 0 38px rgba(250, 204, 21, 0.42);
+  animation: questCelebrate 1.8s ease-in-out infinite;
+}
+
 .quest-stage-meta {
   display: flex;
   justify-content: space-between;
@@ -3019,6 +3135,13 @@ body[data-theme="dark"] .mirror-guide-pill {
   min-height: 52px;
   padding: 10px;
   text-align: left;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.quest-option:hover,
+.quest-option:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--accent-2);
 }
 
 .quest-option.active {
@@ -3026,16 +3149,44 @@ body[data-theme="dark"] .mirror-guide-pill {
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
+.quest-feedback-label {
+  justify-self: start;
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: #ffffff;
+  font-weight: 1000;
+  animation: questFeedbackPop 260ms ease both;
+}
+
+.quest-feedback-correct {
+  animation: questCorrectPulse 520ms ease both;
+}
+
+.quest-feedback-correct .quest-feedback-label {
+  background: #16a34a;
+}
+
+.quest-feedback-wrong {
+  animation: questWrongShake 360ms ease both;
+}
+
+.quest-feedback-wrong .quest-feedback-label {
+  background: #dc2626;
+}
+
 .quest-reward-card {
+  position: relative;
   display: grid;
   gap: 14px;
-  padding: 18px;
+  padding: 54px 18px 18px;
   border-radius: 20px;
   color: #ffffff;
   background:
     radial-gradient(circle at 20% 20%, rgba(22, 196, 127, 0.35), transparent 34%),
     linear-gradient(135deg, #111827, #254064);
   box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: questRewardEnter 520ms cubic-bezier(.18,.89,.32,1.28) both;
 }
 
 .quest-reward-card p,
@@ -3051,6 +3202,52 @@ body[data-theme="dark"] .mirror-guide-pill {
   border-radius: 16px;
   background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.24) 0 8px, rgba(255, 255, 255, 0.1) 8px 16px);
   color: rgba(255, 255, 255, 0.86);
+  font-weight: 900;
+  animation: questScratchGlow 1.6s ease-in-out infinite;
+}
+
+.quest-ribbon {
+  position: absolute;
+  top: 14px;
+  left: -10px;
+  right: -10px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(90deg, #facc15, #ffffff 45%, #f59e0b);
+  color: #102014;
+  font-weight: 1000;
+  transform: rotate(-2deg) translateY(0);
+  box-shadow: 0 8px 24px rgba(250, 204, 21, 0.28);
+  animation: questRibbonIdle 1.8s ease-in-out infinite;
+}
+
+.quest-ribbon.open {
+  animation: questRibbonOpen 680ms ease both;
+}
+
+.quest-congrats-panel {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 178px;
+  padding: 22px;
+  border-radius: 22px;
+  color: #ffffff;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(250, 204, 21, 0.28), transparent 28%),
+    linear-gradient(135deg, #062219, #0b5f39);
+  text-align: center;
+  box-shadow: var(--shadow);
+  animation: questCardEnter 360ms ease both;
+}
+
+.quest-congrats-panel strong {
+  font-size: clamp(1.4rem, 6vw, 2.2rem);
+}
+
+.quest-congrats-panel small {
+  color: rgba(255, 255, 255, 0.72);
   font-weight: 900;
 }
 
@@ -3089,11 +3286,248 @@ body[data-theme="dark"] .mirror-guide-pill {
   resize: vertical;
 }
 
+.quest-countdown-screen,
+.quest-unavailable-screen {
+  display: grid;
+  place-items: center;
+  min-height: min(68vh, 620px);
+  padding: 20px;
+}
+
+.quest-countdown-screen {
+  gap: 14px;
+  color: #ffffff;
+  text-align: center;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 50% 12%, rgba(250, 204, 21, 0.32), transparent 28%),
+    linear-gradient(155deg, #041712, #103b2c 55%, #071019);
+  box-shadow: var(--shadow);
+}
+
+.quest-countdown-ring {
+  display: grid;
+  place-items: center;
+  width: min(72vw, 300px);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background:
+    conic-gradient(from 0deg, #16c47f, #facc15, #16c47f),
+    radial-gradient(circle, rgba(255, 255, 255, 0.12), transparent 64%);
+  box-shadow: 0 0 52px rgba(22, 196, 127, 0.36);
+  animation: questCountdownSpin 5s linear infinite;
+}
+
+.quest-countdown-ring span {
+  display: grid;
+  place-items: center;
+  width: 84%;
+  height: 84%;
+  border-radius: inherit;
+  background: #071019;
+  font-family: var(--number-font);
+  font-size: clamp(2rem, 11vw, 3.8rem);
+  font-weight: 1000;
+  animation: questCountdownCounterSpin 5s linear infinite;
+}
+
+.quest-countdown-screen h2,
+.quest-unavailable-card h2 {
+  margin: 0;
+  max-width: 520px;
+  font-size: clamp(1.25rem, 6vw, 2.2rem);
+  letter-spacing: 0;
+}
+
+.quest-unavailable-card {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  width: min(100%, 520px);
+  padding: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 26px;
+  color: #ffffff;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.1), transparent 30%),
+    linear-gradient(145deg, #121826, #071019);
+  box-shadow: var(--shadow);
+  text-align: center;
+  animation: questCardEnter 260ms ease both;
+}
+
+.quest-unavailable-card > span {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.quest-unavailable-card p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 900;
+}
+
+@keyframes questAdShine {
+  0%,
+  48% {
+    transform: translateX(-120%);
+  }
+  72%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes questButtonPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes questWorldSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes questFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes questCardEnter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes questCorrectPulse {
+  0% {
+    box-shadow: 0 0 0 rgba(22, 163, 74, 0);
+  }
+  45% {
+    box-shadow: 0 0 0 8px rgba(22, 163, 74, 0.16);
+  }
+  100% {
+    box-shadow: 0 0 0 rgba(22, 163, 74, 0);
+  }
+}
+
+@keyframes questWrongShake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  60% {
+    transform: translateX(5px);
+  }
+}
+
+@keyframes questFeedbackPop {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes questCelebrate {
+  0%,
+  100% {
+    transform: rotate(-5deg) scale(1);
+  }
+  50% {
+    transform: rotate(6deg) scale(1.08);
+  }
+}
+
+@keyframes questRewardEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes questScratchGlow {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.16);
+  }
+}
+
+@keyframes questRibbonIdle {
+  0%,
+  100% {
+    transform: rotate(-2deg) translateY(0);
+  }
+  50% {
+    transform: rotate(-2deg) translateY(3px);
+  }
+}
+
+@keyframes questRibbonOpen {
+  from {
+    transform: rotate(-2deg) translateY(0) scaleX(1);
+  }
+  to {
+    transform: rotate(0) translateY(-42px) scaleX(1.08);
+  }
+}
+
+@keyframes questCountdownSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes questCountdownCounterSpin {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
 @media (max-width: 520px) {
-  .quest-promo-card,
   .quest-admin-hero {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .quest-ad-card span {
+    right: 5%;
+    bottom: 8%;
+    min-height: 32px;
+    padding: 6px 12px;
   }
 
   .quest-option-grid {
