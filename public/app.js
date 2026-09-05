@@ -2336,6 +2336,28 @@ function renderActionModal() {
     `;
   }
 
+  if (state.actionModal.type === "admin-users") {
+    const totalUsers = Number(state.users?.length || 0);
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card admin-users-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Users</p>
+          <h3>${totalUsers.toLocaleString()} registered</h3>
+          <p class="modal-text">Select a user row to manage balance, bonus, email, trade access, messages, and password.</p>
+          <div class="admin-users-table-head">
+            <span>User</span>
+            <span>Balance</span>
+            <span>Edit</span>
+          </div>
+          <div class="admin-users-modal-list">
+            ${state.users.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No users linked yet.</p>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "admin-balance") {
     const user = state.users.find((item) => item.id === state.actionModal.userId);
     if (!user) {
@@ -4533,6 +4555,67 @@ function renderSummaryCard() {
   `;
 }
 
+function renderAdminHomeDashboard() {
+  const stats = state.financialDashboard || {};
+  const pendingDeposits = Number(stats.pendingDeposits || 0);
+  const pendingWithdrawals = Number(stats.pendingWithdrawals || 0);
+  const openTrades = (state.trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase())).length;
+  const exchangeLabel = getExchangeLabel(getAdminDashboardExchange());
+  return `
+    <section class="admin-dashboard-rail" aria-label="Admin overview">
+      <button class="admin-stat-tile" data-admin-users-open type="button">
+        <span class="card-icon">${icon("profile")}</span>
+        <strong>${Number(stats.totalUsers || state.users?.length || 0).toLocaleString()}</strong>
+        <small>Users</small>
+      </button>
+      <button class="admin-stat-tile" data-tab="history" type="button">
+        <span class="card-icon">${icon("bank")}</span>
+        <strong>${pendingDeposits.toLocaleString()}</strong>
+        <small>Deposits</small>
+      </button>
+      <button class="admin-stat-tile" data-tab="history" type="button">
+        <span class="card-icon">${icon("download")}</span>
+        <strong>${pendingWithdrawals.toLocaleString()}</strong>
+        <small>Withdrawals</small>
+      </button>
+      <div class="admin-stat-tile passive">
+        <span class="card-icon">${icon("signals")}</span>
+        <strong>${openTrades.toLocaleString()}</strong>
+        <small>Open trades</small>
+      </div>
+    </section>
+    <section class="admin-dashboard-section admin-trade-desk">
+      <div class="section-head">
+        <div>
+          <h3>Trade Desk</h3>
+          <p class="muted-copy">${exchangeLabel} spot execution</p>
+        </div>
+      </div>
+      ${renderTradeTicket()}
+    </section>
+    <div class="admin-dashboard-columns">
+      <section class="admin-dashboard-section">
+        <div class="section-head">
+          <div>
+            <h3>Portfolio</h3>
+            <p class="muted-copy">Live balances</p>
+          </div>
+        </div>
+        ${renderBalancesSection()}
+      </section>
+      <section class="admin-dashboard-section">
+        <div class="section-head">
+          <div>
+            <h3>Orders</h3>
+            <p class="muted-copy">Open queue</p>
+          </div>
+        </div>
+        <div data-home-trades-host>${renderOpenOrdersSection()}</div>
+      </section>
+    </div>
+  `;
+}
+
 function renderTradeTicket() {
   const summary = getCurrentTradeSummary();
   const livePositive = Number(summary.live.changePercent || 0) >= 0;
@@ -5244,9 +5327,12 @@ function renderAdminUserCard(user) {
           <p class="muted-copy">${user.email}</p>
           <div class="exchange-pill-row">${renderExchangeBadgeList(connectedExchanges)}</div>
         </div>
-        <div class="asset-values">
-          <strong>${formatUsdtUnit(liveUsdt)}</strong>
-          <p class="muted-copy">${formatNaira(liveNgn)}</p>
+        <div class="admin-user-summary-actions">
+          <div class="asset-values">
+            <strong>${formatUsdtUnit(liveUsdt)}</strong>
+            <p class="muted-copy">${formatNaira(liveNgn)}</p>
+          </div>
+          <button class="micro-btn icon-only-btn" data-admin-balance-open="${user.id}" type="button" aria-label="Edit balance" title="Edit balance">${icon("edit")}</button>
         </div>
       </summary>
       <div class="trade-disclosure-body">
@@ -5263,9 +5349,6 @@ function renderAdminUserCard(user) {
             <span>Locked</span>
             <strong>${formatUsdtUnit(usdtWallet.lockedBalance)} / ${formatNaira(ngnWallet.lockedBalance)}</strong>
           </div>
-        </div>
-        <div class="trade-actions-inline admin-user-actions">
-          <button class="micro-btn icon-only-btn" data-admin-balance-open="${user.id}" type="button" aria-label="Edit balance" title="Edit balance">${icon("edit")}</button>
         </div>
         <div class="trade-detail-lines">
           <p class="muted-copy">${user.mirrorEnabled ? "Mirror active" : "Mirror off"} | ${getExchangeLabel(user.activeExchange || "bybit")} | ${user.createdAt ? new Date(user.createdAt).toLocaleDateString() : ""}</p>
@@ -5631,6 +5714,48 @@ function renderAdminGiftCardsPanel() {
   `;
 }
 
+function renderAdminSettingsOverview() {
+  if (state.user.role !== "admin") {
+    return "";
+  }
+  const totalUsers = Number(state.users?.length || 0);
+  const pendingDeposits = (state.adminDeposits || []).filter((item) => String(item.status || "").toUpperCase() === "PENDING").length;
+  const pendingWithdrawals = (state.adminWithdrawals || []).filter((item) => ["PENDING", "PROCESSING"].includes(String(item.status || "").toUpperCase())).length;
+  const activeGiftCards = (state.adminGiftCards || []).filter((card) => String(card.status || "").toUpperCase() !== "USED").length;
+  return `
+    <section class="mobile-card settings-card admin-settings-overview">
+      <div class="section-head">
+        <div>
+          <h3>Admin Controls</h3>
+          <p class="muted-copy">Fast access</p>
+        </div>
+      </div>
+      <div class="admin-control-grid">
+        <button class="admin-control-tile" data-admin-users-open type="button">
+          <span class="card-icon">${icon("profile")}</span>
+          <strong>${totalUsers.toLocaleString()}</strong>
+          <small>Users</small>
+        </button>
+        <button class="admin-control-tile" data-tab="history" type="button">
+          <span class="card-icon">${icon("bank")}</span>
+          <strong>${(pendingDeposits + pendingWithdrawals).toLocaleString()}</strong>
+          <small>Finance</small>
+        </button>
+        <div class="admin-control-tile passive">
+          <span class="card-icon">${icon("gift")}</span>
+          <strong>${activeGiftCards.toLocaleString()}</strong>
+          <small>Gift cards</small>
+        </div>
+        <div class="admin-control-tile passive">
+          <span class="card-icon">${icon("settings")}</span>
+          <strong>${getExchangeLabel(getAdminDashboardExchange())}</strong>
+          <small>Exchange</small>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderAdminFinancePanel() {
   if (state.user.role !== "admin") {
     return "";
@@ -5643,8 +5768,8 @@ function renderAdminFinancePanel() {
       ${state.loadingAdminFinance ? renderSectionLoadingOverlay("Loading finance queue", "Checking pending deposits and withdrawals") : ""}
       <div class="section-head">
         <div>
-          <h3>Finance</h3>
-          <p class="muted-copy">Approve, review, or clear records.</p>
+          <h3>Finance History</h3>
+          <p class="muted-copy">Approve, review, clear records.</p>
         </div>
       </div>
       <div class="history-toolbar admin-finance-toolbar">
@@ -5655,7 +5780,6 @@ function renderAdminFinancePanel() {
         </div>
       </div>
       <div class="card-list">
-        ${renderAdminGiftCardsPanel()}
         <div>
           <p class="eyebrow">Deposits</p>
           ${(state.adminDeposits || []).map(renderAdminDepositCard).join("") || `<p class="muted-copy">No deposits yet.</p>`}
@@ -5837,23 +5961,29 @@ function renderSettingsPane() {
           `
           : ""
       }
-      ${renderAdminFinancePanel()}
-      <section class="mobile-card settings-card">
-        <div class="section-head">
-          <div>
-            <h3>${state.user.role === "admin" ? "Registered Users" : "Account Summary"}</h3>
-            <p class="muted-copy">${state.user.role === "admin" ? "All registered users appear below whether they have connected an exchange or not." : "Your linked account and mirror status."}</p>
-            <p class="muted-copy">${settingsLiveLabel}</p>
-          </div>
-        </div>
-        <div class="card-list">
-          ${
-            state.user.role === "admin"
-              ? state.users.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No users linked yet.</p>`
-              : renderCurrentUserWalletSummary()
-          }
-        </div>
-      </section>
+      ${
+        state.user.role === "admin"
+          ? `
+            ${renderAdminSettingsOverview()}
+            <section class="mobile-card settings-card admin-gift-card-section">
+              ${renderAdminGiftCardsPanel()}
+            </section>
+          `
+          : `
+            <section class="mobile-card settings-card">
+              <div class="section-head">
+                <div>
+                  <h3>Account Summary</h3>
+                  <p class="muted-copy">Your linked account and mirror status.</p>
+                  <p class="muted-copy">${settingsLiveLabel}</p>
+                </div>
+              </div>
+              <div class="card-list">
+                ${renderCurrentUserWalletSummary()}
+              </div>
+            </section>
+          `
+      }
       <section class="mobile-card settings-card" data-section="support">
         <div class="section-head">
           <div>
@@ -6029,7 +6159,7 @@ function applyRouteTarget() {
   const pathname = String(window.location?.pathname || "");
   const params = new URLSearchParams(window.location?.search || "");
   if (/^\/admin\/withdrawals\/[^/]+\/?$/.test(pathname) && state.user?.role === "admin") {
-    state.activeTab = "settings";
+    state.activeTab = "history";
     state.routeScrollSection = "finance";
     return;
   }
@@ -6184,6 +6314,7 @@ function renderHistoryPane() {
   const allSelected = !!clearableTrades.length && selectedCount === clearableTrades.length;
   return `
     ${renderProfitLossReportCard()}
+    ${canClearHistory ? renderAdminFinancePanel() : ""}
     <section class="mobile-card${loadingClass(state.loadingTrades)}">
       ${state.loadingTrades ? renderSectionLoadingOverlay("Loading history", "Syncing your saved trade timeline") : ""}
       <div class="section-head">
@@ -6240,11 +6371,7 @@ function renderHomePane() {
           ? userHomeContent
           : isFuturesMode()
           ? renderFuturesDashboard()
-          : `
-            ${state.user.role === "admin" ? renderTradeTicket() : ""}
-            ${renderBalancesSection()}
-            <div data-home-trades-host>${renderOpenOrdersSection()}</div>
-          `
+          : renderAdminHomeDashboard()
       }
     `;
 }
@@ -6461,6 +6588,12 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-admin-balance-open]").forEach((button) => {
     button.addEventListener("click", () => {
       showActionModal({ type: "admin-balance", userId: button.dataset.adminBalanceOpen });
+    });
+  });
+
+  document.querySelectorAll("[data-admin-users-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      showActionModal({ type: "admin-users" });
     });
   });
 
