@@ -2589,7 +2589,7 @@ function renderDashboardTopBar() {
             ? `
               <div class="notification-panel">
                 ${notifications
-                  .slice(0, 8)
+                  .slice(0, 30)
                   .map(
                     (item) => `
                       <button class="notification-item ${item.readAt ? "read" : ""}" data-notification-open="${escapeHtml(item.id)}" type="button">
@@ -2744,7 +2744,7 @@ function renderActionModal() {
   }
 
   if (state.actionModal.type === "message-reply") {
-    const notification = (state.notifications || []).find((item) => item.id === state.actionModal.notificationId);
+    const notification = state.actionModal.notification || (state.notifications || []).find((item) => item.id === state.actionModal.notificationId);
     if (!notification) {
       return "";
     }
@@ -2982,6 +2982,7 @@ function renderActionModal() {
           <span>${escapeHtml(selectedSavedBank.bankName || "Bank")}</span>
           <strong>${escapeHtml(selectedSavedBank.accountName || "")}</strong>
           <code>${escapeHtml(selectedSavedBank.maskedAccountNumber || selectedSavedBank.accountNumber || "")}</code>
+          ${renderBankNameWarning(selectedSavedBank)}
         </div>
       `
       : "";
@@ -3010,6 +3011,7 @@ function renderActionModal() {
               <span>${escapeHtml(resolvedBank.bankName || "Bank")}</span>
               <strong>${escapeHtml(resolvedBank.accountName || "")}</strong>
               <code>${escapeHtml(resolvedBank.maskedAccountNumber || resolvedBank.accountNumber || "")}</code>
+              ${renderBankNameWarning(resolvedBank)}
             </div>
           `
           : `<p class="muted-copy">Resolve account to continue.</p>`
@@ -4527,6 +4529,22 @@ async function updateAdminMirror(userId, enabled) {
   }).catch((error) => showError(error.message));
 }
 
+async function clearAdminUserReview(userId) {
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/users/${encodeURIComponent(userId)}/fraud-review/clear`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (payload.user?.id) {
+      updateUserInStateUsers(payload.user);
+    } else {
+      updateUserInStateUsers({ id: userId, fraudReview: payload.fraudReview || { status: "CLEARED" } });
+    }
+    await loadDashboardData();
+    showNotice("Review cleared");
+  }).catch((error) => showError(error.message));
+}
+
 async function deleteAdminUser(userId, name) {
   if (!window.confirm(`Delete ${name}? This removes the user account and signs the user out everywhere.`)) {
     return;
@@ -4851,24 +4869,30 @@ async function resolveSelectedBankAccount() {
         saveBankAccount: document.getElementById("wallet-save-bank-input")?.checked !== false,
       }),
     });
-    state.resolvedBankAccount = payload.bankAccount;
-    const nextBankAccounts = payload.saved && payload.bankAccount?.id
+    const resolvedAccount = {
+      ...(payload.bankAccount || {}),
+      nameMatch: payload.nameMatch ?? payload.bankAccount?.nameMatch,
+      nameMatchWarning: payload.nameMatchWarning || payload.bankAccount?.nameMatchWarning || "",
+      matchedNameCount: payload.matchedNameCount ?? payload.bankAccount?.matchedNameCount,
+    };
+    state.resolvedBankAccount = resolvedAccount;
+    const nextBankAccounts = payload.saved && resolvedAccount?.id
       ? [
-          payload.bankAccount,
+          resolvedAccount,
           ...((state.financialDashboard?.bankAccounts || []).filter(
-            (account) => account.id !== payload.bankAccount.id
+            (account) => account.id !== resolvedAccount.id
           )),
         ]
       : (state.financialDashboard?.bankAccounts || []);
     state.financialDashboard = {
       ...(state.financialDashboard || {}),
-      bankAccount: payload.saved ? payload.bankAccount : state.financialDashboard?.bankAccount,
+      bankAccount: payload.saved ? resolvedAccount : state.financialDashboard?.bankAccount,
       bankAccounts: nextBankAccounts,
     };
     state.actionModal = {
       ...state.actionModal,
       bankMode: payload.saved ? "saved" : "new",
-      bankAccountId: payload.saved ? payload.bankAccount?.id || "" : "",
+      bankAccountId: payload.saved ? resolvedAccount?.id || "" : "",
       bankCode,
     };
     render();
@@ -5093,6 +5117,26 @@ function updateWalletEquivalentPreview(amountInput, currency) {
   preview.textContent = equivalent ? `Equivalent: ${equivalent}` : "Equivalent: --";
 }
 
+function renderBankNameWarning(account) {
+  if (!account || (account.nameMatch !== false && !account.nameMatchWarning)) {
+    return "";
+  }
+  return `<p class="bank-name-warning">${escapeHtml(account.nameMatchWarning || "Resolved account name does not match your registered name. Withdrawal may be reviewed.")}</p>`;
+}
+
+function getTabRoute(tab) {
+  if (tab === "quest") {
+    return "/?tab=quest";
+  }
+  if (tab === "adminQuests") {
+    return "/?tab=adminQuests";
+  }
+  if (["home", "settings", "signals", "history"].includes(tab)) {
+    return `/?tab=${encodeURIComponent(tab)}`;
+  }
+  return "/?tab=home";
+}
+
 function getNotificationTarget(notification) {
   const type = String(notification?.type || "").toUpperCase();
   const entityType = String(notification?.entityType || "").toUpperCase();
@@ -5120,18 +5164,28 @@ async function openNotification(notificationId) {
       item.id === notificationId
         ? { ...item, readAt: payload.notification?.readAt || new Date().toISOString() }
         : item
-    );
+    ).filter((item) => item.id !== notificationId);
   } catch (error) {
     showError(error.message);
     return;
   }
   state.showNotifications = false;
   if (target.modal === "message-reply") {
-    state.actionModal = { type: "message-reply", notificationId };
+    state.actionModal = {
+      type: "message-reply",
+      notificationId,
+      notification: {
+        ...notification,
+        readAt: new Date().toISOString(),
+      },
+    };
     render();
     return;
   }
   state.activeTab = target.tab;
+  if (window.history?.pushState) {
+    window.history.pushState({}, "", getTabRoute(target.tab));
+  }
   if (target.tab === "settings") {
     connectSettingsUsersSocket();
   } else {
@@ -6087,6 +6141,9 @@ function getAdminTradeOptionsForUsers() {
 function renderAdminUserCard(user) {
   const isExpanded = state.expandedAdminUserIds.includes(user.id);
   const isSuspicious = String(user.fraudReview?.status || "").toUpperCase() === "SUSPICIOUS";
+  const fraudReasons = Array.isArray(user.fraudReview?.reasons) && user.fraudReview.reasons.length
+    ? user.fraudReview.reasons
+    : [user.fraudReview?.reason].filter(Boolean);
   const connectedExchanges = getConnectedExchanges(user);
   const revealPassword = state.revealedAdminPasswordIds.includes(user.id);
   const passwordDraft = getAdminPasswordDraft(user.id);
@@ -6103,8 +6160,8 @@ function renderAdminUserCard(user) {
     <details class="trade-disclosure admin-user-card ${isSuspicious ? "fraud-review-card" : ""}" data-admin-user-id="${user.id}" ${isExpanded ? "open" : ""}>
       <summary class="trade-summary-row">
         <div>
-          <strong>${user.name}</strong>
-          <p class="muted-copy">${user.email}</p>
+          <strong>${escapeHtml(user.name || "User")}</strong>
+          <p class="muted-copy">${escapeHtml(user.email || "")}</p>
           ${isSuspicious ? `<span class="fraud-review-badge">Review</span>` : ""}
           <div class="exchange-pill-row">${renderExchangeBadgeList(connectedExchanges)}</div>
         </div>
@@ -6117,6 +6174,20 @@ function renderAdminUserCard(user) {
         </div>
       </summary>
       <div class="trade-disclosure-body">
+        ${
+          isSuspicious
+            ? `
+              <div class="fraud-review-note">
+                <div>
+                  <strong>Review flag</strong>
+                  <p>${escapeHtml(fraudReasons.map((reason) => String(reason || "").replace(/_/g, " ")).join(", ") || "Similar account details")}</p>
+                  ${user.fraudReview?.relatedUserIds?.length ? `<p>${user.fraudReview.relatedUserIds.length} related account${user.fraudReview.relatedUserIds.length === 1 ? "" : "s"}</p>` : ""}
+                </div>
+                <button class="micro-btn" data-admin-review-clear="${escapeHtml(user.id)}" type="button">${icon("check")} Clear</button>
+              </div>
+            `
+            : ""
+        }
         <div class="trade-detail-grid">
           <div class="trade-detail-pill">
             <span>Live balance</span>
@@ -7371,6 +7442,10 @@ function applyRouteTarget() {
       return;
     }
     state.routeScrollSection = String(params.get("section") || "finance").trim() || "finance";
+    return;
+  }
+  if (["home", "settings", "history", "signals"].includes(params.get("tab"))) {
+    state.activeTab = params.get("tab");
   }
 }
 
@@ -7666,6 +7741,9 @@ function renderDashboardShell() {
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", async () => {
       const nextTab = button.dataset.tab;
+      if (window.history?.pushState) {
+        window.history.pushState({}, "", getTabRoute(nextTab));
+      }
       if (nextTab === "home") {
         state.activeTab = "home";
         disconnectSettingsUsersSocket();
@@ -8009,6 +8087,14 @@ function bindDashboardActions() {
       event.preventDefault();
       event.stopPropagation();
       showActionModal({ type: "admin-balance", userId: button.dataset.adminBalanceOpen });
+    });
+  });
+
+  document.querySelectorAll("[data-admin-review-clear]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearAdminUserReview(button.dataset.adminReviewClear);
     });
   });
 
