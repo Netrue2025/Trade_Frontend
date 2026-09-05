@@ -19,6 +19,13 @@ const SIGNAL_CHART_REFRESH_INTERVAL_MS = 5000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
+const FORM_DRAFT_EXCLUDED_FIELD_KEYS = new Set([
+  "trade-symbol",
+  "trade-price",
+  "trade-quantity",
+  "trade-total",
+  "trade-tp",
+]);
 const ACTIVE_API_ORDER_STATUSES = new Set(["NEW", "PARTIALLY_FILLED", "PENDING_NEW"]);
 const STABLECOIN_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD"];
 const KNOWN_QUOTE_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD", "BTC", "ETH", "EUR", "BRL", "TRY"];
@@ -268,7 +275,24 @@ function getActiveExchange() {
 }
 
 function getAdminDashboardExchange() {
-  return state.user?.role === "admin" && state.user.bybitConnected ? "bybit" : getActiveExchange();
+  const preferredExchange = state.selectedExchange || state.user?.activeExchange || state.authExchange || "bybit";
+  const connectedAccounts = state.user?.exchangeAccounts || {};
+  if (state.user?.role !== "admin") {
+    return getActiveExchange();
+  }
+  if (
+    (preferredExchange === "bybit" && (state.user.bybitConnected || connectedAccounts.bybit)) ||
+    (preferredExchange === "binance" && (state.user.binanceConnected || connectedAccounts.binance))
+  ) {
+    return preferredExchange;
+  }
+  if (state.user.bybitConnected || connectedAccounts.bybit) {
+    return "bybit";
+  }
+  if (state.user.binanceConnected || connectedAccounts.binance) {
+    return "binance";
+  }
+  return preferredExchange;
 }
 
 function setSelectedExchange(exchange) {
@@ -582,6 +606,9 @@ function isDraftableField(field) {
     return false;
   }
   if (/(password|secret|token|apikey|api-key|privatekey|private-key)/.test(name)) {
+    return false;
+  }
+  if (FORM_DRAFT_EXCLUDED_FIELD_KEYS.has(name)) {
     return false;
   }
   return !!(field.name || field.id);
@@ -1868,6 +1895,33 @@ async function loadFinancialDashboard() {
   state.notifications = state.financialDashboard?.notifications || [];
   if (state.user.role === "admin" && state.financialDashboard?.accountSnapshot) {
     applyAccountSnapshot(state.financialDashboard.accountSnapshot);
+  }
+}
+
+async function refreshTradingAccountSnapshot({ force = false, silent = false } = {}) {
+  if (!state.user?.exchangeConnected && !(state.user?.role === "admin" && (state.user?.bybitConnected || state.user?.binanceConnected))) {
+    return null;
+  }
+  const exchange = state.user.role === "admin" ? getAdminDashboardExchange() : getActiveExchange();
+  const refreshParam = force ? "&refresh=1" : "";
+  if (!silent) {
+    state.loadingAccount = true;
+    render();
+  }
+  try {
+    const account = await api(`/api/exchange/account?exchange=${encodeURIComponent(exchange)}${refreshParam}`);
+    applyAccountSnapshot(account);
+    state.user = {
+      ...state.user,
+      cachedAccountSnapshot: account,
+      cachedAccountSnapshots: {
+        ...(state.user.cachedAccountSnapshots || {}),
+        [account.exchange || exchange]: account,
+      },
+    };
+    return account;
+  } finally {
+    state.loadingAccount = false;
   }
 }
 
@@ -4242,7 +4296,7 @@ async function loadDashboardData() {
 
   state.loadingWatchlist = !state.watchlistSeed.length;
   const accountConnected = state.user.role === "admin"
-    ? !!(state.user.bybitConnected || state.user.exchangeConnected)
+    ? !!(state.user.bybitConnected || state.user.binanceConnected || state.user.exchangeConnected)
     : !!state.user.exchangeConnected;
   state.loadingAccount = !!(accountConnected && !state.balances.length);
   state.loadingTrades = !state.trades.length;
@@ -4324,9 +4378,16 @@ async function loadDashboardData() {
   const cachedSnapshot = getCachedAccountSnapshot(accountExchange);
   applyAccountSnapshot(cachedSnapshot);
   const accountPromise = state.user.role === "admin"
-    ? Promise.resolve().then(() => {
-        state.loadingAccount = false;
-      })
+    ? refreshTradingAccountSnapshot({ force: true, silent: true })
+        .then(() => {
+          state.loadingAccount = false;
+          render();
+        })
+        .catch(() => {
+          applyAccountSnapshot(cachedSnapshot);
+          state.loadingAccount = false;
+          render();
+        })
     : accountConnected
     ? api(`/api/exchange/account?exchange=${encodeURIComponent(accountExchange)}${accountRefreshParam}`)
         .then((account) => {
@@ -8712,13 +8773,36 @@ function updateTradeSymbol(symbol) {
   return normalizedSymbol;
 }
 
-function applyAllocation(percent) {
+async function applyAllocation(percent) {
+  const symbol = normalizeTradeSymbolValue(tradeDraft.symbol);
+  if (symbol) {
+    await Promise.allSettled([
+      refreshSingleMarketSymbol(symbol, {
+        renderAfter: false,
+        fillPrice: true,
+        forcePrice: !tradeDraft.price,
+      }),
+      refreshTradingAccountSnapshot({ force: true, silent: true }),
+    ]);
+  }
   const summary = getCurrentTradeSummary();
+  const livePrice = Number(summary.live.price || 0);
+  const price = Number(tradeDraft.price || livePrice || 0);
+  const draftPatch = {};
+  if (livePrice && !tradeDraft.price) {
+    draftPatch.price = String(livePrice);
+  }
   if (tradeDraft.side === "BUY") {
     const budget = summary.usdtBalance * (percent / 100);
-    const price = Number(tradeDraft.price || summary.live.price || 0);
+    if (budget <= 0) {
+      render();
+      const exchange = state.user?.role === "admin" ? getAdminDashboardExchange() : getActiveExchange();
+      showError(`No available ${summary.quoteAsset} balance was found. Refresh or reconnect ${getExchangeLabel(exchange)}.`);
+      return;
+    }
     if (tradeDraft.type === "MARKET") {
       updateTradeDraft({
+        ...draftPatch,
         quantity: "",
         quoteOrderQty: formatMarketSpendInput(budget, {
           fullBalance: percent >= 100 || budget >= summary.usdtBalance,
@@ -8727,12 +8811,22 @@ function applyAllocation(percent) {
       });
     } else if (price) {
       updateTradeDraft({
+        ...draftPatch,
         quantity: String(budget / price),
         quoteOrderQty: "",
       });
+    } else {
+      showError(`Live price for ${summary.baseAsset}${summary.quoteAsset} is not ready yet.`);
+      return;
     }
   } else {
+    if (Number(summary.baseBalance || 0) <= 0) {
+      render();
+      showError(`No available ${summary.baseAsset} balance was found for this sell order.`);
+      return;
+    }
     updateTradeDraft({
+      ...draftPatch,
       quantity: String(summary.baseBalance * (percent / 100)),
       quoteOrderQty: "",
     });
@@ -8960,9 +9054,13 @@ function bindTradeTicketActions() {
   if (takeProfitInput) takeProfitInput.addEventListener("input", () => updateTradeDraft({ takeProfitPrice: takeProfitInput.value }));
   if (submitButton) submitButton.addEventListener("click", submitTrade);
   if (bboButton) bboButton.addEventListener("click", async () => {
-    await refreshSingleMarketSymbol(tradeDraft.symbol, { renderAfter: false, fillSpend: true, fillPrice: true, forcePrice: true });
+    await Promise.allSettled([
+      refreshSingleMarketSymbol(tradeDraft.symbol, { renderAfter: false, fillSpend: true, fillPrice: true, forcePrice: true }),
+      refreshTradingAccountSnapshot({ force: true, silent: true }),
+    ]);
     const live = getSymbolData(tradeDraft.symbol);
     updateTradeDraft({ price: live.price ? String(live.price) : tradeDraft.price });
+    syncMarketBuySpendFromBalance({ force: true });
     render();
   });
 
@@ -8975,7 +9073,9 @@ function bindTradeTicketActions() {
   });
 
   document.querySelectorAll("[data-alloc]").forEach((button) => {
-    button.addEventListener("click", () => applyAllocation(Number(button.dataset.alloc)));
+    button.addEventListener("click", () => {
+      void applyAllocation(Number(button.dataset.alloc));
+    });
   });
 
   document.querySelectorAll("[data-step-field]").forEach((button) => {
