@@ -2693,6 +2693,31 @@ body[data-theme="dark"] .mirror-guide-pill {
   margin-top: 0;
 }
 
+.message-reply-modal {
+  grid-template-rows: auto auto auto minmax(0, auto) auto;
+}
+
+.reply-thread-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--soft-surface);
+  border: 1px solid var(--line);
+}
+
+.reply-thread-card p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.reply-thread-card span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .wallet-choice-row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

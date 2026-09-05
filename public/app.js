@@ -2434,6 +2434,43 @@ function renderActionModal() {
     `;
   }
 
+  if (state.actionModal.type === "message-reply") {
+    const notification = (state.notifications || []).find((item) => item.id === state.actionModal.notificationId);
+    if (!notification) {
+      return "";
+    }
+    const isAdmin = state.user?.role === "admin";
+    const targetUser = isAdmin ? state.users.find((user) => user.id === notification.entityId) : null;
+    const heading = isAdmin
+      ? `Reply ${targetUser?.name || "user"}`
+      : "Reply admin";
+    const message = String(notification.message || "");
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card message-reply-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Message</p>
+          <h3>${escapeHtml(heading)}</h3>
+          <div class="reply-thread-card">
+            <strong>${escapeHtml(notification.title || "Message")}</strong>
+            <p>${escapeHtml(message)}</p>
+            <span>${notification.createdAt ? new Date(notification.createdAt).toLocaleString() : ""}</span>
+          </div>
+          <form id="notification-reply-form" class="stack-form" data-reply-notification="${escapeHtml(notification.id)}">
+            <label class="stack-label">
+              <span>Reply</span>
+              <textarea name="message" rows="4" placeholder="Type reply" required></textarea>
+            </label>
+            <div class="modal-actions">
+              <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+              <button class="button-primary shimmer-button" type="submit">${icon("contact")} Send</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "admin-users") {
     const totalUsers = Number(state.users?.length || 0);
     const filteredUsers = getFilteredAdminUsers();
@@ -3027,6 +3064,14 @@ function bindModalActions() {
         adminUsersList.scrollTop = 0;
       }
       render();
+    });
+  }
+
+  const notificationReplyForm = document.getElementById("notification-reply-form");
+  if (notificationReplyForm) {
+    notificationReplyForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitNotificationReply(notificationReplyForm);
     });
   }
 
@@ -4451,6 +4496,48 @@ async function submitUserSupportMessage(form) {
   }).catch((error) => showError(error.message));
 }
 
+async function submitNotificationReply(form) {
+  const notificationId = form.dataset.replyNotification;
+  const notification = (state.notifications || []).find((item) => item.id === notificationId);
+  if (!notification) {
+    showError("Message not found.");
+    return;
+  }
+  const data = Object.fromEntries(new FormData(form).entries());
+  const message = String(data.message || "").trim();
+  if (!message) {
+    showError("Message is required.");
+    return;
+  }
+
+  await withLoading(async () => {
+    if (state.user?.role === "admin") {
+      if (!notification.entityId) {
+        throw new Error("Message user was not found.");
+      }
+      await api(`/api/admin/users/${encodeURIComponent(notification.entityId)}/message`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Admin reply",
+          message,
+        }),
+      });
+    } else {
+      await api("/api/support/messages", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "User reply",
+          message,
+        }),
+      });
+    }
+    state.actionModal = null;
+    await loadFinancialDashboard();
+    render();
+    showNotice("Reply sent");
+  }).catch((error) => showError(error.message));
+}
+
 async function submitAdminUserTradeJoin(form, userId) {
   const data = Object.fromEntries(new FormData(form).entries());
   if (!data.tradeId) {
@@ -4496,10 +4583,10 @@ function getNotificationTarget(notification) {
   const type = String(notification?.type || "").toUpperCase();
   const entityType = String(notification?.entityType || "").toUpperCase();
   if (state.user?.role === "admin" && ["DEPOSIT", "WITHDRAWAL"].includes(entityType || type)) {
-    return { tab: "settings", section: "finance" };
+    return { tab: "history", section: "finance" };
   }
   if (type === "MESSAGE") {
-    return { tab: "settings", section: "support" };
+    return { modal: "message-reply" };
   }
   return { tab: "home", section: "wallet" };
 }
@@ -4525,6 +4612,11 @@ async function openNotification(notificationId) {
     return;
   }
   state.showNotifications = false;
+  if (target.modal === "message-reply") {
+    state.actionModal = { type: "message-reply", notificationId };
+    render();
+    return;
+  }
   state.activeTab = target.tab;
   if (target.tab === "settings") {
     connectSettingsUsersSocket();
