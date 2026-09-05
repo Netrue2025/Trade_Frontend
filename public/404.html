@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Netrue</title>
+    <script>
+      (function () {
+        var path = window.location.pathname || "/";
+        var search = window.location.search || "";
+        var target = "/";
+        if (path.indexOf("/quest/rewards") === 0) {
+          target = "/?tab=quest&questView=rewards";
+        } else if (path.indexOf("/quest/history") === 0) {
+          target = "/?tab=quest&questView=history";
+        } else if (path.indexOf("/quest") === 0) {
+          target = "/?tab=quest";
+        } else if (path.indexOf("/admin/quests") === 0) {
+          target = "/?tab=adminQuests";
+        } else {
+          target = "/?from=" + encodeURIComponent(path + search);
+        }
+        window.location.replace(target);
+      }());
+    </script>
+  </head>
+  <body>Loading Netrue...</body>
+</html>

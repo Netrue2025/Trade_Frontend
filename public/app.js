@@ -18,6 +18,7 @@ const FUTURES_REFRESH_INTERVAL_MS = 180000;
 const SIGNAL_CHART_REFRESH_INTERVAL_MS = 5000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
+const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const ACTIVE_API_ORDER_STATUSES = new Set(["NEW", "PARTIALLY_FILLED", "PENDING_NEW"]);
 const STABLECOIN_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD"];
 const KNOWN_QUOTE_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD", "BTC", "ETH", "EUR", "BRL", "TRY"];
@@ -26,6 +27,14 @@ const SIGNAL_CHART_TYPES = [
   { id: "candles", label: "Candles" },
   { id: "line", label: "Line" },
 ];
+
+function loadFormDraftsFromStorage() {
+  try {
+    return JSON.parse(sessionStorage.getItem(FORM_DRAFT_STORAGE_KEY) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
 const SPOT_MIRROR_GUIDANCE = {
   bybit: {
     referenceMinUsdt: 5,
@@ -163,6 +172,7 @@ const state = {
     statusMessage: "Realtime settings sync is offline.",
   },
   signalAutoTrade: getDefaultSignalAutoTradeState(),
+  formDrafts: loadFormDraftsFromStorage(),
   quest: {
     status: null,
     rewards: [],
@@ -537,6 +547,179 @@ function showError(message) {
 function clearError() {
   state.modalError = null;
   render();
+}
+
+function persistFormDrafts() {
+  try {
+    sessionStorage.setItem(FORM_DRAFT_STORAGE_KEY, JSON.stringify(state.formDrafts || {}));
+  } catch {
+    // Session storage can be disabled; drafts still work in memory.
+  }
+}
+
+function getFormDraftKey(form) {
+  if (!form) {
+    return "standalone";
+  }
+  if (form.id) {
+    return `form:${form.id}`;
+  }
+  const dataKey = Object.entries(form.dataset || {}).find(([, value]) => String(value || "").trim());
+  if (dataKey) {
+    return `form:${dataKey[0]}:${dataKey[1]}`;
+  }
+  return "";
+}
+
+function isDraftableField(field) {
+  const tagName = String(field?.tagName || "").toLowerCase();
+  const type = String(field?.type || "").toLowerCase();
+  const name = String(field?.name || field?.id || "").toLowerCase();
+  if (!["input", "textarea", "select"].includes(tagName)) {
+    return false;
+  }
+  if (["password", "hidden", "file", "button", "submit", "reset", "image"].includes(type)) {
+    return false;
+  }
+  if (/(password|secret|token|apikey|api-key|privatekey|private-key)/.test(name)) {
+    return false;
+  }
+  return !!(field.name || field.id);
+}
+
+function getFieldDraftKey(field) {
+  if (!isDraftableField(field)) {
+    return "";
+  }
+  const formKey = getFormDraftKey(field.closest("form"));
+  const fieldKey = field.name || field.id;
+  if (!formKey && !field.id) {
+    return "";
+  }
+  return `${formKey || "standalone"}::${fieldKey}`;
+}
+
+function readDraftFieldValue(field) {
+  const type = String(field.type || "").toLowerCase();
+  if (type === "checkbox") {
+    return !!field.checked;
+  }
+  if (type === "radio") {
+    return field.checked ? field.value : undefined;
+  }
+  return field.value;
+}
+
+function writeDraftFieldValue(field, value) {
+  const type = String(field.type || "").toLowerCase();
+  if (type === "checkbox") {
+    field.checked = !!value;
+    return;
+  }
+  if (type === "radio") {
+    field.checked = String(field.value) === String(value);
+    return;
+  }
+  field.value = value ?? "";
+}
+
+function captureFormDrafts(root = app) {
+  if (!root) {
+    return;
+  }
+  root.querySelectorAll("input, textarea, select").forEach((field) => {
+    const key = getFieldDraftKey(field);
+    if (!key) {
+      return;
+    }
+    const value = readDraftFieldValue(field);
+    if (value === undefined) {
+      return;
+    }
+    state.formDrafts = {
+      ...(state.formDrafts || {}),
+      [key]: value,
+    };
+  });
+  persistFormDrafts();
+}
+
+function restoreFormDrafts(root = app) {
+  if (!root) {
+    return;
+  }
+  const drafts = state.formDrafts || {};
+  root.querySelectorAll("input, textarea, select").forEach((field) => {
+    const key = getFieldDraftKey(field);
+    if (!key || !Object.prototype.hasOwnProperty.call(drafts, key)) {
+      return;
+    }
+    writeDraftFieldValue(field, drafts[key]);
+  });
+}
+
+function clearFormDraft(form) {
+  const formKey = getFormDraftKey(form);
+  if (!formKey) {
+    return;
+  }
+  const nextDrafts = { ...(state.formDrafts || {}) };
+  for (const key of Object.keys(nextDrafts)) {
+    if (key.startsWith(`${formKey}::`)) {
+      delete nextDrafts[key];
+    }
+  }
+  state.formDrafts = nextDrafts;
+  persistFormDrafts();
+}
+
+function clearStandaloneDrafts(fieldIds = []) {
+  const nextDrafts = { ...(state.formDrafts || {}) };
+  for (const fieldId of fieldIds) {
+    delete nextDrafts[`standalone::${fieldId}`];
+  }
+  state.formDrafts = nextDrafts;
+  persistFormDrafts();
+}
+
+function clearWalletDrafts() {
+  clearStandaloneDrafts([
+    "wallet-amount-input",
+    "wallet-tx-input",
+    "wallet-reference-input",
+    "wallet-sender-input",
+    "wallet-address-input",
+    "wallet-network-input",
+    "wallet-bank-code-input",
+    "wallet-account-input",
+    "wallet-save-bank-input",
+    "gift-card-code-input",
+  ]);
+}
+
+function bindFormDraftCapture() {
+  if (bindFormDraftCapture.bound || !app) {
+    return;
+  }
+  const handler = (event) => {
+    const field = event.target;
+    const key = getFieldDraftKey(field);
+    if (!key) {
+      return;
+    }
+    const value = readDraftFieldValue(field);
+    if (value === undefined) {
+      return;
+    }
+    state.formDrafts = {
+      ...(state.formDrafts || {}),
+      [key]: value,
+    };
+    persistFormDrafts();
+  };
+  app.addEventListener("input", handler, true);
+  app.addEventListener("change", handler, true);
+  bindFormDraftCapture.bound = true;
 }
 
 function syncQuestCountdownTimer() {
@@ -3116,6 +3299,7 @@ function renderAuthLanding() {
 }
 
 function renderLanding() {
+  captureFormDrafts();
   app.innerHTML = `
     ${renderAuthLanding()}
     ${renderNotice()}
@@ -3123,6 +3307,8 @@ function renderLanding() {
     ${renderActionModal()}
     ${renderLoader()}
   `;
+  restoreFormDrafts();
+  bindFormDraftCapture();
 
   document.querySelectorAll("[data-auth-tab]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3287,6 +3473,7 @@ function bindAuthForms() {
         state.activeTab = "home";
         applyRouteTarget();
         await loadDashboardData();
+        clearFormDraft(loginForm);
         showNotice(`Welcome back, ${state.user.name}`);
       }).catch((error) => showError(error.message));
     });
@@ -3307,6 +3494,7 @@ function bindAuthForms() {
         state.activeTab = "home";
         applyRouteTarget();
         await loadDashboardData();
+        clearFormDraft(registerForm);
         showNotice("Account created");
       }).catch((error) => showError(error.message));
     });
@@ -4321,6 +4509,7 @@ async function submitAdminEmailUpdate(form, userId) {
       body: JSON.stringify({ email: payload.email }),
     });
     updateUserInStateUsers(result.user);
+    clearFormDraft(form);
     render();
     showNotice("User email updated");
   }).catch((error) => showError(error.message));
@@ -4397,6 +4586,7 @@ async function submitAdminGiftCard(form) {
       }),
     });
     await Promise.all([loadAdminFinanceQueues(), loadAdminQuestData().catch(() => undefined)]);
+    clearFormDraft(form);
     render();
     showNotice("Gift card generated");
   }).catch((error) => showError(error.message));
@@ -4552,6 +4742,7 @@ async function submitAdminQuest(form) {
     });
     state.quest.draft = null;
     await loadAdminQuestData();
+    clearFormDraft(form);
     showNotice(id ? "Quest saved" : "Quest created");
     render();
   }).catch((error) => showError(error.message));
@@ -4603,6 +4794,7 @@ async function submitAdminDepositSettings(form) {
       settings: payload.settings,
     };
     state.adminDepositSettingsDraft = null;
+    clearFormDraft(form);
     render();
     showNotice("Deposit accounts saved");
   }).catch((error) => showError(error.message));
@@ -4635,6 +4827,7 @@ async function submitUserBankAccount(form) {
       ],
     };
     state.resolvedBankAccount = payload.bankAccount;
+    clearFormDraft(form);
     render();
     showNotice("Bank verified");
   }).catch((error) => showError(error.message));
@@ -4725,6 +4918,7 @@ async function submitAdminUserBonus(form, userId) {
       });
     }
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
+    clearFormDraft(form);
     render();
     showNotice("Bonus added");
   }).catch((error) => showError(error.message));
@@ -4748,6 +4942,7 @@ async function submitAdminUserBalance(form, userId) {
         recentTransactions: payload.profile.recentTransactions || [],
       });
     }
+    clearFormDraft(form);
     state.actionModal = null;
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
     await loadDashboardData();
@@ -4766,6 +4961,7 @@ async function submitAdminUserMessage(form, userId) {
         message: data.message || "",
       }),
     });
+    clearFormDraft(form);
     form.reset();
     render();
     showNotice("Message sent");
@@ -4788,6 +4984,7 @@ async function submitUserPasswordChange(form) {
         newPassword,
       }),
     });
+    clearFormDraft(form);
     form.reset();
     render();
     showNotice("Password updated");
@@ -4804,6 +5001,7 @@ async function submitUserSupportMessage(form) {
         message: data.message || "",
       }),
     });
+    clearFormDraft(form);
     form.reset();
     render();
     showNotice("Message sent to admin");
@@ -4845,6 +5043,7 @@ async function submitNotificationReply(form) {
         }),
       });
     }
+    clearFormDraft(form);
     state.actionModal = null;
     await loadFinancialDashboard();
     render();
@@ -4867,6 +5066,7 @@ async function submitAdminUserTradeJoin(form, userId) {
     if (payload.user?.id) {
       updateUserInStateUsers(payload.user);
     }
+    clearFormDraft(form);
     await loadDashboardData();
     showNotice("User added to trade");
   }).catch((error) => showError(error.message));
@@ -7119,7 +7319,13 @@ function formatWalletRequestStatus(status) {
 function applyRouteTarget() {
   const pathname = String(window.location?.pathname || "");
   const params = new URLSearchParams(window.location?.search || "");
-  if (/^\/quest\/?$/.test(pathname) || params.get("tab") === "quest") {
+  if (params.get("tab") === "quest") {
+    state.activeTab = "quest";
+    const view = String(params.get("questView") || "play").trim();
+    state.quest.view = ["play", "rewards", "history"].includes(view) ? view : "play";
+    return;
+  }
+  if (/^\/quest\/?$/.test(pathname)) {
     state.activeTab = "quest";
     state.quest.view = "play";
     return;
@@ -7135,6 +7341,10 @@ function applyRouteTarget() {
     return;
   }
   if (/^\/admin\/quests\/?$/.test(pathname) && state.user?.role === "admin") {
+    state.activeTab = "adminQuests";
+    return;
+  }
+  if (params.get("tab") === "adminQuests" && state.user?.role === "admin") {
     state.activeTab = "adminQuests";
     return;
   }
@@ -7394,6 +7604,7 @@ function renderHomePane() {
 }
 
 function renderDashboardShell() {
+  captureFormDrafts();
   const adminUsersList = document.querySelector(".admin-users-modal-list");
   const adminUsersSearch = document.getElementById("admin-user-search-input");
   const restoreAdminUsersModal = state.actionModal?.type === "admin-users"
@@ -7430,6 +7641,8 @@ function renderDashboardShell() {
     ${renderActionModal()}
     ${renderLoader()}
   `;
+  restoreFormDrafts();
+  bindFormDraftCapture();
 
   bindDashboardActions();
   bindModalActions();
@@ -7523,7 +7736,7 @@ function bindDashboardActions() {
     button.addEventListener("click", async () => {
       state.activeTab = "quest";
       if (window.history?.pushState) {
-        window.history.pushState({}, "", "/quest");
+        window.history.pushState({}, "", "/?tab=quest");
       }
       render();
       await refreshQuestData();
@@ -7575,10 +7788,10 @@ function bindDashboardActions() {
       state.quest.view = button.dataset.questView || "play";
       if (window.history?.pushState) {
         const nextPath = state.quest.view === "rewards"
-          ? "/quest/rewards"
+          ? "/?tab=quest&questView=rewards"
           : state.quest.view === "history"
-            ? "/quest/history"
-            : "/quest";
+            ? "/?tab=quest&questView=history"
+            : "/?tab=quest";
         window.history.pushState({}, "", nextPath);
       }
       render();
@@ -7697,6 +7910,12 @@ function bindDashboardActions() {
         });
         state.user = normalizeUserPayload(result.user);
         setSelectedExchange(state.user.activeExchange || data.exchange || getActiveExchange());
+        clearFormDraft(connectForm);
+        state.settingsDraft = {
+          apiKey: "",
+          apiSecret: "",
+          testnet: data.testnet === "true" ? "true" : "false",
+        };
         await loadDashboardData();
         showNotice(`${getExchangeLabel(getActiveExchange())} connected successfully`);
       }).catch((error) => showError(error.message));
@@ -7714,6 +7933,7 @@ function bindDashboardActions() {
           body: JSON.stringify({ enabled: data.enabled === "true" }),
         });
         state.user = normalizeUserPayload(result.user);
+        clearFormDraft(mirrorForm);
         render();
         showNotice("Mirror preference updated");
       }).catch((error) => showError(error.message));
@@ -7757,6 +7977,7 @@ function bindDashboardActions() {
           }),
         });
         state.signalAutoTrade = normalizeSignalAutoTradePayload(payload);
+        clearFormDraft(signalAutoTradeForm);
         render();
         showNotice(`Signal auto trade ${state.signalAutoTrade.settings.enabled ? "enabled" : "disabled"}`);
       }).catch((error) => showError(error.message));
@@ -8035,6 +8256,7 @@ function bindDashboardActions() {
             body: JSON.stringify({ code }),
           });
           await loadFinancialDashboard();
+          clearWalletDrafts();
           clearActionModal();
           showNotice("Gift card redeemed.");
           render();
@@ -8108,6 +8330,7 @@ function bindDashboardActions() {
             body: JSON.stringify(depositPayload),
           });
           await loadFinancialDashboard();
+          clearWalletDrafts();
           clearActionModal();
           showNotice("Deposit submitted. Waiting for admin confirmation.");
           render();
@@ -8120,6 +8343,7 @@ function bindDashboardActions() {
           body: JSON.stringify(withdrawalPayload),
         });
         await loadFinancialDashboard();
+        clearWalletDrafts();
         clearActionModal();
         showNotice("Withdrawal submitted. Funds are locked while admin reviews it.");
         render();
