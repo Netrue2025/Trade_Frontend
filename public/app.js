@@ -3034,7 +3034,10 @@ function renderAuthPane() {
   if (state.authTab === "register") {
     return `
       <form id="register-form" class="auth-form">
-        <label>Name <input name="name" placeholder="Full name or username" autocomplete="name" required /></label>
+        <div class="auth-name-grid">
+          <label>First name <input name="firstName" placeholder="First name" autocomplete="given-name" required /></label>
+          <label>Last name <input name="lastName" placeholder="Last name" autocomplete="family-name" required /></label>
+        </div>
         <label>Email <input name="email" type="email" placeholder="Email address" autocomplete="email" required /></label>
         ${renderPasswordField({
           label: "Password",
@@ -3275,11 +3278,11 @@ function bindAuthForms() {
       event.preventDefault();
       await withLoading(async () => {
         const payload = Object.fromEntries(new FormData(loginForm).entries());
-        await api("/api/auth/login", {
+        const result = await api("/api/auth/login", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        state.user = normalizeUserPayload(await requireSessionUser());
+        state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
         state.activeTab = "home";
         applyRouteTarget();
@@ -3294,11 +3297,12 @@ function bindAuthForms() {
       event.preventDefault();
       await withLoading(async () => {
         const payload = Object.fromEntries(new FormData(registerForm).entries());
-        await api("/api/auth/register", {
+        payload.name = `${payload.firstName || ""} ${payload.lastName || ""}`.replace(/\s+/g, " ").trim();
+        const result = await api("/api/auth/register", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        state.user = normalizeUserPayload(await requireSessionUser());
+        state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
         state.activeTab = "home";
         applyRouteTarget();
@@ -5882,6 +5886,7 @@ function getAdminTradeOptionsForUsers() {
 
 function renderAdminUserCard(user) {
   const isExpanded = state.expandedAdminUserIds.includes(user.id);
+  const isSuspicious = String(user.fraudReview?.status || "").toUpperCase() === "SUSPICIOUS";
   const connectedExchanges = getConnectedExchanges(user);
   const revealPassword = state.revealedAdminPasswordIds.includes(user.id);
   const passwordDraft = getAdminPasswordDraft(user.id);
@@ -5895,11 +5900,12 @@ function renderAdminUserCard(user) {
   const recentTransactions = user.recentTransactions || [];
   const tradeOptions = getAdminTradeOptionsForUsers();
   return `
-    <details class="trade-disclosure admin-user-card" data-admin-user-id="${user.id}" ${isExpanded ? "open" : ""}>
+    <details class="trade-disclosure admin-user-card ${isSuspicious ? "fraud-review-card" : ""}" data-admin-user-id="${user.id}" ${isExpanded ? "open" : ""}>
       <summary class="trade-summary-row">
         <div>
           <strong>${user.name}</strong>
           <p class="muted-copy">${user.email}</p>
+          ${isSuspicious ? `<span class="fraud-review-badge">Review</span>` : ""}
           <div class="exchange-pill-row">${renderExchangeBadgeList(connectedExchanges)}</div>
         </div>
         <div class="admin-user-summary-actions">
@@ -6168,6 +6174,8 @@ function renderAdminDepositCard(deposit) {
 
 function renderAdminWithdrawalCard(withdrawal) {
   const destination = withdrawal.bank || withdrawal.destination || {};
+  const fraudReview = withdrawal.fraudReview || {};
+  const isSuspicious = String(fraudReview.status || "").toUpperCase() === "SUSPICIOUS";
   const destinationCopy = destination.type === "NGN_BANK"
     ? `${destination.bankName || ""} ${destination.maskedAccountNumber || destination.accountNumber || ""}`.trim()
     : `${destination.network || ""} ${destination.address || ""}`.trim();
@@ -6182,7 +6190,7 @@ function renderAdminWithdrawalCard(withdrawal) {
   const canFinalize = ["PENDING", "PROCESSING"].includes(withdrawal.status) && !isNgnBankWithdrawal;
   const canReject = withdrawal.status === "PENDING";
   return `
-    <div class="asset-card admin-finance-card" data-finance-withdrawal-id="${escapeHtml(withdrawal.id || "")}">
+    <div class="asset-card admin-finance-card ${isSuspicious ? "fraud-review-card" : ""}" data-finance-withdrawal-id="${escapeHtml(withdrawal.id || "")}">
       <label class="history-checkbox finance-history-checkbox" aria-label="Select withdrawal">
         <input type="checkbox" data-finance-history-kind="withdrawal" data-finance-history-id="${withdrawal.id}" ${
           state.selectedFinanceHistoryIds.includes(historyKey) ? "checked" : ""
@@ -6193,11 +6201,13 @@ function renderAdminWithdrawalCard(withdrawal) {
         <strong>${escapeHtml(withdrawal.user?.name || "Unknown user")}</strong>
         <p class="muted-copy">${escapeHtml(withdrawal.user?.email || "")}</p>
         <p class="muted-copy">${withdrawal.currency === "NGN" ? formatNaira(withdrawal.amount) : formatUsdtUnit(withdrawal.amount)}</p>
+        ${isSuspicious ? `<p class="fraud-review-line">Name mismatch${fraudReview.relatedUserIds?.length ? ` | ${fraudReview.relatedUserIds.length} related` : ""}</p>` : ""}
         ${equivalent ? `<p class="muted-copy">Eq ${equivalent}</p>` : ""}
         ${fundingCopy ? `<p class="muted-copy">From ${fundingCopy}</p>` : ""}
         <p class="muted-copy">${escapeHtml(destinationCopy || "Destination unavailable")}</p>
       </div>
       <div class="asset-values">
+        ${isSuspicious ? `<span class="fraud-review-badge">Fraud review</span>` : ""}
         <span class="wallet-status-badge ${walletStatusClass(withdrawal.status)}">${escapeHtml(formatWalletRequestStatus(withdrawal.status))}</span>
         <p class="muted-copy">${withdrawal.submittedAt ? new Date(withdrawal.submittedAt).toLocaleString() : ""}</p>
         ${

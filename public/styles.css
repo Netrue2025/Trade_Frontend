@@ -855,6 +855,12 @@ button {
   gap: 12px;
 }
 
+.auth-name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -2204,6 +2210,32 @@ body[data-theme="dark"] .section-loading-card {
   align-items: flex-start;
 }
 
+.fraud-review-card {
+  border-color: rgba(255, 77, 109, 0.58);
+  background:
+    linear-gradient(180deg, rgba(255, 77, 109, 0.1), rgba(255, 77, 109, 0.04)),
+    var(--surface);
+  box-shadow: 0 14px 42px rgba(255, 77, 109, 0.12);
+}
+
+.fraud-review-badge,
+.fraud-review-line {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.74rem;
+  font-weight: 1000;
+}
+
+.fraud-review-line {
+  margin: 6px 0 0;
+}
+
 .history-row-focus {
   border-radius: 18px;
   outline: 2px solid rgba(47, 125, 246, 0.45);
@@ -3531,6 +3563,10 @@ body[data-theme="dark"] .mirror-guide-pill {
   }
 
   .quest-option-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-name-grid {
     grid-template-columns: 1fr;
   }
 }
