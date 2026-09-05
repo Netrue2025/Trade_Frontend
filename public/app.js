@@ -19,6 +19,7 @@ const SIGNAL_CHART_REFRESH_INTERVAL_MS = 5000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
+const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
 const FORM_DRAFT_EXCLUDED_FIELD_KEYS = new Set([
   "trade-symbol",
   "trade-price",
@@ -225,6 +226,32 @@ let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
 let questCountdownTimer = null;
 const seenSignalIds = new Set();
+
+function getAuthSessionToken() {
+  try {
+    return localStorage.getItem(AUTH_SESSION_TOKEN_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setAuthSessionToken(token) {
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_SESSION_TOKEN_STORAGE_KEY, token);
+    }
+  } catch {
+    // The session cookie remains the primary auth mechanism.
+  }
+}
+
+function clearAuthSessionToken() {
+  try {
+    localStorage.removeItem(AUTH_SESSION_TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures during logout.
+  }
+}
 
 function normalizeUserPayload(user) {
   if (!user) {
@@ -516,12 +543,14 @@ function toggleSelectAllSignals() {
 }
 
 async function api(path, options = {}) {
+  const sessionToken = getAuthSessionToken();
   const response = await fetch(toApiUrl(path), {
     credentials: "include",
     cache: "no-store",
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -3527,6 +3556,7 @@ function bindAuthForms() {
           method: "POST",
           body: JSON.stringify(payload),
         });
+        setAuthSessionToken(result.sessionToken);
         state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
         state.activeTab = "home";
@@ -3550,6 +3580,7 @@ function bindAuthForms() {
           method: "POST",
           body: JSON.stringify(payload),
         });
+        setAuthSessionToken(result.sessionToken);
         state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
         state.activeTab = "home";
@@ -8583,6 +8614,7 @@ function bindDashboardActions() {
   if (logoutButton) {
     logoutButton.addEventListener("click", async () => {
       await api("/api/auth/logout", { method: "POST", body: "{}" });
+      clearAuthSessionToken();
       disconnectWatchSocket();
       disconnectSignalStream();
       disconnectSettingsUsersSocket();
@@ -8869,6 +8901,7 @@ async function submitTrade() {
     quantity: tradeDraft.quantity,
     quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? marketSpend || fallbackSpend : "",
     price: tradeDraft.type === "LIMIT" ? tradeDraft.price : "",
+    timeInForce: tradeDraft.type === "LIMIT" ? "POST_ONLY" : "",
     takeProfitPrice: tradeDraft.takeProfitPrice,
   };
 
@@ -9196,6 +9229,7 @@ async function bootstrap() {
       applyRouteTarget();
       await loadDashboardData();
     } else {
+      clearAuthSessionToken();
       disconnectWatchSocket();
       disconnectSignalStream();
       disconnectSettingsUsersSocket();
@@ -9208,6 +9242,7 @@ async function bootstrap() {
     }
   } catch {
     state.user = null;
+    clearAuthSessionToken();
     disconnectWatchSocket();
     disconnectSignalStream();
     disconnectSettingsUsersSocket();
