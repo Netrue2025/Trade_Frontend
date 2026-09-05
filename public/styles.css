@@ -2883,6 +2883,18 @@ body[data-theme="dark"] .mirror-guide-pill {
   gap: 8px;
 }
 
+.saved-bank-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.saved-bank-row.active .saved-bank-option {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
 .saved-bank-option {
   display: grid;
   gap: 3px;
@@ -2896,9 +2908,11 @@ body[data-theme="dark"] .mirror-guide-pill {
   text-align: left;
 }
 
-.saved-bank-option.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+.saved-bank-remove {
+  align-self: stretch;
+  width: 38px;
+  min-height: 38px;
+  border-radius: 14px;
 }
 
 .saved-bank-option span,

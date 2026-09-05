@@ -2967,11 +2967,14 @@ function renderActionModal() {
       ? `
         <div class="saved-bank-list">
           ${savedBanks.map((account) => `
-            <button class="saved-bank-option ${account.id === selectedSavedBank?.id ? "active" : ""}" data-saved-bank-id="${escapeHtml(account.id || "")}" type="button">
-              <span>${escapeHtml(account.bankName || "Bank")}</span>
-              <strong>${escapeHtml(account.accountName || "")}</strong>
-              <code>${escapeHtml(account.maskedAccountNumber || account.accountNumber || "")}</code>
-            </button>
+            <div class="saved-bank-row ${account.id === selectedSavedBank?.id ? "active" : ""}">
+              <button class="saved-bank-option" data-saved-bank-id="${escapeHtml(account.id || "")}" type="button">
+                <span>${escapeHtml(account.bankName || "Bank")}</span>
+                <strong>${escapeHtml(account.accountName || "")}</strong>
+                <code>${escapeHtml(account.maskedAccountNumber || account.accountNumber || "")}</code>
+              </button>
+              <button class="icon-btn danger saved-bank-remove" data-saved-bank-remove="${escapeHtml(account.id || "")}" type="button" aria-label="Remove saved account" title="Remove">${icon("trash")}</button>
+            </div>
           `).join("")}
         </div>
       `
@@ -3473,7 +3476,9 @@ function bindAuthForms() {
         state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
         state.activeTab = "home";
-        applyRouteTarget();
+        if (window.history?.replaceState) {
+          window.history.replaceState({}, "", getTabRoute("home"));
+        }
         await loadDashboardData();
         clearFormDraft(loginForm);
         showNotice(`Welcome back, ${state.user.name}`);
@@ -3494,7 +3499,9 @@ function bindAuthForms() {
         state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
         state.activeTab = "home";
-        applyRouteTarget();
+        if (window.history?.replaceState) {
+          window.history.replaceState({}, "", getTabRoute("home"));
+        }
         await loadDashboardData();
         clearFormDraft(registerForm);
         showNotice("Account created");
@@ -4848,6 +4855,39 @@ async function submitUserBankAccount(form) {
     clearFormDraft(form);
     render();
     showNotice("Bank verified");
+  }).catch((error) => showError(error.message));
+}
+
+async function removeSavedBankAccount(bankAccountId) {
+  const accountId = String(bankAccountId || "").trim();
+  if (!accountId) {
+    return;
+  }
+  if (!window.confirm("Remove this saved account?")) {
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/user/bank-account/${encodeURIComponent(accountId)}`, {
+      method: "DELETE",
+      body: JSON.stringify({}),
+    });
+    const nextAccounts = payload.bankAccounts || [];
+    state.financialDashboard = {
+      ...(state.financialDashboard || {}),
+      bankAccount: payload.bankAccount || nextAccounts[0] || null,
+      bankAccounts: nextAccounts,
+    };
+    const nextSaved = getSavedBankAccounts();
+    state.resolvedBankAccount = nextSaved[0] || null;
+    state.actionModal = state.actionModal
+      ? {
+          ...state.actionModal,
+          bankMode: nextSaved.length ? "saved" : "new",
+          bankAccountId: nextSaved[0]?.id || "",
+        }
+      : state.actionModal;
+    showNotice("Saved account removed");
+    render();
   }).catch((error) => showError(error.message));
 }
 
@@ -8253,6 +8293,14 @@ function bindDashboardActions() {
     });
   });
 
+  document.querySelectorAll("[data-saved-bank-remove]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      removeSavedBankAccount(button.dataset.savedBankRemove);
+    });
+  });
+
   const useNewBankButton = document.getElementById("wallet-use-new-bank-btn");
   if (useNewBankButton) {
     useNewBankButton.addEventListener("click", () => {
@@ -8550,6 +8598,9 @@ function bindDashboardActions() {
       state.revealedAdminPasswordIds = [];
       state.showSplash = false;
       tradeDraft = getTradeFormDefaults();
+      if (window.history?.replaceState) {
+        window.history.replaceState({}, "", getTabRoute("home"));
+      }
       render();
     });
   }
