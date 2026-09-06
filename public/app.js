@@ -3016,6 +3016,7 @@ function renderActionModal() {
     const bankMode = state.actionModal.bankMode || (savedBanks.length ? "saved" : "new");
     const selectedSavedBank = savedBanks.find((account) => account.id === state.actionModal.bankAccountId) || savedBanks[0] || null;
     const resolvedBank = state.resolvedBankAccount || (bankMode === "saved" ? selectedSavedBank : null);
+    const currency = ["NGN", "USDT"].includes(state.actionModal.currency) ? state.actionModal.currency : "";
     const bankNameAccepted = currency !== "NGN" || isBankAccountNameAccepted(resolvedBank);
     const selectedBankCode = state.actionModal.bankCode || resolvedBank?.bankCode || savedBank.bankCode || "";
     const bankOptions = (state.paymentBanks || [])
@@ -3024,7 +3025,6 @@ function renderActionModal() {
     const liveBalance = state.financialDashboard?.totalBalance || {};
     const liveAvailableUsdt = Number(liveBalance.liveUsdt || liveBalance.usdt || usdtWallet?.availableBalance || 0);
     const liveAvailableNgn = Number(liveBalance.liveNgnEquivalent || liveBalance.ngnEquivalent || ngnWallet?.availableBalance || 0);
-    const currency = ["NGN", "USDT"].includes(state.actionModal.currency) ? state.actionModal.currency : "";
     const currencyLabel = currency === "NGN" ? "Naira" : currency;
     const title = isGiftRedeem ? "Redeem Gift Card" : isDeposit ? "Deposit" : "Withdraw";
     const eyebrow = isDeposit ? "Wallet" : "Cashout";
