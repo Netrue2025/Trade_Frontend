@@ -30,6 +30,7 @@ const FORM_DRAFT_EXCLUDED_FIELD_KEYS = new Set([
 const ACTIVE_API_ORDER_STATUSES = new Set(["NEW", "PARTIALLY_FILLED", "PENDING_NEW"]);
 const STABLECOIN_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD"];
 const KNOWN_QUOTE_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD", "BTC", "ETH", "EUR", "BRL", "TRY"];
+const EXCLUDED_PROFIT_LOSS_REPORT_SYMBOLS = new Set(["ZENUSDT"]);
 const SIGNAL_INTERVAL_OPTIONS = ["15m", "1h", "1d"];
 const SIGNAL_CHART_TYPES = [
   { id: "candles", label: "Candles" },
@@ -2418,9 +2419,14 @@ function buildProfitLossTradeBreakdown(trade, pnlValue) {
   };
 }
 
+function shouldIncludeTradeInProfitLossReport(trade) {
+  const symbol = normalizeTradeSymbolValue(trade?.symbol);
+  return !EXCLUDED_PROFIT_LOSS_REPORT_SYMBOLS.has(symbol);
+}
+
 function getProfitLossReportRows(period = state.reportPeriod) {
   const groups = new Map();
-  for (const trade of getHistoryTrades()) {
+  for (const trade of getHistoryTrades().filter(shouldIncludeTradeInProfitLossReport)) {
     const key = getTradeReportKey(trade, period);
     const current = groups.get(key) || {
       key,
