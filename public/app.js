@@ -167,6 +167,7 @@ const state = {
   expandedPendingOrderIds: [],
   expandedAdminUserIds: [],
   expandedListKeys: [],
+  settingsDisclosureOpen: {},
   selectedHistoryTradeIds: [],
   selectedFinanceHistoryIds: [],
   adminPasswordDrafts: {},
@@ -712,6 +713,48 @@ function restoreFormDrafts(root = app) {
       return;
     }
     writeDraftFieldValue(field, drafts[key]);
+  });
+}
+
+function getFocusedFieldSnapshot(root = app) {
+  const field = document.activeElement;
+  if (!root || !field || !root.contains(field) || !isDraftableField(field)) {
+    return null;
+  }
+  let selectionStart = null;
+  let selectionEnd = null;
+  try {
+    selectionStart = field.selectionStart ?? null;
+    selectionEnd = field.selectionEnd ?? null;
+  } catch {
+    selectionStart = null;
+    selectionEnd = null;
+  }
+  return {
+    key: getFieldDraftKey(field),
+    selectionStart,
+    selectionEnd,
+  };
+}
+
+function restoreFocusedField(snapshot, root = app) {
+  if (!snapshot?.key || !root) {
+    return;
+  }
+  requestAnimationFrame(() => {
+    const field = [...root.querySelectorAll("input, textarea, select")]
+      .find((item) => getFieldDraftKey(item) === snapshot.key);
+    if (!field) {
+      return;
+    }
+    field.focus();
+    if (
+      snapshot.selectionStart !== null &&
+      snapshot.selectionEnd !== null &&
+      typeof field.setSelectionRange === "function"
+    ) {
+      field.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+    }
   });
 }
 
@@ -2959,7 +3002,7 @@ function renderActionModal() {
   }
 
   if (state.actionModal.type === "admin-user-profile") {
-    const user = state.users.find((item) => item.id === state.actionModal.userId);
+    const user = state.users.find((item) => item.id === state.actionModal.userId) || state.actionModal.userSnapshot;
     if (!user) {
       return "";
     }
@@ -6510,8 +6553,8 @@ function renderAdminUserCard(user) {
             <strong>${formatUsdtUnit(liveUsdt)}</strong>
             <p class="muted-copy">${formatNaira(liveNgn)}</p>
           </div>
-          <button class="micro-btn icon-only-btn" data-admin-profile-open="${user.id}" type="button" aria-label="Edit profile" title="Edit profile">${icon("profile")}</button>
-          <button class="micro-btn icon-only-btn" data-admin-balance-open="${user.id}" type="button" aria-label="Edit balance" title="Edit balance">${icon("edit")}</button>
+          <button class="micro-btn icon-only-btn" data-admin-profile-open="${escapeHtml(user.id)}" type="button" aria-label="Edit profile" title="Edit profile">${icon("profile")}</button>
+          <button class="micro-btn icon-only-btn" data-admin-balance-open="${escapeHtml(user.id)}" type="button" aria-label="Edit balance" title="Edit balance">${icon("edit")}</button>
         </div>
       </summary>
       <div class="trade-disclosure-body">
@@ -7326,9 +7369,20 @@ function renderAdminFinancePanel() {
   `;
 }
 
-function renderSettingsDisclosure({ title, subtitle = "", iconName = "settings", content = "", open = false, extraClass = "", section = "" }) {
+function isSettingsDisclosureOpen(key, fallback = false) {
+  if (!key) {
+    return fallback;
+  }
+  if (Object.prototype.hasOwnProperty.call(state.settingsDisclosureOpen || {}, key)) {
+    return !!state.settingsDisclosureOpen[key];
+  }
+  return fallback;
+}
+
+function renderSettingsDisclosure({ key, title, subtitle = "", iconName = "settings", content = "", open = false, extraClass = "", section = "" }) {
+  const isOpen = isSettingsDisclosureOpen(key, open);
   return `
-    <details class="mobile-card settings-card settings-disclosure ${escapeHtml(extraClass)}" ${section ? `data-section="${escapeHtml(section)}"` : ""} ${open ? "open" : ""}>
+    <details class="mobile-card settings-card settings-disclosure ${escapeHtml(extraClass)}" data-settings-disclosure="${escapeHtml(key || title)}" ${section ? `data-section="${escapeHtml(section)}"` : ""} ${isOpen ? "open" : ""}>
       <summary class="settings-disclosure-summary">
         <span class="card-icon">${icon(iconName)}</span>
         <span>
@@ -7459,12 +7513,12 @@ function renderSettingsPane() {
     `;
     return `
       ${renderAdminSettingsOverview()}
-      ${renderSettingsDisclosure({ title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
-      ${renderSettingsDisclosure({ title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
-      ${renderSettingsDisclosure({ title: "Deposit & Channel", subtitle: "Bank, wallet, rate", iconName: "bank", content: depositPanel, open: true })}
-      ${renderSettingsDisclosure({ title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
-      ${renderSettingsDisclosure({ title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
-      ${renderSettingsDisclosure({ title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
+      ${renderSettingsDisclosure({ key: "appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
+      ${renderSettingsDisclosure({ key: "exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
+      ${renderSettingsDisclosure({ key: "deposit-channel", title: "Deposit & Channel", subtitle: "Bank, wallet, rate", iconName: "bank", content: depositPanel, open: true })}
+      ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
+      ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
+      ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
     `;
   }
   return `
@@ -8139,6 +8193,7 @@ function renderHomePane() {
 
 function renderDashboardShell() {
   captureFormDrafts();
+  const focusedFieldSnapshot = getFocusedFieldSnapshot();
   const adminUsersList = document.querySelector(".admin-users-modal-list");
   const adminUsersSearch = document.getElementById("admin-user-search-input");
   const restoreAdminUsersModal = state.actionModal?.type === "admin-users"
@@ -8178,6 +8233,7 @@ function renderDashboardShell() {
   `;
   restoreFormDrafts();
   bindFormDraftCapture();
+  restoreFocusedField(focusedFieldSnapshot);
 
   bindDashboardActions();
   bindModalActions();
@@ -8261,6 +8317,19 @@ function bindDashboardActions() {
       state.hideBalanceAmounts = !state.hideBalanceAmounts;
       localStorage.setItem(BALANCE_PRIVACY_STORAGE_KEY, state.hideBalanceAmounts ? "true" : "false");
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-settings-disclosure]").forEach((details) => {
+    details.addEventListener("toggle", () => {
+      const key = details.dataset.settingsDisclosure;
+      if (!key) {
+        return;
+      }
+      state.settingsDisclosureOpen = {
+        ...(state.settingsDisclosureOpen || {}),
+        [key]: details.open,
+      };
     });
   });
 
@@ -8567,7 +8636,12 @@ function bindDashboardActions() {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      showActionModal({ type: "admin-user-profile", userId: button.dataset.adminProfileOpen });
+      const userId = button.dataset.adminProfileOpen;
+      showActionModal({
+        type: "admin-user-profile",
+        userId,
+        userSnapshot: state.users.find((user) => user.id === userId) || null,
+      });
     });
   });
 
