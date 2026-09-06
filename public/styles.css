@@ -2109,6 +2109,70 @@ body[data-theme="dark"] .section-loading-card {
   min-width: 0;
 }
 
+.vtu-service-strip {
+  overflow: hidden;
+}
+
+.vtu-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.service-action-btn {
+  min-height: 86px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent),
+    var(--card-bg);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  gap: 7px;
+  cursor: pointer;
+  box-shadow: var(--soft-shadow);
+}
+
+.service-action-btn span {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.service-action-btn strong {
+  font-size: 0.9rem;
+}
+
+.service-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vtu-action-modal {
+  max-height: min(92vh, 620px);
+  overflow: auto;
+}
+
+.settings-status-grid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--card-bg) 86%, var(--accent) 6%);
+}
+
+.inline-modal-actions {
+  flex-wrap: wrap;
+}
+
 .split-card {
   display: grid;
   gap: 18px;

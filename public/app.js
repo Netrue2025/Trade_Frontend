@@ -123,10 +123,16 @@ const state = {
   adminWithdrawals: [],
   adminTransactions: [],
   adminGiftCards: [],
+  adminVtuTransactions: [],
   paymentBanks: [],
   paymentBanksLoadedAt: 0,
   resolvedBankAccount: null,
   financialDashboard: null,
+  vtuSettings: null,
+  vtuDataPlans: [],
+  vtuDataPlansNetwork: "",
+  vtuTransactions: [],
+  loadingVtu: false,
   notifications: [],
   showNotifications: false,
   totalUsdt: 0,
@@ -1527,12 +1533,20 @@ function icon(name) {
       '<path d="M12 3v10"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/>',
     whatsapp:
       '<path d="M20 11.6a8.2 8.2 0 0 1-12.1 7.2L4 20l1.3-3.7A8.2 8.2 0 1 1 20 11.6Z"/><path d="M9.2 8.3c.2-.5.4-.5.7-.5h.5c.2 0 .4.1.5.4l.7 1.7c.1.2.1.4 0 .5l-.4.5c-.1.1-.2.3-.1.5.4.8 1.1 1.5 2.1 2 .2.1.3.1.5-.1l.7-.8c.2-.2.4-.2.6-.1l1.7.8c.2.1.4.3.4.5 0 .6-.4 1.4-.9 1.7-.5.3-1.5.4-3.1-.3-2.6-1.1-4.4-3.7-4.6-4-.1-.2-1.1-1.5-1.1-2.8 0-1.2.7-1.8 1-2Z"/>',
+    phone:
+      '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.4 19.4 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.6 2.6a2 2 0 0 1-.5 2.1L8 9.6a16 16 0 0 0 6.4 6.4l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.5 2.6.6a2 2 0 0 1 1.7 2Z"/>',
+    wifi:
+      '<path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M12 20h.01"/><path d="M2 9a15 15 0 0 1 20 0"/>',
     copy:
       '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/>',
     chevronDown:
       '<path d="m6 9 6 6 6-6"/>',
     chevronUp:
       '<path d="m18 15-6-6-6 6"/>',
+    refresh:
+      '<path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/>',
+    check:
+      '<path d="m20 6-11 11-5-5"/>',
     play:
       '<path d="M8 5v14l11-7Z"/>',
     trash:
@@ -1947,6 +1961,7 @@ function getFinanceHistoryKeys() {
     ...(state.adminDeposits || []).map((item) => financeHistoryKey("deposit", item.id)),
     ...(state.adminWithdrawals || []).map((item) => financeHistoryKey("withdrawal", item.id)),
     ...(state.adminTransactions || []).map((item) => financeHistoryKey("transaction", item.id)),
+    ...(state.adminVtuTransactions || []).map((item) => financeHistoryKey("vtu", item.id)),
   ];
 }
 
@@ -1970,6 +1985,7 @@ async function loadFinancialDashboard() {
   if (state.user.role === "admin" && state.financialDashboard?.accountSnapshot) {
     applyAccountSnapshot(state.financialDashboard.accountSnapshot);
   }
+  await loadVtuSnapshot().catch(() => undefined);
 }
 
 async function refreshTradingAccountSnapshot({ force = false, silent = false } = {}) {
@@ -2014,24 +2030,67 @@ async function loadPaymentBanks({ force = false } = {}) {
   return state.paymentBanks;
 }
 
+async function loadVtuSnapshot() {
+  if (!state.user) {
+    state.vtuSettings = null;
+    state.vtuTransactions = [];
+    state.vtuDataPlans = [];
+    return;
+  }
+  if (state.user.role === "admin") {
+    state.vtuSettings = state.financialDashboard?.settings?.vtu || state.financialDashboard?.vtu?.settings || state.vtuSettings;
+    return;
+  }
+  const [settingsPayload, transactionsPayload] = await Promise.all([
+    api("/api/vtu/settings").catch(() => ({ settings: null })),
+    api("/api/vtu/transactions?limit=20").catch(() => ({ transactions: [] })),
+  ]);
+  state.vtuSettings = settingsPayload.settings || null;
+  state.vtuTransactions = transactionsPayload.transactions || [];
+}
+
+async function loadVtuDataPlans(network, { force = false } = {}) {
+  const normalizedNetwork = String(network || "").trim().toLowerCase();
+  if (!normalizedNetwork) {
+    state.vtuDataPlans = [];
+    state.vtuDataPlansNetwork = "";
+    return [];
+  }
+  if (!force && state.vtuDataPlansNetwork === normalizedNetwork && state.vtuDataPlans.length) {
+    return state.vtuDataPlans;
+  }
+  state.loadingVtu = true;
+  try {
+    const payload = await api(`/api/vtu/data/plans?network=${encodeURIComponent(normalizedNetwork)}`);
+    state.vtuDataPlans = payload.plans || [];
+    state.vtuDataPlansNetwork = normalizedNetwork;
+    return state.vtuDataPlans;
+  } finally {
+    state.loadingVtu = false;
+  }
+}
+
 async function loadAdminFinanceQueues() {
   if (!state.user || state.user.role !== "admin") {
     state.adminDeposits = [];
     state.adminWithdrawals = [];
     state.adminTransactions = [];
     state.adminGiftCards = [];
+    state.adminVtuTransactions = [];
     return;
   }
-  const [depositPayload, withdrawalPayload, transactionPayload, giftCardPayload] = await Promise.all([
+  const [depositPayload, withdrawalPayload, transactionPayload, giftCardPayload, vtuPayload] = await Promise.all([
     api("/api/admin/deposits"),
     api("/api/admin/withdrawals"),
     api("/api/admin/transactions"),
     api("/api/admin/gift-cards"),
+    api("/api/admin/integrations/vtu/transactions").catch(() => ({ transactions: [] })),
   ]);
   state.adminDeposits = depositPayload.deposits || [];
   state.adminWithdrawals = withdrawalPayload.withdrawals || [];
   state.adminTransactions = transactionPayload.transactions || [];
   state.adminGiftCards = giftCardPayload.giftCards || [];
+  state.adminVtuTransactions = vtuPayload.transactions || [];
   syncFinanceHistorySelection();
 }
 
@@ -3082,6 +3141,117 @@ function renderActionModal() {
               <button class="button-primary shimmer-button" type="submit">${icon("edit")} Update</button>
             </div>
           </form>
+        </div>
+      </div>
+    `;
+  }
+
+  if (state.actionModal.type === "vtu-airtime" || state.actionModal.type === "vtu-data") {
+    const isData = state.actionModal.type === "vtu-data";
+    const settings = state.vtuSettings || getFinancialSettings().vtu || {};
+    const ngnWallet = getFinancialWallet("NGN");
+    const availableNgn = Number(ngnWallet?.availableBalance || 0);
+    const network = state.actionModal.network || "";
+    const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === state.actionModal.variationId);
+    const amount = isData ? selectedPlan?.sellingPrice || "" : state.actionModal.amount || "";
+    const canUse = settings.configured && (isData ? settings.dataEnabled : settings.airtimeEnabled);
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card vtu-action-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">${isData ? "Data" : "Airtime"}</p>
+          <h3>${isData ? "Buy Data" : "Buy Airtime"}</h3>
+          <p class="modal-text">Available ${formatNaira(availableNgn)}</p>
+          ${
+            canUse
+              ? `
+                <div class="stack-form wallet-action-fields">
+                  <label class="stack-label">
+                    <span>Phone</span>
+                    <input id="vtu-phone-input" type="tel" inputmode="tel" value="${escapeHtml(state.actionModal.phone || "")}" placeholder="08000000000" />
+                  </label>
+                  <label class="stack-label">
+                    <span>Network</span>
+                    <select id="vtu-network-input">
+                      <option value="">Choose</option>
+                      ${["mtn", "airtel", "glo", "9mobile"].map((item) => `<option value="${item}" ${network === item ? "selected" : ""}>${item.toUpperCase()}</option>`).join("")}
+                    </select>
+                  </label>
+                  ${
+                    isData
+                      ? `
+                        <label class="stack-label">
+                          <span>Plan</span>
+                          <select id="vtu-plan-input" ${state.loadingVtu || !network ? "disabled" : ""}>
+                            <option value="">${state.loadingVtu ? "Loading plans..." : "Choose plan"}</option>
+                            ${state.vtuDataPlans.map((plan) => `<option value="${escapeHtml(plan.id)}" ${state.actionModal.variationId === plan.id ? "selected" : ""}>${escapeHtml(plan.size || plan.name)} - ${formatNaira(plan.sellingPrice)}</option>`).join("")}
+                          </select>
+                        </label>
+                        ${selectedPlan ? `<p class="wallet-equivalent-preview">${escapeHtml(selectedPlan.validity || selectedPlan.name)} | ${formatNaira(selectedPlan.sellingPrice)}</p>` : ""}
+                      `
+                      : `
+                        <label class="stack-label wallet-amount-field">
+                          <span>Amount</span>
+                          <input id="vtu-amount-input" class="wallet-amount-input" type="number" min="${escapeHtml(settings.minAirtimeAmount || "100")}" max="${escapeHtml(settings.maxAirtimeAmount || "50000")}" step="1" value="${escapeHtml(state.actionModal.amount || "")}" placeholder="1000" />
+                        </label>
+                        <div class="wallet-choice-row">
+                          ${[100, 200, 500, 1000, 2000, 5000].map((value) => `<button class="wallet-choice" data-vtu-airtime-amount="${value}" type="button">${formatNaira(value).replace(".00", "")}</button>`).join("")}
+                        </div>
+                      `
+                  }
+                </div>
+                <div class="modal-actions">
+                  <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+                  <button class="button-primary shimmer-button" id="vtu-review-btn" data-vtu-product="${isData ? "data" : "airtime"}" type="button" ${amount ? "" : "disabled"}>${icon(isData ? "wifi" : "phone")} Continue</button>
+                </div>
+              `
+              : `<p class="warning-copy">Service not available now.</p>`
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  if (state.actionModal.type === "vtu-confirm") {
+    const isData = state.actionModal.productType === "data";
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card vtu-action-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Confirm</p>
+          <h3>${isData ? "Data Purchase" : "Airtime Purchase"}</h3>
+          <div class="action-metric-stack">
+            <div class="action-metric"><span>Phone</span><strong>${escapeHtml(state.actionModal.phone || "")}</strong></div>
+            <div class="action-metric"><span>Network</span><strong>${escapeHtml(String(state.actionModal.network || "").toUpperCase())}</strong></div>
+            ${isData ? `<div class="action-metric"><span>Plan</span><strong>${escapeHtml(state.actionModal.planName || "")}</strong></div>` : ""}
+            <div class="action-metric"><span>Total</span><strong>${formatNaira(state.actionModal.amountCharged || 0)}</strong></div>
+          </div>
+          <div class="modal-actions">
+            <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+            <button class="button-primary shimmer-button" id="vtu-confirm-btn" type="button">${icon("check")} Pay</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (state.actionModal.type === "vtu-receipt") {
+    const transaction = state.actionModal.transaction || {};
+    const status = String(transaction.status || "processing").toUpperCase();
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card vtu-action-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Receipt</p>
+          <h3>${formatWalletRequestStatus(status)}</h3>
+          <div class="action-metric-stack">
+            <div class="action-metric"><span>Product</span><strong>${escapeHtml(String(transaction.productType || "VTU").toUpperCase())}</strong></div>
+            <div class="action-metric"><span>Amount</span><strong>${formatNaira(transaction.amountCharged || 0)}</strong></div>
+            <div class="action-metric"><span>Ref</span><strong>${escapeHtml(transaction.requestId || "")}</strong></div>
+          </div>
+          <div class="modal-actions">
+            <button class="button-primary shimmer-button" id="action-modal-cancel-btn" type="button">Done</button>
+          </div>
         </div>
       </div>
     `;
@@ -5132,6 +5302,73 @@ async function submitAdminDepositSettings(form) {
   }).catch((error) => showError(error.message));
 }
 
+async function submitAdminVtuSettings(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    const payload = await api("/api/admin/integrations/vtu/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        username: data.username || "",
+        password: data.password || "",
+        pin: data.pin || "",
+        airtimeEnabled: data.airtimeEnabled === "true",
+        dataEnabled: data.dataEnabled === "true",
+        airtimeMarkupPercent: data.airtimeMarkupPercent || "0",
+        dataMarkupPercent: data.dataMarkupPercent || "0",
+        minAirtimeAmount: data.minAirtimeAmount || "100",
+        maxAirtimeAmount: data.maxAirtimeAmount || "50000",
+        lowBalanceThreshold: data.lowBalanceThreshold || "5000",
+      }),
+    });
+    state.vtuSettings = payload.settings;
+    state.financialDashboard = {
+      ...(state.financialDashboard || {}),
+      settings: {
+        ...(state.financialDashboard?.settings || {}),
+        vtu: payload.settings,
+      },
+    };
+    clearFormDraft(form);
+    render();
+    showNotice("VTU settings saved");
+  }).catch((error) => showError(error.message));
+}
+
+async function refreshAdminVtuConnection(action = "test") {
+  await withLoading(async () => {
+    const endpoint = action === "balance" ? "/api/admin/integrations/vtu/balance" : "/api/admin/integrations/vtu/test";
+    const payload = await api(endpoint, {
+      method: action === "balance" ? "GET" : "POST",
+      body: action === "balance" ? undefined : JSON.stringify({}),
+    });
+    state.vtuSettings = payload.settings;
+    state.financialDashboard = {
+      ...(state.financialDashboard || {}),
+      settings: {
+        ...(state.financialDashboard?.settings || {}),
+        vtu: payload.settings,
+      },
+    };
+    render();
+    showNotice(`VTU balance ${formatNaira(payload.balance || payload.settings?.lastKnownBalance || 0)}`);
+  }).catch((error) => showError(error.message));
+}
+
+async function requeryAdminVtuTransaction(transactionId) {
+  if (!transactionId) {
+    return;
+  }
+  await withLoading(async () => {
+    await api(`/api/admin/integrations/vtu/transactions/${encodeURIComponent(transactionId)}/requery`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
+    render();
+    showNotice("VTU order checked");
+  }).catch((error) => showError(error.message));
+}
+
 async function submitUserBankAccount(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   const bank = (state.paymentBanks || []).find((item) => item.code === data.bankCode);
@@ -5597,6 +5834,7 @@ async function deleteSelectedFinanceHistory() {
     depositIds: [],
     withdrawalIds: [],
     transactionIds: [],
+    vtuTransactionIds: [],
   };
   selected.forEach((key) => {
     const [kind, id] = key.split(":");
@@ -5609,6 +5847,9 @@ async function deleteSelectedFinanceHistory() {
     if (kind === "transaction") {
       payload.transactionIds.push(id);
     }
+    if (kind === "vtu") {
+      payload.vtuTransactionIds.push(id);
+    }
   });
   await withLoading(async () => {
     const result = await api("/api/admin/finance-history/delete", {
@@ -5619,6 +5860,106 @@ async function deleteSelectedFinanceHistory() {
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
     render();
     showNotice(`${result.deletedCount || selected.length} record${(result.deletedCount || selected.length) === 1 ? "" : "s"} deleted`);
+  }).catch((error) => showError(error.message));
+}
+
+function openVtuModal(productType) {
+  const product = String(productType || "").trim().toLowerCase();
+  state.actionModal = {
+    type: product === "data" ? "vtu-data" : "vtu-airtime",
+    phone: "",
+    network: "",
+    amount: "",
+    variationId: "",
+  };
+  state.vtuDataPlans = [];
+  state.vtuDataPlansNetwork = "";
+  render();
+}
+
+function readVtuModalFields(productType) {
+  const product = String(productType || "").trim().toLowerCase();
+  const phone = document.getElementById("vtu-phone-input")?.value?.trim() || state.actionModal?.phone || "";
+  const network = document.getElementById("vtu-network-input")?.value || state.actionModal?.network || "";
+  const variationId = document.getElementById("vtu-plan-input")?.value || state.actionModal?.variationId || "";
+  const amount = document.getElementById("vtu-amount-input")?.value?.trim() || state.actionModal?.amount || "";
+  const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === variationId);
+  return {
+    productType: product,
+    phone,
+    network,
+    variationId,
+    amount,
+    selectedPlan,
+    amountCharged: product === "data" ? selectedPlan?.sellingPrice || "" : amount,
+    planName: selectedPlan?.name || "",
+  };
+}
+
+function saveVtuModalDraft(productType) {
+  const values = readVtuModalFields(productType);
+  state.actionModal = {
+    ...state.actionModal,
+    phone: values.phone,
+    network: values.network,
+    amount: values.amount,
+    variationId: values.variationId,
+  };
+}
+
+function reviewVtuPurchase(productType) {
+  const values = readVtuModalFields(productType);
+  if (!values.phone || !values.network) {
+    showError("Enter phone and network.");
+    return;
+  }
+  if (values.productType === "data" && !values.selectedPlan) {
+    showError("Select a data plan.");
+    return;
+  }
+  if (values.productType === "airtime" && (!values.amount || Number(values.amount) <= 0)) {
+    showError("Enter airtime amount.");
+    return;
+  }
+  state.actionModal = {
+    type: "vtu-confirm",
+    ...values,
+    amountCharged: values.amountCharged,
+    returnModal: {
+      type: values.productType === "data" ? "vtu-data" : "vtu-airtime",
+      phone: values.phone,
+      network: values.network,
+      amount: values.amount,
+      variationId: values.variationId,
+    },
+  };
+  render();
+}
+
+async function submitVtuPurchase() {
+  const modal = state.actionModal || {};
+  const productType = String(modal.productType || "").trim().toLowerCase();
+  if (!["airtime", "data"].includes(productType)) {
+    showError("Select airtime or data.");
+    return;
+  }
+  await withLoading(async () => {
+    const endpoint = productType === "data" ? "/api/vtu/data" : "/api/vtu/airtime";
+    const body = productType === "data"
+      ? { phone: modal.phone, network: modal.network, variationId: modal.variationId }
+      : { phone: modal.phone, network: modal.network, amount: modal.amount };
+    const response = await api(endpoint, {
+      method: "POST",
+      headers: { "Idempotency-Key": `vtu-${productType}-${Date.now()}-${Math.random().toString(16).slice(2)}` },
+      body: JSON.stringify(body),
+    });
+    state.actionModal = {
+      type: "vtu-receipt",
+      transaction: response.transaction,
+    };
+    await loadFinancialDashboard();
+    render();
+    showNotice(productType === "data" ? "Data order submitted." : "Airtime order submitted.");
   }).catch((error) => showError(error.message));
 }
 
@@ -6786,6 +7127,36 @@ function renderCurrentUserWalletSummary() {
   `;
 }
 
+function renderVtuQuickActions() {
+  if (state.user?.role !== "user") {
+    return "";
+  }
+  const settings = state.vtuSettings || getFinancialSettings().vtu || {};
+  if (!settings.configured || (!settings.airtimeEnabled && !settings.dataEnabled)) {
+    return "";
+  }
+  return `
+    <section class="mobile-card vtu-service-strip" data-section="vtu">
+      <div class="section-head compact">
+        <div>
+          <h3>Services</h3>
+          <p class="muted-copy">Airtime and data</p>
+        </div>
+      </div>
+      <div class="vtu-action-grid">
+        <button class="service-action-btn" data-vtu-open="airtime" type="button" ${settings.airtimeEnabled ? "" : "disabled"}>
+          <span>${icon("phone")}</span>
+          <strong>Airtime</strong>
+        </button>
+        <button class="service-action-btn" data-vtu-open="data" type="button" ${settings.dataEnabled ? "" : "disabled"}>
+          <span>${icon("wifi")}</span>
+          <strong>Data</strong>
+        </button>
+      </div>
+    </section>
+  `;
+}
+
 function renderAdminDepositCard(deposit) {
   const currency = deposit.currency || "USDT";
   const reference = deposit.transactionHash || deposit.bankReference || "";
@@ -6899,6 +7270,34 @@ function renderAdminTransactionCard(transaction) {
       <div class="asset-values">
         <strong>${formatCurrencyAmount(transaction.amount, transaction.currency)}</strong>
         <p class="muted-copy">${transaction.createdAt ? new Date(transaction.createdAt).toLocaleString() : ""}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminVtuTransactionCard(transaction) {
+  const historyKey = financeHistoryKey("vtu", transaction.id);
+  const status = String(transaction.status || "processing").toUpperCase();
+  const product = String(transaction.productType || "vtu").toUpperCase();
+  const canRequery = ["INITIATED", "PROCESSING"].includes(status);
+  return `
+    <div class="asset-card admin-finance-card">
+      <label class="history-checkbox finance-history-checkbox" aria-label="Select VTU transaction">
+        <input type="checkbox" data-finance-history-kind="vtu" data-finance-history-id="${transaction.id}" ${
+          state.selectedFinanceHistoryIds.includes(historyKey) ? "checked" : ""
+        } />
+        <span></span>
+      </label>
+      <div>
+        <strong>${escapeHtml(transaction.user?.name || "Unknown user")}</strong>
+        <p class="muted-copy">${product} | ${escapeHtml(String(transaction.network || "").toUpperCase())} ${escapeHtml(transaction.phone || "")}</p>
+        <p class="muted-copy">${escapeHtml(transaction.planName || transaction.requestId || "")}</p>
+      </div>
+      <div class="asset-values">
+        <strong>${formatNaira(transaction.amountCharged || 0)}</strong>
+        <span class="wallet-status-badge ${walletStatusClass(status)}">${escapeHtml(formatWalletRequestStatus(status))}</span>
+        <p class="muted-copy">${transaction.createdAt ? new Date(transaction.createdAt).toLocaleString() : ""}</p>
+        ${canRequery ? `<button class="micro-btn" data-admin-vtu-requery="${escapeHtml(transaction.id)}" type="button">${icon("refresh")} Check</button>` : ""}
       </div>
     </div>
   `;
@@ -7324,9 +7723,11 @@ function renderAdminFinancePanel() {
   const deposits = sortRecent(state.adminDeposits || []);
   const withdrawals = sortRecent(state.adminWithdrawals || []);
   const transactions = sortRecent(state.adminTransactions || []);
+  const vtuTransactions = sortRecent(state.adminVtuTransactions || []);
   const visibleDeposits = getPreviewRecords(deposits, "admin-deposits");
   const visibleWithdrawals = getPreviewRecords(withdrawals, "admin-withdrawals");
   const visibleTransactions = getPreviewRecords(transactions, "admin-ledger");
+  const visibleVtuTransactions = getPreviewRecords(vtuTransactions, "admin-vtu");
   return `
     <section class="mobile-card settings-card${loadingClass(state.loadingAdminFinance)}" data-section="finance">
       ${state.loadingAdminFinance ? renderSectionLoadingOverlay("Loading finance queue", "Checking pending deposits and withdrawals") : ""}
@@ -7364,6 +7765,13 @@ function renderAdminFinancePanel() {
             ${renderListToggle("admin-ledger", transactions.length)}
           </div>
           ${visibleTransactions.map(renderAdminTransactionCard).join("") || `<p class="muted-copy">No ledger records yet.</p>`}
+        </div>
+        <div>
+          <div class="list-section-head">
+            <p class="eyebrow">Airtime & Data</p>
+            ${renderListToggle("admin-vtu", vtuTransactions.length)}
+          </div>
+          ${visibleVtuTransactions.map(renderAdminVtuTransactionCard).join("") || `<p class="muted-copy">No VTU orders yet.</p>`}
         </div>
       </div>
     </section>
@@ -7411,6 +7819,7 @@ function renderSettingsPane() {
   const depositSettings = financeSettings.deposit || {};
   const exchangeRateSettings = financeSettings.exchangeRate || {};
   const telegramSettings = financeSettings.telegram || {};
+  const vtuSettings = state.vtuSettings || financeSettings.vtu || {};
   const adminDepositSettingsDraft = state.adminDepositSettingsDraft || {};
   const savedBank = getSavedBankAccount();
   const settingsBankOptions = (state.paymentBanks || [])
@@ -7468,6 +7877,61 @@ function renderSettingsPane() {
         <button class="button-secondary shimmer-button" type="submit">${icon("bank")} Save</button>
       </form>
     `;
+    const vtuLowBalance = Number(vtuSettings.lastKnownBalance || 0) > 0
+      && Number(vtuSettings.lowBalanceThreshold || 0) > 0
+      && Number(vtuSettings.lastKnownBalance || 0) <= Number(vtuSettings.lowBalanceThreshold || 0);
+    const vtuPanel = `
+      <form id="admin-vtu-settings-form" class="stack-form subtle-form progressive-settings-form">
+        <div class="settings-status-grid">
+          <span class="wallet-status-badge ${vtuSettings.configured ? "wallet-status-success" : "wallet-status-pending"}">${vtuSettings.configured ? "Connected" : "Not set"}</span>
+          <span class="muted-copy">${vtuSettings.lastKnownBalance !== null && vtuSettings.lastKnownBalance !== undefined ? `VTU ${formatNaira(vtuSettings.lastKnownBalance)}` : "Balance not checked"}</span>
+        </div>
+        ${vtuLowBalance ? `<p class="warning-copy">VTU wallet low. Current ${formatNaira(vtuSettings.lastKnownBalance)}.</p>` : ""}
+        <label>Username <input name="username" value="" placeholder="${escapeHtml(vtuSettings.username || "VTU.ng username or email")}" autocomplete="off" /></label>
+        ${renderPasswordField({
+          label: "Password",
+          name: "password",
+          placeholder: vtuSettings.hasPassword ? "Saved password" : "VTU.ng password",
+          autocomplete: "new-password",
+          required: false,
+        })}
+        ${renderPasswordField({
+          label: "Webhook PIN",
+          name: "pin",
+          placeholder: vtuSettings.hasPin ? "Saved PIN" : "VTU.ng PIN",
+          autocomplete: "new-password",
+          required: false,
+        })}
+        <label>
+          Airtime
+          <select name="airtimeEnabled">
+            <option value="true" ${vtuSettings.airtimeEnabled ? "selected" : ""}>Enabled</option>
+            <option value="false" ${!vtuSettings.airtimeEnabled ? "selected" : ""}>Disabled</option>
+          </select>
+        </label>
+        <label>
+          Data
+          <select name="dataEnabled">
+            <option value="true" ${vtuSettings.dataEnabled ? "selected" : ""}>Enabled</option>
+            <option value="false" ${!vtuSettings.dataEnabled ? "selected" : ""}>Disabled</option>
+          </select>
+        </label>
+        <label>Airtime markup % <input name="airtimeMarkupPercent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(vtuSettings.airtimeMarkupPercent || "0")}" /></label>
+        <label>Data markup % <input name="dataMarkupPercent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(vtuSettings.dataMarkupPercent || "0")}" /></label>
+        <label>Min airtime <input name="minAirtimeAmount" type="number" min="1" step="1" value="${escapeHtml(vtuSettings.minAirtimeAmount || "100")}" /></label>
+        <label>Max airtime <input name="maxAirtimeAmount" type="number" min="1" step="1" value="${escapeHtml(vtuSettings.maxAirtimeAmount || "50000")}" /></label>
+        <label>Low balance alert <input name="lowBalanceThreshold" type="number" min="0" step="1" value="${escapeHtml(vtuSettings.lowBalanceThreshold || "5000")}" /></label>
+        <div class="copy-value-row">
+          <code>${escapeHtml(`${API_BASE_URL || window.location.origin}/api/webhooks/vtu`)}</code>
+          ${renderCopyButton(`${API_BASE_URL || window.location.origin}/api/webhooks/vtu`, "Copy webhook URL")}
+        </div>
+        <div class="modal-actions inline-modal-actions">
+          <button class="button-secondary" id="admin-vtu-test-btn" type="button">${icon("refresh")} Test</button>
+          <button class="button-secondary" id="admin-vtu-balance-btn" type="button">${icon("bank")} Balance</button>
+          <button class="button-primary shimmer-button" type="submit">${icon("settings")} Save</button>
+        </div>
+      </form>
+    `;
     const signalPanel = `
       <form id="signal-auto-trade-form" class="stack-form subtle-form progressive-settings-form">
         <label>
@@ -7517,6 +7981,7 @@ function renderSettingsPane() {
       ${renderSettingsDisclosure({ key: "appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
       ${renderSettingsDisclosure({ key: "exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
       ${renderSettingsDisclosure({ key: "deposit-channel", title: "Deposit & Channel", subtitle: "Bank, wallet, rate", iconName: "bank", content: depositPanel, open: true })}
+      ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel })}
       ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
       ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
       ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
@@ -8127,7 +8592,7 @@ function scrollToRouteSection() {
 
 function isWalletRequestHistoryItem(item) {
   const kind = String(item?.kind || item?.type || "").toUpperCase();
-  return ["DEPOSIT", "WITHDRAWAL"].includes(kind);
+  return ["DEPOSIT", "WITHDRAWAL", "VTU", "VTU_AIRTIME", "VTU_DATA"].includes(kind);
 }
 
 function renderWalletHistorySection({
@@ -8285,6 +8750,7 @@ function renderHistoryPane() {
 
 function renderHomePane() {
     const userHomeContent = `
+      ${renderVtuQuickActions()}
       ${renderWalletHistorySection({
         limit: 3,
         title: "Transactions",
@@ -8734,6 +9200,28 @@ function bindDashboardActions() {
     });
   }
 
+  const adminVtuSettingsForm = document.getElementById("admin-vtu-settings-form");
+  if (adminVtuSettingsForm) {
+    adminVtuSettingsForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminVtuSettings(adminVtuSettingsForm);
+    });
+  }
+
+  const adminVtuTestButton = document.getElementById("admin-vtu-test-btn");
+  if (adminVtuTestButton) {
+    adminVtuTestButton.addEventListener("click", () => refreshAdminVtuConnection("test"));
+  }
+
+  const adminVtuBalanceButton = document.getElementById("admin-vtu-balance-btn");
+  if (adminVtuBalanceButton) {
+    adminVtuBalanceButton.addEventListener("click", () => refreshAdminVtuConnection("balance"));
+  }
+
+  document.querySelectorAll("[data-admin-vtu-requery]").forEach((button) => {
+    button.addEventListener("click", () => requeryAdminVtuTransaction(button.dataset.adminVtuRequery));
+  });
+
   document.querySelectorAll("[data-admin-bonus-form]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -8859,6 +9347,70 @@ function bindDashboardActions() {
   const withdrawButton = document.getElementById("netrue-withdraw-btn");
   if (withdrawButton) {
     withdrawButton.addEventListener("click", () => openWalletActionModal("withdraw"));
+  }
+
+  document.querySelectorAll("[data-vtu-open]").forEach((button) => {
+    button.addEventListener("click", () => openVtuModal(button.dataset.vtuOpen));
+  });
+
+  const vtuNetworkInput = document.getElementById("vtu-network-input");
+  if (vtuNetworkInput) {
+    vtuNetworkInput.addEventListener("change", () => {
+      const productType = state.actionModal?.type === "vtu-data" ? "data" : "airtime";
+      saveVtuModalDraft(productType);
+      if (productType === "data") {
+        state.actionModal = {
+          ...state.actionModal,
+          network: vtuNetworkInput.value,
+          variationId: "",
+        };
+        void loadVtuDataPlans(vtuNetworkInput.value, { force: true })
+          .then(() => render())
+          .catch((error) => showError(error.message));
+        render();
+      }
+    });
+  }
+
+  const vtuPhoneInput = document.getElementById("vtu-phone-input");
+  if (vtuPhoneInput) {
+    vtuPhoneInput.addEventListener("input", () => saveVtuModalDraft(state.actionModal?.type === "vtu-data" ? "data" : "airtime"));
+  }
+
+  const vtuAmountInput = document.getElementById("vtu-amount-input");
+  if (vtuAmountInput) {
+    vtuAmountInput.addEventListener("input", () => {
+      saveVtuModalDraft("airtime");
+      render();
+    });
+  }
+
+  const vtuPlanInput = document.getElementById("vtu-plan-input");
+  if (vtuPlanInput) {
+    vtuPlanInput.addEventListener("change", () => {
+      saveVtuModalDraft("data");
+      render();
+    });
+  }
+
+  document.querySelectorAll("[data-vtu-airtime-amount]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = {
+        ...state.actionModal,
+        amount: button.dataset.vtuAirtimeAmount,
+      };
+      render();
+    });
+  });
+
+  const vtuReviewButton = document.getElementById("vtu-review-btn");
+  if (vtuReviewButton) {
+    vtuReviewButton.addEventListener("click", () => reviewVtuPurchase(vtuReviewButton.dataset.vtuProduct));
+  }
+
+  const vtuConfirmButton = document.getElementById("vtu-confirm-btn");
+  if (vtuConfirmButton) {
+    vtuConfirmButton.addEventListener("click", submitVtuPurchase);
   }
 
   const manualDepositButton = document.getElementById("wallet-manual-deposit-btn");
