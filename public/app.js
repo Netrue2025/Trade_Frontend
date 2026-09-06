@@ -616,12 +616,12 @@ function getFormDraftKey(form) {
   if (!form) {
     return "standalone";
   }
-  if (form.id) {
-    return `form:${form.id}`;
-  }
   const dataKey = Object.entries(form.dataset || {}).find(([, value]) => String(value || "").trim());
   if (dataKey) {
     return `form:${dataKey[0]}:${dataKey[1]}`;
+  }
+  if (form.id) {
+    return `form:${form.id}`;
   }
   return "";
 }
@@ -903,7 +903,8 @@ function clearActionModal() {
   if (window.SignalPage?.destroyActiveChart) {
     window.SignalPage.destroyActiveChart();
   }
-  state.actionModal = null;
+  const returnModal = state.actionModal?.returnModal || null;
+  state.actionModal = returnModal;
   render();
 }
 
@@ -7521,6 +7522,122 @@ function renderSettingsPane() {
       ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
     `;
   }
+  if (state.user.role === "user") {
+    const appearancePanel = `
+      <div class="theme-toggle">
+        <button class="theme-btn ${state.theme === "light" ? "active" : ""}" data-theme-mode="light" type="button">Light</button>
+        <button class="theme-btn ${state.theme === "dark" ? "active" : ""}" data-theme-mode="dark" type="button">Dark</button>
+      </div>
+    `;
+    const exchangePanel = `
+      ${state.loadingUsers ? renderSectionLoadingOverlay("Loading account", "Pulling linked account details") : ""}
+      <form id="exchange-select-form" class="stack-form subtle-form progressive-settings-form">
+        <label>
+          Active exchange
+          <select name="exchange">
+            ${EXCHANGE_OPTIONS.map((exchange) => `<option value="${exchange.id}" ${activeExchange === exchange.id ? "selected" : ""}>${exchange.label}</option>`).join("")}
+          </select>
+        </label>
+      </form>
+      <form id="exchange-connect-form" class="stack-form progressive-settings-form">
+        <input type="hidden" name="exchange" value="${activeExchange}" />
+        <label>API key <input name="apiKey" value="${escapeHtml(settingsDraft.apiKey)}" placeholder="${activeExchangeLabel} API key" required /></label>
+        ${renderPasswordField({
+          label: "API secret",
+          name: "apiSecret",
+          placeholder: `${activeExchangeLabel} API secret`,
+          autocomplete: "off",
+          value: settingsDraft.apiSecret,
+        })}
+        <label>
+          Environment
+          <select name="testnet">
+            <option value="false" ${settingsDraft.testnet !== "true" ? "selected" : ""}>Mainnet</option>
+            <option value="true" ${settingsDraft.testnet === "true" ? "selected" : ""}>Testnet</option>
+          </select>
+        </label>
+        <button class="button-primary shimmer-button" type="submit">${icon("settings")} Connect</button>
+      </form>
+      <form id="mirror-form" class="stack-form subtle-form progressive-settings-form">
+        <label>
+          Mirror trades
+          <select name="enabled">
+            <option value="true" ${state.user.mirrorEnabled ? "selected" : ""}>Enabled</option>
+            <option value="false" ${!state.user.mirrorEnabled ? "selected" : ""}>Disabled</option>
+          </select>
+        </label>
+        <button class="button-secondary shimmer-button" type="submit">${icon("signals")} Save</button>
+      </form>
+      ${renderMirrorMinimumNotice()}
+    `;
+    const bankPanel = `
+      <form id="user-bank-account-form" class="stack-form subtle-form progressive-settings-form">
+        <label>
+          Bank
+          <select name="bankCode">
+            <option value="">Choose bank</option>
+            ${settingsBankOptions}
+          </select>
+        </label>
+        <label>Account number <input name="accountNumber" value="${escapeHtml(savedBank.accountNumber || "")}" placeholder="10 digits" inputmode="numeric" maxlength="10" /></label>
+        ${savedBank.verified ? `<p class="muted-copy">Verified: ${escapeHtml(savedBank.accountName || "")} | ${escapeHtml(savedBank.maskedAccountNumber || savedBank.accountNumber || "")}</p>` : ""}
+        <button class="button-secondary shimmer-button" type="submit">${icon("bank")} Verify</button>
+      </form>
+    `;
+    const accountPanel = `
+      <div class="card-list">
+        ${renderCurrentUserWalletSummary()}
+      </div>
+      <p class="muted-copy">${escapeHtml(settingsLiveLabel)}</p>
+    `;
+    const supportPanel = `
+      <form id="user-password-form" class="stack-form subtle-form progressive-settings-form">
+        ${renderPasswordField({
+          label: "Current password",
+          name: "currentPassword",
+          placeholder: "Current password",
+          autocomplete: "current-password",
+        })}
+        ${renderPasswordField({
+          label: "New password",
+          name: "newPassword",
+          placeholder: "New password",
+          autocomplete: "new-password",
+        })}
+        ${renderPasswordField({
+          label: "Confirm password",
+          name: "confirmPassword",
+          placeholder: "Confirm password",
+          autocomplete: "new-password",
+        })}
+        <button class="button-secondary shimmer-button" type="submit">${icon("lock")} Update</button>
+      </form>
+      <div class="support-action-grid">
+        <a class="support-action-card whatsapp" href="https://wa.me/2347062671100" target="_blank" rel="noopener noreferrer">
+          ${icon("whatsapp")}
+          <span>WhatsApp</span>
+        </a>
+        <form id="user-support-message-form" class="support-message-card">
+          <label>
+            <span>Message admin</span>
+            <textarea name="message" rows="3" placeholder="Type message" required></textarea>
+          </label>
+          <button class="button-primary shimmer-button" type="submit">${icon("contact")} Send</button>
+        </form>
+      </div>
+      <div class="contact-card compact-contact-card">
+        <p><strong>Email:</strong> support@trade.local</p>
+        <button id="logout-btn" class="button-secondary shimmer-button" type="button">Logout</button>
+      </div>
+    `;
+    return `
+      ${renderSettingsDisclosure({ key: "user-appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
+      ${renderSettingsDisclosure({ key: "user-exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, open: true, extraClass: loadingClass(state.loadingUsers) })}
+      ${renderSettingsDisclosure({ key: "user-bank", title: "Withdrawal Bank", subtitle: savedBank.verified ? "Verified" : "Add account", iconName: "bank", content: bankPanel })}
+      ${renderSettingsDisclosure({ key: "user-account", title: "Account", subtitle: state.user.mirrorEnabled ? "Mirror active" : "Mirror off", iconName: "profile", content: accountPanel })}
+      ${renderSettingsDisclosure({ key: "user-support", title: "Support", subtitle: "Password and help", iconName: "contact", content: supportPanel, section: "support" })}
+    `;
+  }
   return `
       <section class="mobile-card settings-card">
         <div class="section-head">
@@ -8641,6 +8758,7 @@ function bindDashboardActions() {
         type: "admin-user-profile",
         userId,
         userSnapshot: state.users.find((user) => user.id === userId) || null,
+        returnModal: { type: "admin-users" },
       });
     });
   });
