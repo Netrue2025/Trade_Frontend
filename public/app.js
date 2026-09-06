@@ -178,6 +178,7 @@ const state = {
   selectedFinanceHistoryIds: [],
   adminPasswordDrafts: {},
   revealedAdminPasswordIds: [],
+  volatileFieldDrafts: {},
   settingsDraft: {
     apiKey: "",
     apiSecret: "",
@@ -651,8 +652,46 @@ function isDraftableField(field) {
   return !!(field.name || field.id);
 }
 
+function isRestorableField(field) {
+  const tagName = String(field?.tagName || "").toLowerCase();
+  const type = String(field?.type || "").toLowerCase();
+  if (!["input", "textarea", "select"].includes(tagName)) {
+    return false;
+  }
+  if (["hidden", "file", "button", "submit", "reset", "image"].includes(type)) {
+    return false;
+  }
+  return !!(field.name || field.id);
+}
+
+function isVolatileDraftField(field) {
+  if (!isRestorableField(field)) {
+    return false;
+  }
+  const type = String(field.type || "").toLowerCase();
+  const name = String(field.name || field.id || "").toLowerCase();
+  return (
+    field.dataset?.volatileDraft === "true" ||
+    type === "password" ||
+    /(password|secret|token|apikey|api-key|privatekey|private-key|pin)/.test(name) ||
+    !isDraftableField(field)
+  );
+}
+
 function getFieldDraftKey(field) {
   if (!isDraftableField(field)) {
+    return "";
+  }
+  const formKey = getFormDraftKey(field.closest("form"));
+  const fieldKey = field.name || field.id;
+  if (!formKey && !field.id) {
+    return "";
+  }
+  return `${formKey || "standalone"}::${fieldKey}`;
+}
+
+function getRestorableFieldKey(field) {
+  if (!isRestorableField(field)) {
     return "";
   }
   const formKey = getFormDraftKey(field.closest("form"));
@@ -722,9 +761,49 @@ function restoreFormDrafts(root = app) {
   });
 }
 
+function captureVolatileFieldDrafts(root = app) {
+  if (!root) {
+    return;
+  }
+  const nextDrafts = { ...(state.volatileFieldDrafts || {}) };
+  root.querySelectorAll("input, textarea, select").forEach((field) => {
+    if (!isVolatileDraftField(field)) {
+      return;
+    }
+    const key = getRestorableFieldKey(field);
+    if (!key) {
+      return;
+    }
+    const value = readDraftFieldValue(field);
+    if (value === undefined || value === "") {
+      delete nextDrafts[key];
+      return;
+    }
+    nextDrafts[key] = value;
+  });
+  state.volatileFieldDrafts = nextDrafts;
+}
+
+function restoreVolatileFieldDrafts(root = app) {
+  if (!root) {
+    return;
+  }
+  const drafts = state.volatileFieldDrafts || {};
+  root.querySelectorAll("input, textarea, select").forEach((field) => {
+    if (!isVolatileDraftField(field)) {
+      return;
+    }
+    const key = getRestorableFieldKey(field);
+    if (!key || !Object.prototype.hasOwnProperty.call(drafts, key)) {
+      return;
+    }
+    writeDraftFieldValue(field, drafts[key]);
+  });
+}
+
 function getFocusedFieldSnapshot(root = app) {
   const field = document.activeElement;
-  if (!root || !field || !root.contains(field) || !isDraftableField(field)) {
+  if (!root || !field || !root.contains(field) || !isRestorableField(field)) {
     return null;
   }
   let selectionStart = null;
@@ -737,7 +816,7 @@ function getFocusedFieldSnapshot(root = app) {
     selectionEnd = null;
   }
   return {
-    key: getFieldDraftKey(field),
+    key: getRestorableFieldKey(field),
     selectionStart,
     selectionEnd,
   };
@@ -749,7 +828,7 @@ function restoreFocusedField(snapshot, root = app) {
   }
   requestAnimationFrame(() => {
     const field = [...root.querySelectorAll("input, textarea, select")]
-      .find((item) => getFieldDraftKey(item) === snapshot.key);
+      .find((item) => getRestorableFieldKey(item) === snapshot.key);
     if (!field) {
       return;
     }
@@ -770,12 +849,19 @@ function clearFormDraft(form) {
     return;
   }
   const nextDrafts = { ...(state.formDrafts || {}) };
+  const nextVolatileDrafts = { ...(state.volatileFieldDrafts || {}) };
   for (const key of Object.keys(nextDrafts)) {
     if (key.startsWith(`${formKey}::`)) {
       delete nextDrafts[key];
     }
   }
+  for (const key of Object.keys(nextVolatileDrafts)) {
+    if (key.startsWith(`${formKey}::`)) {
+      delete nextVolatileDrafts[key];
+    }
+  }
   state.formDrafts = nextDrafts;
+  state.volatileFieldDrafts = nextVolatileDrafts;
   persistFormDrafts();
 }
 
@@ -8776,6 +8862,7 @@ function renderHomePane() {
 
 function renderDashboardShell() {
   captureFormDrafts();
+  captureVolatileFieldDrafts();
   const focusedFieldSnapshot = getFocusedFieldSnapshot();
   const adminUsersList = document.querySelector(".admin-users-modal-list");
   const adminUsersSearch = document.getElementById("admin-user-search-input");
@@ -8815,6 +8902,7 @@ function renderDashboardShell() {
     ${renderLoader()}
   `;
   restoreFormDrafts();
+  restoreVolatileFieldDrafts();
   bindFormDraftCapture();
   restoreFocusedField(focusedFieldSnapshot);
 
