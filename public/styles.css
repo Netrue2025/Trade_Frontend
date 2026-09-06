@@ -2949,6 +2949,14 @@ body[data-theme="dark"] .mirror-guide-pill {
   letter-spacing: 0;
 }
 
+.wallet-resolve-primary {
+  width: 100%;
+  min-height: 52px;
+  justify-content: center;
+  border-radius: 14px;
+  font-weight: 900;
+}
+
 .gift-card-code-input {
   text-align: center;
 }
@@ -3063,6 +3071,8 @@ body[data-theme="dark"] .mirror-guide-pill {
 }
 
 .bank-name-warning {
+  display: grid;
+  gap: 8px;
   margin: 6px 0 0;
   padding: 8px 10px;
   border-radius: 12px;
@@ -3071,6 +3081,25 @@ body[data-theme="dark"] .mirror-guide-pill {
   font-size: 0.78rem;
   font-weight: 800;
   line-height: 1.35;
+}
+
+.bank-name-warning p {
+  margin: 0;
+}
+
+.bank-warning-support {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 77, 109, 0.28);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--danger);
+  font-weight: 900;
 }
 
 .action-metric small {

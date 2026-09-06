@@ -2901,6 +2901,29 @@ function renderActionModal() {
     `;
   }
 
+  if (state.actionModal.type === "withdrawal-support") {
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card message-reply-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Support</p>
+          <h3>Account name review</h3>
+          <p class="modal-text">Send admin the account details you want reviewed.</p>
+          <form id="withdrawal-support-message-form" class="stack-form">
+            <label class="stack-label">
+              <span>Message</span>
+              <textarea name="message" rows="4" placeholder="Type message" required>${escapeHtml(state.actionModal.message || "")}</textarea>
+            </label>
+            <div class="modal-actions">
+              <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+              <button class="button-primary shimmer-button" type="submit">${icon("contact")} Send</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "admin-users") {
     const totalUsers = Number(state.users?.length || 0);
     const filteredUsers = getFilteredAdminUsers();
@@ -2993,6 +3016,7 @@ function renderActionModal() {
     const bankMode = state.actionModal.bankMode || (savedBanks.length ? "saved" : "new");
     const selectedSavedBank = savedBanks.find((account) => account.id === state.actionModal.bankAccountId) || savedBanks[0] || null;
     const resolvedBank = state.resolvedBankAccount || (bankMode === "saved" ? selectedSavedBank : null);
+    const bankNameAccepted = currency !== "NGN" || isBankAccountNameAccepted(resolvedBank);
     const selectedBankCode = state.actionModal.bankCode || resolvedBank?.bankCode || savedBank.bankCode || "";
     const bankOptions = (state.paymentBanks || [])
       .map((bank) => `<option value="${escapeHtml(bank.code)}" ${selectedBankCode === bank.code ? "selected" : ""}>${escapeHtml(bank.name)}</option>`)
@@ -3127,7 +3151,7 @@ function renderActionModal() {
         <input id="wallet-save-bank-input" type="checkbox" checked />
         <span>Save account</span>
       </label>
-      <button class="button-secondary shimmer-button" id="wallet-resolve-bank-btn" type="button">${icon("bank")} Resolve</button>
+      <button class="button-secondary shimmer-button wallet-resolve-primary" id="wallet-resolve-bank-btn" type="button">${icon("bank")} Resolve</button>
       ${
         bankMode === "new" && resolvedBank?.verified
           ? `
@@ -3173,6 +3197,8 @@ function renderActionModal() {
     `;
     const actionFields = isGiftRedeem ? giftRedeemForm : isDeposit ? depositForm : withdrawalForm;
     const canSubmit = isGiftRedeem || !!currency;
+    const submitDisabled = !isGiftRedeem && !isDeposit && currency === "NGN" && !bankNameAccepted;
+    const submitTitle = submitDisabled ? "Resolve a matching bank account first" : buttonLabel;
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card">
@@ -3190,7 +3216,7 @@ function renderActionModal() {
               ? `
                 <div class="modal-actions">
                   <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
-                  <button class="button-primary shimmer-button" id="wallet-submit-btn" data-wallet-mode="${isGiftRedeem ? "gift-card" : state.actionModal.type}" data-wallet-currency-selected="${currency}" type="button">${buttonLabel}</button>
+                  <button class="button-primary shimmer-button" id="wallet-submit-btn" data-wallet-mode="${isGiftRedeem ? "gift-card" : state.actionModal.type}" data-wallet-currency-selected="${currency}" type="button" title="${escapeHtml(submitTitle)}" ${submitDisabled ? "disabled" : ""}>${buttonLabel}</button>
                 </div>
               `
               : ""
@@ -3515,6 +3541,36 @@ function bindModalActions() {
       submitNotificationReply(notificationReplyForm);
     });
   }
+
+  const withdrawalSupportForm = document.getElementById("withdrawal-support-message-form");
+  if (withdrawalSupportForm) {
+    withdrawalSupportForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(withdrawalSupportForm).entries());
+      await withLoading(async () => {
+        await api("/api/support/messages", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Withdrawal account review",
+            message: data.message || "",
+          }),
+        });
+        clearFormDraft(withdrawalSupportForm);
+        clearActionModal();
+        showNotice("Message sent to admin");
+      }).catch((error) => showError(error.message));
+    });
+  }
+
+  document.querySelectorAll("[data-open-withdrawal-support]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = {
+        type: "withdrawal-support",
+        message: button.dataset.openWithdrawalSupport || "",
+      };
+      render();
+    });
+  });
 
   if (state.actionModal?.type === "signal-chart" && state.actionModal.chartPayload && window.SignalPage?.mountSignalChart) {
     window.SignalPage.mountSignalChart({
@@ -5287,11 +5343,30 @@ function updateWalletEquivalentPreview(amountInput, currency) {
   preview.textContent = equivalent ? `Equivalent: ${equivalent}` : "Equivalent: --";
 }
 
+function isBankAccountNameAccepted(account) {
+  if (!account) {
+    return false;
+  }
+  if (account.nameMatch === true) {
+    return true;
+  }
+  return Number(account.matchedNameCount || 0) >= 2;
+}
+
 function renderBankNameWarning(account) {
-  if (!account || (account.nameMatch !== false && !account.nameMatchWarning)) {
+  if (!account || isBankAccountNameAccepted(account)) {
     return "";
   }
-  return `<p class="bank-name-warning">${escapeHtml(account.nameMatchWarning || "Resolved account name does not match your registered name. Withdrawal may be reviewed.")}</p>`;
+  const accountName = account.accountName ? ` (${account.accountName})` : "";
+  const message = `Withdrawal account name review needed${accountName}. My registered name is ${state.user?.name || ""}.`;
+  return `
+    <div class="bank-name-warning">
+      <p>${escapeHtml(account.nameMatchWarning || "Resolved account name does not match your registered name. Please use your own account or contact support.")}</p>
+      <button class="bank-warning-support" data-open-withdrawal-support="${escapeHtml(message)}" type="button">
+        ${icon("contact")} Support
+      </button>
+    </div>
+  `;
 }
 
 function getTabRoute(tab) {
@@ -8601,6 +8676,10 @@ function bindDashboardActions() {
         const accountNumber = document.getElementById("wallet-account-input")?.value?.replace(/\D/g, "").trim()
           || bankAccount?.accountNumber
           || "";
+        if (!isBankAccountNameAccepted(bankAccount)) {
+          showError("Resolve a bank account that matches your registered first and last name.");
+          return;
+        }
         if (useSavedBank) {
           withdrawalPayload.bankAccountId = savedBank.id;
         } else {
