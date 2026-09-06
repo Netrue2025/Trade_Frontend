@@ -1555,7 +1555,7 @@ function getTradeFormDefaults() {
   return {
     symbol: "PEPEUSDT",
     side: "BUY",
-    type: "MARKET",
+    type: "LIMIT",
     price: "",
     quantity: "",
     quoteOrderQty: "",
@@ -8782,7 +8782,7 @@ function updateTradeDraft(patch) {
     ...patch,
   };
 
-  if (tradeDraft.side === "SELL") {
+  if (tradeDraft.type === "LIMIT" || tradeDraft.side === "SELL") {
     tradeDraft.quoteOrderQty = "";
   }
 }
@@ -8885,18 +8885,6 @@ async function submitTrade() {
     fillPrice: true,
   });
   const summary = getCurrentTradeSummary();
-  const livePrice = Number(summary.live.price || 0);
-  const limitPrice = Number(tradeDraft.price || 0);
-  if (tradeDraft.type === "LIMIT" && livePrice && limitPrice) {
-    if (tradeDraft.side === "BUY" && limitPrice >= livePrice) {
-      showError(`Limit buy would fill immediately at live price ${formatNumber(livePrice, 8)}. Set your limit below live price or use Market.`);
-      return;
-    }
-    if (tradeDraft.side === "SELL" && limitPrice <= livePrice) {
-      showError(`Limit sell would fill immediately at live price ${formatNumber(livePrice, 8)}. Set your limit above live price or use Market.`);
-      return;
-    }
-  }
   const marketSpend = tradeDraft.side === "BUY" && tradeDraft.type === "MARKET" && Number(tradeDraft.quoteOrderQty || 0) > 0
     ? formatMarketSpendInput(tradeDraft.quoteOrderQty, {
         fullBalance: Number(tradeDraft.quoteOrderQty || 0) >= Number(summary.usdtBalance || 0),
@@ -8913,7 +8901,6 @@ async function submitTrade() {
     quantity: tradeDraft.quantity,
     quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? marketSpend || fallbackSpend : "",
     price: tradeDraft.type === "LIMIT" ? tradeDraft.price : "",
-    timeInForce: tradeDraft.type === "LIMIT" ? "POST_ONLY" : "",
     takeProfitPrice: tradeDraft.takeProfitPrice,
   };
 
@@ -9076,8 +9063,15 @@ function bindTradeTicketActions() {
     scheduleTradeSymbolMarketRefresh(symbol);
   });
   if (typeInput) typeInput.addEventListener("change", () => {
-    updateTradeDraft({ type: typeInput.value });
-    syncMarketBuySpendFromBalance();
+    const nextType = typeInput.value === "MARKET" ? "MARKET" : "LIMIT";
+    updateTradeDraft({
+      type: nextType,
+      quoteOrderQty: "",
+      ...(nextType === "MARKET" ? { quantity: "" } : {}),
+    });
+    if (nextType === "MARKET") {
+      syncMarketBuySpendFromBalance({ force: true });
+    }
     render();
   });
   if (priceInput) priceInput.addEventListener("input", () => updateTradeDraft({ price: priceInput.value, quoteOrderQty: "" }));
