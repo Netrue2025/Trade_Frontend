@@ -2688,6 +2688,12 @@ function renderMessageNotificationPopup() {
   `;
 }
 
+function getNotificationConversationUserId(notification = {}) {
+  return notification.metadata?.conversationUserId
+    || notification.conversationUserId
+    || (String(notification.entityType || "").toUpperCase() === "USER" ? notification.entityId : "");
+}
+
 function renderDashboardTopBar() {
   if (!state.user) {
     return "";
@@ -2870,7 +2876,8 @@ function renderActionModal() {
       return "";
     }
     const isAdmin = state.user?.role === "admin";
-    const targetUser = isAdmin ? state.users.find((user) => user.id === notification.entityId) : null;
+    const conversationUserId = getNotificationConversationUserId(notification);
+    const targetUser = isAdmin ? state.users.find((user) => user.id === conversationUserId) : null;
     const heading = isAdmin
       ? `Reply ${targetUser?.name || "user"}`
       : "Reply admin";
@@ -5260,7 +5267,8 @@ async function submitUserSupportMessage(form) {
 
 async function submitNotificationReply(form) {
   const notificationId = form.dataset.replyNotification;
-  const notification = (state.notifications || []).find((item) => item.id === notificationId);
+  const modalNotification = state.actionModal?.notificationId === notificationId ? state.actionModal.notification : null;
+  const notification = modalNotification || (state.notifications || []).find((item) => item.id === notificationId);
   if (!notification) {
     showError("Message not found.");
     return;
@@ -5274,10 +5282,11 @@ async function submitNotificationReply(form) {
 
   await withLoading(async () => {
     if (state.user?.role === "admin") {
-      if (!notification.entityId) {
+      const conversationUserId = getNotificationConversationUserId(notification);
+      if (!conversationUserId) {
         throw new Error("Message user was not found.");
       }
-      await api(`/api/admin/users/${encodeURIComponent(notification.entityId)}/message`, {
+      await api(`/api/admin/users/${encodeURIComponent(conversationUserId)}/message`, {
         method: "POST",
         body: JSON.stringify({
           title: "Admin reply",
