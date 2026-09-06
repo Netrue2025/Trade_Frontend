@@ -2656,6 +2656,38 @@ function renderNotice() {
   return state.notice ? `<div class="floating-notice">${state.notice}</div>` : "";
 }
 
+function getUnreadMessageNotifications() {
+  const now = Date.now();
+  return (state.notifications || [])
+    .filter((item) => {
+      if (String(item.type || "").toUpperCase() !== "MESSAGE" || item.readAt) {
+        return false;
+      }
+      const expiresAt = Date.parse(item.expiresAt || "");
+      return !Number.isFinite(expiresAt) || expiresAt > now;
+    })
+    .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+}
+
+function renderMessageNotificationPopup() {
+  const message = getUnreadMessageNotifications()[0];
+  if (!message) {
+    return "";
+  }
+  return `
+    <aside class="message-popover" aria-live="polite">
+      <button class="message-popover-body" data-message-popup-open="${escapeHtml(message.id)}" type="button">
+        <span class="message-popover-icon">${icon("contact")}</span>
+        <span>
+          <strong>${escapeHtml(message.title || "Message")}</strong>
+          <small>${escapeHtml(message.message || "")}</small>
+        </span>
+      </button>
+      <button class="message-popover-close" data-message-popup-dismiss="${escapeHtml(message.id)}" type="button" aria-label="Dismiss message">x</button>
+    </aside>
+  `;
+}
+
 function renderDashboardTopBar() {
   if (!state.user) {
     return "";
@@ -5338,6 +5370,22 @@ async function openNotification(notificationId) {
   });
 }
 
+async function dismissNotification(notificationId) {
+  if (!notificationId) {
+    return;
+  }
+  try {
+    await api(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  } catch {
+    // The message may have expired on the server; remove it locally either way.
+  }
+  state.notifications = (state.notifications || []).filter((item) => item.id !== notificationId);
+  render();
+}
+
 async function deleteSelectedFinanceHistory() {
   const selected = state.selectedFinanceHistoryIds;
   if (!selected.length) {
@@ -7850,6 +7898,7 @@ function renderDashboardShell() {
       ${renderBottomNav()}
     </section>
     ${renderNotice()}
+    ${renderMessageNotificationPopup()}
     ${renderErrorModal()}
     ${renderActionModal()}
     ${renderLoader()}
@@ -7945,6 +7994,19 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-notification-open]").forEach((button) => {
     button.addEventListener("click", () => {
       openNotification(button.dataset.notificationOpen);
+    });
+  });
+
+  document.querySelectorAll("[data-message-popup-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openNotification(button.dataset.messagePopupOpen);
+    });
+  });
+
+  document.querySelectorAll("[data-message-popup-dismiss]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      dismissNotification(button.dataset.messagePopupDismiss);
     });
   });
 
