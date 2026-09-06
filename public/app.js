@@ -2958,6 +2958,40 @@ function renderActionModal() {
     `;
   }
 
+  if (state.actionModal.type === "admin-user-profile") {
+    const user = state.users.find((item) => item.id === state.actionModal.userId);
+    if (!user) {
+      return "";
+    }
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card admin-profile-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">User</p>
+          <h3>Edit profile</h3>
+          <form id="admin-user-profile-form" class="stack-form admin-profile-form" data-admin-profile-form="${escapeHtml(user.id)}">
+            <label class="stack-label">
+              <span>First name</span>
+              <input name="firstName" value="${escapeHtml(user.firstName || String(user.name || "").split(" ")[0] || "")}" placeholder="First name" required />
+            </label>
+            <label class="stack-label">
+              <span>Last name</span>
+              <input name="lastName" value="${escapeHtml(user.lastName || String(user.name || "").split(" ").slice(1).join(" ") || "")}" placeholder="Last name" required />
+            </label>
+            <label class="stack-label">
+              <span>Email</span>
+              <input name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="Email" required />
+            </label>
+            <div class="modal-actions">
+              <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+              <button class="button-primary shimmer-button" type="submit">${icon("edit")} Save</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "admin-balance") {
     const user = state.users.find((item) => item.id === state.actionModal.userId);
     if (!user) {
@@ -3546,6 +3580,14 @@ function bindModalActions() {
     notificationReplyForm.addEventListener("submit", (event) => {
       event.preventDefault();
       submitNotificationReply(notificationReplyForm);
+    });
+  }
+
+  const adminUserProfileForm = document.getElementById("admin-user-profile-form");
+  if (adminUserProfileForm) {
+    adminUserProfileForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminProfileUpdate(adminUserProfileForm, adminUserProfileForm.dataset.adminProfileForm);
     });
   }
 
@@ -4714,6 +4756,34 @@ async function submitAdminEmailUpdate(form, userId) {
     clearFormDraft(form);
     render();
     showNotice("User email updated");
+  }).catch((error) => showError(error.message));
+}
+
+async function submitAdminProfileUpdate(form, userId) {
+  const payload = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    const nameResult = await api(`/api/admin/users/${encodeURIComponent(userId)}/name`, {
+      method: "POST",
+      body: JSON.stringify({
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+      }),
+    });
+    let nextUser = nameResult.user;
+    const currentEmail = String(nextUser?.email || "").trim().toLowerCase();
+    const nextEmail = String(payload.email || "").trim().toLowerCase();
+    if (nextEmail && nextEmail !== currentEmail) {
+      const emailResult = await api(`/api/admin/users/${encodeURIComponent(userId)}/email`, {
+        method: "POST",
+        body: JSON.stringify({ email: payload.email }),
+      });
+      nextUser = emailResult.user;
+    }
+    updateUserInStateUsers(nextUser);
+    clearFormDraft(form);
+    state.actionModal = null;
+    await loadDashboardData();
+    showNotice("User profile updated");
   }).catch((error) => showError(error.message));
 }
 
@@ -6440,6 +6510,7 @@ function renderAdminUserCard(user) {
             <strong>${formatUsdtUnit(liveUsdt)}</strong>
             <p class="muted-copy">${formatNaira(liveNgn)}</p>
           </div>
+          <button class="micro-btn icon-only-btn" data-admin-profile-open="${user.id}" type="button" aria-label="Edit profile" title="Edit profile">${icon("profile")}</button>
           <button class="micro-btn icon-only-btn" data-admin-balance-open="${user.id}" type="button" aria-label="Edit balance" title="Edit balance">${icon("edit")}</button>
         </div>
       </summary>
@@ -6497,10 +6568,6 @@ function renderAdminUserCard(user) {
             <input name="amount" type="number" min="0" step="0.00000001" placeholder="Bonus" required />
             <input name="note" type="text" placeholder="Note" />
             <button class="micro-btn primary" type="submit">${icon("gift")} Add</button>
-          </form>
-          <form class="inline-admin-form" data-admin-email-form="${user.id}">
-            <input name="email" type="email" value="${escapeHtml(user.email || "")}" placeholder="Email" required />
-            <button class="micro-btn primary" type="submit">${icon("edit")} Email</button>
           </form>
           <form class="inline-admin-form" data-admin-user-trade-form="${user.id}">
             <select name="tradeId" aria-label="Trade">
@@ -7259,6 +7326,24 @@ function renderAdminFinancePanel() {
   `;
 }
 
+function renderSettingsDisclosure({ title, subtitle = "", iconName = "settings", content = "", open = false, extraClass = "", section = "" }) {
+  return `
+    <details class="mobile-card settings-card settings-disclosure ${escapeHtml(extraClass)}" ${section ? `data-section="${escapeHtml(section)}"` : ""} ${open ? "open" : ""}>
+      <summary class="settings-disclosure-summary">
+        <span class="card-icon">${icon(iconName)}</span>
+        <span>
+          <strong>${escapeHtml(title)}</strong>
+          ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ""}
+        </span>
+        <span class="settings-disclosure-chevron">${icon("chevronDown")}</span>
+      </summary>
+      <div class="settings-disclosure-body">
+        ${content}
+      </div>
+    </details>
+  `;
+}
+
 function renderSettingsPane() {
   const settingsDraft = state.settingsDraft || { apiKey: "", apiSecret: "", testnet: "false" };
   const activeExchange = getActiveExchange();
@@ -7278,6 +7363,110 @@ function renderSettingsPane() {
     .join("");
   const depositSettingValue = (key, fallback = "") =>
     adminDepositSettingsDraft[key] !== undefined ? adminDepositSettingsDraft[key] : fallback;
+  if (state.user.role === "admin") {
+    const appearancePanel = `
+      <div class="theme-toggle">
+        <button class="theme-btn ${state.theme === "light" ? "active" : ""}" data-theme-mode="light" type="button">Light</button>
+        <button class="theme-btn ${state.theme === "dark" ? "active" : ""}" data-theme-mode="dark" type="button">Dark</button>
+      </div>
+    `;
+    const exchangePanel = `
+      ${state.loadingUsers ? renderSectionLoadingOverlay("Loading users", "Pulling linked account details") : ""}
+      <form id="exchange-select-form" class="stack-form subtle-form progressive-settings-form">
+        <label>
+          Active exchange
+          <select name="exchange">
+            ${EXCHANGE_OPTIONS.map((exchange) => `<option value="${exchange.id}" ${activeExchange === exchange.id ? "selected" : ""}>${exchange.label}</option>`).join("")}
+          </select>
+        </label>
+      </form>
+      <form id="exchange-connect-form" class="stack-form progressive-settings-form">
+        <input type="hidden" name="exchange" value="${activeExchange}" />
+        <label>API key <input name="apiKey" value="${escapeHtml(settingsDraft.apiKey)}" placeholder="${activeExchangeLabel} API key" required /></label>
+        ${renderPasswordField({
+          label: "API secret",
+          name: "apiSecret",
+          placeholder: `${activeExchangeLabel} API secret`,
+          autocomplete: "off",
+          value: settingsDraft.apiSecret,
+        })}
+        <label>
+          Environment
+          <select name="testnet">
+            <option value="false" ${settingsDraft.testnet !== "true" ? "selected" : ""}>Mainnet</option>
+            <option value="true" ${settingsDraft.testnet === "true" ? "selected" : ""}>Testnet</option>
+          </select>
+        </label>
+        <button class="button-primary shimmer-button" type="submit">${icon("settings")} Connect</button>
+      </form>
+    `;
+    const depositPanel = `
+      <form id="admin-deposit-settings-form" class="stack-form subtle-form progressive-settings-form">
+        <label>Bank <input name="bankName" value="${escapeHtml(depositSettingValue("bankName", depositSettings.bankName || ""))}" placeholder="Bank name" /></label>
+        <label>Account name <input name="accountName" value="${escapeHtml(depositSettingValue("accountName", depositSettings.accountName || ""))}" placeholder="Account name" /></label>
+        <label>Account number <input name="accountNumber" value="${escapeHtml(depositSettingValue("accountNumber", depositSettings.accountNumber || ""))}" placeholder="Account number" inputmode="numeric" /></label>
+        <label>USDT address <input name="usdtAddress" value="${escapeHtml(depositSettingValue("usdtAddress", depositSettings.usdtAddress || ""))}" placeholder="Wallet address" /></label>
+        <label>USDT network <input name="usdtNetwork" value="${escapeHtml(depositSettingValue("usdtNetwork", depositSettings.usdtNetwork || "TRC20"))}" placeholder="TRC20" /></label>
+        <label>USDT to Naira <input name="usdtToNgn" type="number" min="1" step="0.01" value="${escapeHtml(depositSettingValue("usdtToNgn", exchangeRateSettings.usdtToNgn || getUsdtToNgnRate() || ""))}" placeholder="1600" /></label>
+        <label>Telegram channel <input name="telegramChannelUsername" value="${escapeHtml(depositSettingValue("telegramChannelUsername", telegramSettings.channelUsername || "netruesignal"))}" placeholder="netruesignal" /></label>
+        <label>Bank note <textarea name="bankNote" rows="2" placeholder="Short note">${escapeHtml(depositSettingValue("bankNote", depositSettings.bankNote || ""))}</textarea></label>
+        <button class="button-secondary shimmer-button" type="submit">${icon("bank")} Save</button>
+      </form>
+    `;
+    const signalPanel = `
+      <form id="signal-auto-trade-form" class="stack-form subtle-form progressive-settings-form">
+        <label>
+          Auto trade
+          <select name="enabled">
+            <option value="true" ${signalAutoTradeSettings.enabled ? "selected" : ""}>Enabled</option>
+            <option value="false" ${!signalAutoTradeSettings.enabled ? "selected" : ""}>Disabled</option>
+          </select>
+        </label>
+        <p class="muted-copy">
+          ${signalAutoTrade.loaded
+            ? `Runtime: ${String(signalAutoTradeRuntime.exchange || "bybit").toUpperCase()} | Active ${signalAutoTradeRuntime.activeTrades || 0}/${signalAutoTradeSettings.maxSimultaneousTrades || 2} | Next ${signalAutoTradeRuntime.nextAllocationPercent || 0}%`
+            : "Runtime details are loading..."}
+        </p>
+        <button class="button-secondary shimmer-button" type="submit">${icon("signals")} Save</button>
+      </form>
+    `;
+    const supportPanel = `
+      <form id="user-password-form" class="stack-form subtle-form progressive-settings-form">
+        ${renderPasswordField({
+          label: "Current password",
+          name: "currentPassword",
+          placeholder: "Current password",
+          autocomplete: "current-password",
+        })}
+        ${renderPasswordField({
+          label: "New password",
+          name: "newPassword",
+          placeholder: "New password",
+          autocomplete: "new-password",
+        })}
+        ${renderPasswordField({
+          label: "Confirm password",
+          name: "confirmPassword",
+          placeholder: "Confirm password",
+          autocomplete: "new-password",
+        })}
+        <button class="button-secondary shimmer-button" type="submit">${icon("lock")} Update</button>
+      </form>
+      <div class="contact-card compact-contact-card">
+        <p><strong>Email:</strong> support@trade.local</p>
+        <button id="logout-btn" class="button-secondary shimmer-button" type="button">Logout</button>
+      </div>
+    `;
+    return `
+      ${renderAdminSettingsOverview()}
+      ${renderSettingsDisclosure({ title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
+      ${renderSettingsDisclosure({ title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
+      ${renderSettingsDisclosure({ title: "Deposit & Channel", subtitle: "Bank, wallet, rate", iconName: "bank", content: depositPanel, open: true })}
+      ${renderSettingsDisclosure({ title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
+      ${renderSettingsDisclosure({ title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
+      ${renderSettingsDisclosure({ title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
+    `;
+  }
   return `
       <section class="mobile-card settings-card">
         <div class="section-head">
@@ -8371,6 +8560,14 @@ function bindDashboardActions() {
       event.preventDefault();
       event.stopPropagation();
       showActionModal({ type: "admin-balance", userId: button.dataset.adminBalanceOpen });
+    });
+  });
+
+  document.querySelectorAll("[data-admin-profile-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showActionModal({ type: "admin-user-profile", userId: button.dataset.adminProfileOpen });
     });
   });
 
