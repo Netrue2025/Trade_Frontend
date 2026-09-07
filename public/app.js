@@ -31,6 +31,13 @@ const ACTIVE_API_ORDER_STATUSES = new Set(["NEW", "PARTIALLY_FILLED", "PENDING_N
 const STABLECOIN_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD"];
 const KNOWN_QUOTE_ASSETS = ["USDT", "USDC", "FDUSD", "BUSD", "BTC", "ETH", "EUR", "BRL", "TRY"];
 const EXCLUDED_PROFIT_LOSS_REPORT_SYMBOLS = new Set(["ZENUSDT"]);
+const VTU_NETWORKS = [
+  { id: "mtn", label: "MTN NG", shortLabel: "MTN", logo: "MTN" },
+  { id: "airtel", label: "AIRTEL NG", shortLabel: "airtel", logo: "airtel" },
+  { id: "glo", label: "GLO NG", shortLabel: "glo", logo: "glo" },
+  { id: "9mobile", label: "9MOBILE", shortLabel: "9mobile", logo: "9mobile" },
+];
+const VTU_PLAN_CATEGORIES = ["Daily", "Weekly", "Monthly", "Yearly"];
 const SIGNAL_INTERVAL_OPTIONS = ["15m", "1h", "1d"];
 const SIGNAL_CHART_TYPES = [
   { id: "candles", label: "Candles" },
@@ -1628,6 +1635,12 @@ function icon(name) {
       '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/>',
     bank:
       '<path d="m3 10 9-6 9 6"/><path d="M5 10h14v9H5z"/><path d="M8 14v5"/><path d="M12 14v5"/><path d="M16 14v5"/>',
+    send:
+      '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+    arrowLeft:
+      '<path d="m15 18-6-6 6-6"/>',
+    plus:
+      '<path d="M12 5v14"/><path d="M5 12h14"/>',
     card:
       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M7 15h4"/>',
     gift:
@@ -1658,6 +1671,8 @@ function icon(name) {
       '<path d="m6 9 6 6 6-6"/>',
     chevronUp:
       '<path d="m18 15-6-6-6 6"/>',
+    x:
+      '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     refresh:
       '<path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/>',
     check:
@@ -3053,6 +3068,227 @@ async function copyTextToClipboard(text) {
   textarea.remove();
 }
 
+function getVtuNetwork(networkId) {
+  const normalized = String(networkId || "").trim().toLowerCase();
+  return VTU_NETWORKS.find((network) => network.id === normalized) || null;
+}
+
+function renderVtuNetworkLogo(networkId) {
+  const network = getVtuNetwork(networkId) || { id: "other", logo: "+" };
+  return `<span class="vtu-network-logo vtu-network-${escapeHtml(network.id)}">${escapeHtml(network.logo)}</span>`;
+}
+
+function getVtuRecentTargets(productType) {
+  const product = String(productType || "").trim().toLowerCase();
+  const seen = new Set();
+  return (state.vtuTransactions || [])
+    .filter((transaction) => String(transaction.productType || "").trim().toLowerCase() === product && transaction.phone)
+    .filter((transaction) => {
+      const key = `${transaction.network}:${transaction.phone}:${transaction.planName || transaction.faceValue || ""}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 3);
+}
+
+function getVtuPlanCategory(plan = {}) {
+  const text = `${plan.validity || ""} ${plan.name || ""}`.toLowerCase();
+  const dayMatch = text.match(/(\d+(?:\.\d+)?)\s*(day|days|daily)\b/);
+  const weekMatch = text.match(/(\d+(?:\.\d+)?)\s*(week|weeks|weekly)\b/);
+  const monthMatch = text.match(/(\d+(?:\.\d+)?)\s*(month|months|monthly)\b/);
+  const yearMatch = text.match(/(\d+(?:\.\d+)?)\s*(year|years|yearly|annual)\b/);
+  if (yearMatch) return "Yearly";
+  if (monthMatch) return "Monthly";
+  if (weekMatch) return "Weekly";
+  if (dayMatch) {
+    const days = Number(dayMatch[1] || 1);
+    if (days >= 365) return "Yearly";
+    if (days >= 28) return "Monthly";
+    if (days >= 7) return "Weekly";
+    return "Daily";
+  }
+  if (/\b365\b/.test(text)) return "Yearly";
+  if (/\b30\b|\b31\b|\b28\b/.test(text)) return "Monthly";
+  if (/\b7\b|\b14\b/.test(text)) return "Weekly";
+  return "Daily";
+}
+
+function getVtuPlansByCategory() {
+  return VTU_PLAN_CATEGORIES.reduce((groups, category) => {
+    groups[category] = (state.vtuDataPlans || []).filter((plan) => getVtuPlanCategory(plan) === category);
+    return groups;
+  }, {});
+}
+
+function formatVtuPlanLabel(plan = {}) {
+  const title = plan.name || [plan.size, plan.validity].filter(Boolean).join(" for ");
+  return `${title} - ${formatNaira(plan.sellingPrice).replace(".00", "")}`;
+}
+
+function getSelectedVtuPlan() {
+  const variationId = state.actionModal?.variationId || "";
+  return (state.vtuDataPlans || []).find((plan) => plan.id === variationId || plan.variationId === variationId) || null;
+}
+
+function renderVtuPackageSheet() {
+  if (state.actionModal?.type !== "vtu-data" || !state.actionModal.packageSheet) {
+    return "";
+  }
+  const activeCategory = state.actionModal.packageCategory || "Daily";
+  const groups = getVtuPlansByCategory();
+  const plans = groups[activeCategory] || [];
+  return `
+    <div class="vtu-package-backdrop">
+      <div class="vtu-package-sheet">
+        <button class="vtu-sheet-close" id="vtu-package-close-btn" type="button" aria-label="Close package picker">${icon("x")}</button>
+        <div class="vtu-sheet-handle"></div>
+        <h3>Choose a Package</h3>
+        <p>Categories</p>
+        <div class="vtu-package-tabs">
+          ${VTU_PLAN_CATEGORIES.map((category) => `
+            <button class="${category === activeCategory ? "active" : ""}" data-vtu-plan-category="${category}" type="button">${category}</button>
+          `).join("")}
+        </div>
+        <div class="vtu-package-list">
+          ${
+            plans.length
+              ? plans.map((plan) => `
+                  <button class="vtu-package-row" data-vtu-plan-select="${escapeHtml(plan.variationId || plan.id)}" type="button">
+                    ${escapeHtml(formatVtuPlanLabel(plan))}
+                  </button>
+                `).join("")
+              : `<p class="vtu-empty-state">No active package here.</p>`
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderTransferModal() {
+  const ngnWallet = getFinancialWallet("NGN");
+  const usdtWallet = getFinancialWallet("USDT");
+  const currency = state.actionModal.currency || "NGN";
+  const available = currency === "USDT" ? Number(usdtWallet?.availableBalance || 0) : Number(ngnWallet?.availableBalance || 0);
+  return `
+    <div class="modal-backdrop vtu-screen-backdrop">
+      <div class="vtu-phone-screen">
+        <header class="vtu-screen-header">
+          <button class="vtu-back-btn" id="action-modal-cancel-btn" type="button">${icon("arrowLeft")}</button>
+          <strong>Transfer</strong>
+          <span></span>
+        </header>
+        <div class="vtu-transfer-card">
+          <label>Email <input id="transfer-email-input" type="email" value="${escapeHtml(state.actionModal.email || "")}" placeholder="user@email.com" autocomplete="off" /></label>
+          <label>Currency
+            <select id="transfer-currency-input">
+              <option value="NGN" ${currency === "NGN" ? "selected" : ""}>NGN</option>
+              <option value="USDT" ${currency === "USDT" ? "selected" : ""}>USDT</option>
+            </select>
+          </label>
+          <label>Amount <input id="transfer-amount-input" type="number" min="0" step="${currency === "USDT" ? "0.00000001" : "1"}" value="${escapeHtml(state.actionModal.amount || "")}" placeholder="0" /></label>
+          <label>Note <input id="transfer-note-input" value="${escapeHtml(state.actionModal.note || "")}" placeholder="Optional" /></label>
+        </div>
+        <p class="vtu-balance-line">Balance: ${currency === "USDT" ? formatUsdtUnit(available) : formatNaira(available)}</p>
+        <button class="vtu-next-btn" id="transfer-submit-btn" type="button" ${state.actionModal.email && state.actionModal.amount ? "" : "disabled"}>${icon("send")} Send</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderVtuServiceModal() {
+  const isData = state.actionModal.type === "vtu-data";
+  const settings = state.vtuSettings || getFinancialSettings().vtu || {};
+  const ngnWallet = getFinancialWallet("NGN");
+  const availableNgn = Number(ngnWallet?.availableBalance || 0);
+  const network = state.actionModal.network || "";
+  const selectedPlan = getSelectedVtuPlan();
+  const amount = isData ? selectedPlan?.sellingPrice || "" : state.actionModal.amount || "";
+  const canUse = settings.configured && (isData ? settings.dataEnabled : settings.airtimeEnabled);
+  const recent = getVtuRecentTargets(isData ? "data" : "airtime");
+  const title = isData ? "Internet" : "Airtime";
+  return `
+    <div class="modal-backdrop vtu-screen-backdrop">
+      <div class="vtu-phone-screen">
+        <header class="vtu-screen-header">
+          <button class="vtu-back-btn" id="action-modal-cancel-btn" type="button">${icon("arrowLeft")}</button>
+          <strong>${title} <span class="flag-chip">NG</span></strong>
+          <span></span>
+        </header>
+        ${
+          canUse
+            ? `
+              <section class="vtu-recent-row">
+                <p>Most Recent</p>
+                <div>
+                  ${
+                    recent.length
+                      ? recent.map((item) => `
+                          <button class="vtu-recent-item" data-vtu-recent="${escapeHtml(item.id)}" type="button">
+                            ${renderVtuNetworkLogo(item.network)}
+                            <span>${escapeHtml(item.planName || item.phone)}</span>
+                            <small>${escapeHtml(item.phone || "")}</small>
+                          </button>
+                        `).join("")
+                      : `<span class="vtu-recent-empty">No recent</span>`
+                  }
+                </div>
+              </section>
+              <section class="vtu-network-section">
+                <p>Choose Network</p>
+                <div class="vtu-network-grid">
+                  ${VTU_NETWORKS.map((item) => `
+                    <button class="vtu-network-tile ${network === item.id ? "active" : ""}" data-vtu-network="${item.id}" type="button">
+                      ${renderVtuNetworkLogo(item.id)}
+                      <span>${escapeHtml(item.label)}</span>
+                    </button>
+                  `).join("")}
+                </div>
+              </section>
+              ${
+                isData
+                  ? `
+                    <section class="vtu-field-section">
+                      <label>Package</label>
+                      <button class="vtu-select-field" id="vtu-package-open-btn" type="button" ${state.loadingVtu || !network ? "disabled" : ""}>
+                        <span>${selectedPlan ? escapeHtml(formatVtuPlanLabel(selectedPlan)) : state.loadingVtu ? "Loading plans..." : network && !state.vtuDataPlans.length ? "No active plans" : "Choose a Package"}</span>
+                        ${icon("chevronDown")}
+                      </button>
+                    </section>
+                  `
+                  : `
+                    <section class="vtu-field-section">
+                      <label>Airtime</label>
+                      <div class="wallet-choice-row vtu-airtime-row">
+                        ${[100, 200, 500, 1000, 2000, 5000].map((value) => `<button class="wallet-choice" data-vtu-airtime-amount="${value}" type="button">${formatNaira(value).replace(".00", "")}</button>`).join("")}
+                      </div>
+                    </section>
+                  `
+              }
+              <section class="vtu-field-section">
+                <label>Phone Number <span>Choose Contact</span></label>
+                <input id="vtu-phone-input" type="tel" inputmode="tel" value="${escapeHtml(state.actionModal.phone || "")}" placeholder="Phone Number" />
+              </section>
+              <section class="vtu-field-section">
+                <label>Amount <span>Balance: ${formatNaira(availableNgn)}</span></label>
+                <div class="vtu-amount-field">
+                  <span>₦</span>
+                  <input id="vtu-amount-input" type="number" min="${escapeHtml(settings.minAirtimeAmount || "100")}" max="${escapeHtml(settings.maxAirtimeAmount || "50000")}" step="1" value="${escapeHtml(amount)}" placeholder="0" ${isData ? "readonly" : ""} />
+                </div>
+              </section>
+              <button class="vtu-next-btn" id="vtu-review-btn" data-vtu-product="${isData ? "data" : "airtime"}" type="button" ${amount && state.actionModal.phone && network ? "" : "disabled"}>Next</button>
+              ${renderVtuPackageSheet()}
+            `
+            : `<p class="warning-copy">Service not available now.</p>`
+        }
+      </div>
+    </div>
+  `;
+}
+
 function renderActionModal() {
   if (!state.actionModal) {
     return "";
@@ -3261,70 +3497,12 @@ function renderActionModal() {
     `;
   }
 
+  if (state.actionModal.type === "transfer") {
+    return renderTransferModal();
+  }
+
   if (state.actionModal.type === "vtu-airtime" || state.actionModal.type === "vtu-data") {
-    const isData = state.actionModal.type === "vtu-data";
-    const settings = state.vtuSettings || getFinancialSettings().vtu || {};
-    const ngnWallet = getFinancialWallet("NGN");
-    const availableNgn = Number(ngnWallet?.availableBalance || 0);
-    const network = state.actionModal.network || "";
-    const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === state.actionModal.variationId || plan.variationId === state.actionModal.variationId);
-    const amount = isData ? selectedPlan?.sellingPrice || "" : state.actionModal.amount || "";
-    const canUse = settings.configured && (isData ? settings.dataEnabled : settings.airtimeEnabled);
-    return `
-      <div class="modal-backdrop">
-        <div class="modal-card action-modal-card vtu-action-modal">
-          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
-          <p class="modal-eyebrow neutral">${isData ? "Data" : "Airtime"}</p>
-          <h3>${isData ? "Buy Data" : "Buy Airtime"}</h3>
-          <p class="modal-text">Available ${formatNaira(availableNgn)}</p>
-          ${
-            canUse
-              ? `
-                <div class="stack-form wallet-action-fields">
-                  <label class="stack-label">
-                    <span>Phone</span>
-                    <input id="vtu-phone-input" type="tel" inputmode="tel" value="${escapeHtml(state.actionModal.phone || "")}" placeholder="08000000000" />
-                  </label>
-                  <label class="stack-label">
-                    <span>Network</span>
-                    <select id="vtu-network-input">
-                      <option value="">Choose</option>
-                      ${["mtn", "airtel", "glo", "9mobile"].map((item) => `<option value="${item}" ${network === item ? "selected" : ""}>${item.toUpperCase()}</option>`).join("")}
-                    </select>
-                  </label>
-                  ${
-                    isData
-                      ? `
-                        <label class="stack-label">
-                          <span>Plan</span>
-                          <select id="vtu-plan-input" ${state.loadingVtu || !network ? "disabled" : ""}>
-                            <option value="">${state.loadingVtu ? "Loading plans..." : network && !state.vtuDataPlans.length ? "No active plans" : "Choose plan"}</option>
-                            ${state.vtuDataPlans.map((plan) => `<option value="${escapeHtml(plan.variationId || plan.id)}" ${state.actionModal.variationId === (plan.variationId || plan.id) ? "selected" : ""}>${escapeHtml(plan.size || plan.name)} - ${formatNaira(plan.sellingPrice)}</option>`).join("")}
-                          </select>
-                        </label>
-                        ${selectedPlan ? `<p class="wallet-equivalent-preview">${escapeHtml(selectedPlan.validity || selectedPlan.name)} | ${formatNaira(selectedPlan.sellingPrice)}</p>` : ""}
-                      `
-                      : `
-                        <label class="stack-label wallet-amount-field">
-                          <span>Amount</span>
-                          <input id="vtu-amount-input" class="wallet-amount-input" type="number" min="${escapeHtml(settings.minAirtimeAmount || "100")}" max="${escapeHtml(settings.maxAirtimeAmount || "50000")}" step="1" value="${escapeHtml(state.actionModal.amount || "")}" placeholder="1000" />
-                        </label>
-                        <div class="wallet-choice-row">
-                          ${[100, 200, 500, 1000, 2000, 5000].map((value) => `<button class="wallet-choice" data-vtu-airtime-amount="${value}" type="button">${formatNaira(value).replace(".00", "")}</button>`).join("")}
-                        </div>
-                      `
-                  }
-                </div>
-                <div class="modal-actions">
-                  <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
-                  <button class="button-primary shimmer-button" id="vtu-review-btn" data-vtu-product="${isData ? "data" : "airtime"}" type="button" ${amount ? "" : "disabled"}>${icon(isData ? "wifi" : "phone")} Continue</button>
-                </div>
-              `
-              : `<p class="warning-copy">Service not available now.</p>`
-          }
-        </div>
-      </div>
-    `;
+    return renderVtuServiceModal();
   }
 
   if (state.actionModal.type === "vtu-confirm") {
@@ -5990,19 +6168,32 @@ function openVtuModal(productType) {
     network: "",
     amount: "",
     variationId: "",
+    packageSheet: false,
+    packageCategory: "Daily",
   };
   state.vtuDataPlans = [];
   state.vtuDataPlansNetwork = "";
   render();
 }
 
+function openTransferModal() {
+  state.actionModal = {
+    type: "transfer",
+    email: "",
+    currency: "NGN",
+    amount: "",
+    note: "",
+  };
+  render();
+}
+
 function readVtuModalFields(productType) {
   const product = String(productType || "").trim().toLowerCase();
   const phone = document.getElementById("vtu-phone-input")?.value?.trim() || state.actionModal?.phone || "";
-  const network = document.getElementById("vtu-network-input")?.value || state.actionModal?.network || "";
-  const variationId = document.getElementById("vtu-plan-input")?.value || state.actionModal?.variationId || "";
+  const network = state.actionModal?.network || "";
+  const variationId = state.actionModal?.variationId || "";
   const amount = document.getElementById("vtu-amount-input")?.value?.trim() || state.actionModal?.amount || "";
-  const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === variationId || plan.variationId === variationId);
+  const selectedPlan = getSelectedVtuPlan();
   return {
     productType: product,
     phone,
@@ -6050,9 +6241,74 @@ function reviewVtuPurchase(productType) {
       network: values.network,
       amount: values.amount,
       variationId: values.variationId,
+      packageCategory: state.actionModal?.packageCategory || "Daily",
     },
   };
   render();
+}
+
+function saveTransferModalDraft() {
+  if (state.actionModal?.type !== "transfer") {
+    return;
+  }
+  state.actionModal = {
+    ...state.actionModal,
+    email: document.getElementById("transfer-email-input")?.value?.trim() || "",
+    currency: document.getElementById("transfer-currency-input")?.value || state.actionModal.currency || "NGN",
+    amount: document.getElementById("transfer-amount-input")?.value?.trim() || "",
+    note: document.getElementById("transfer-note-input")?.value?.trim() || "",
+  };
+}
+
+function updateVtuReviewButtonState() {
+  const button = document.getElementById("vtu-review-btn");
+  if (!button) {
+    return;
+  }
+  const productType = button.dataset.vtuProduct;
+  const values = readVtuModalFields(productType);
+  const ready = values.productType === "data"
+    ? !!(values.phone && values.network && values.selectedPlan)
+    : !!(values.phone && values.network && values.amount && Number(values.amount) > 0);
+  button.disabled = !ready;
+}
+
+function updateTransferButtonState() {
+  const button = document.getElementById("transfer-submit-btn");
+  if (!button) {
+    return;
+  }
+  saveTransferModalDraft();
+  button.disabled = !(state.actionModal?.email && state.actionModal?.amount && Number(state.actionModal.amount) > 0);
+}
+
+async function submitInAppTransfer() {
+  saveTransferModalDraft();
+  const modal = state.actionModal || {};
+  await withLoading(async () => {
+    const payload = await api("/api/user/transfer", {
+      method: "POST",
+      headers: { "Idempotency-Key": `transfer-${Date.now()}-${Math.random().toString(16).slice(2)}` },
+      body: JSON.stringify({
+        email: modal.email,
+        currency: modal.currency || "NGN",
+        amount: modal.amount,
+        note: modal.note || "Transfer",
+      }),
+    });
+    if (payload.profile) {
+      state.financialDashboard = {
+        ...(state.financialDashboard || {}),
+        wallets: payload.profile.wallets || state.financialDashboard?.wallets || [],
+        recentTransactions: payload.profile.recentTransactions || state.financialDashboard?.recentTransactions || [],
+        ...(payload.financeSummary || {}),
+      };
+    }
+    state.actionModal = null;
+    await loadFinancialDashboard();
+    render();
+    showNotice("Transfer sent");
+  }).catch((error) => showError(error.message));
 }
 
 async function submitVtuPurchase() {
@@ -7259,17 +7515,21 @@ function renderVtuQuickActions() {
       <div class="section-head compact">
         <div>
           <h3>Services</h3>
-          <p class="muted-copy">Airtime and data</p>
+          <p class="muted-copy">Transfer, airtime and data</p>
         </div>
       </div>
       <div class="vtu-action-grid">
+        <button class="service-action-btn" data-transfer-open type="button">
+          <span>${icon("bank")}</span>
+          <strong>Transfer</strong>
+        </button>
         <button class="service-action-btn" data-vtu-open="airtime" type="button" ${settings.airtimeEnabled ? "" : "disabled"}>
           <span>${icon("phone")}</span>
           <strong>Airtime</strong>
         </button>
         <button class="service-action-btn" data-vtu-open="data" type="button" ${settings.dataEnabled ? "" : "disabled"}>
           <span>${icon("wifi")}</span>
-          <strong>Data</strong>
+          <strong>Internet</strong>
         </button>
       </div>
     </section>
@@ -9474,35 +9734,71 @@ function bindDashboardActions() {
     button.addEventListener("click", () => openVtuModal(button.dataset.vtuOpen));
   });
 
-  const vtuNetworkInput = document.getElementById("vtu-network-input");
-  if (vtuNetworkInput) {
-    vtuNetworkInput.addEventListener("change", () => {
+  const transferOpenButton = document.querySelector("[data-transfer-open]");
+  if (transferOpenButton) {
+    transferOpenButton.addEventListener("click", openTransferModal);
+  }
+
+  document.querySelectorAll("[data-vtu-network]").forEach((button) => {
+    button.addEventListener("click", () => {
       const productType = state.actionModal?.type === "vtu-data" ? "data" : "airtime";
       saveVtuModalDraft(productType);
+      const nextNetwork = button.dataset.vtuNetwork || "";
       if (productType === "data") {
         state.actionModal = {
           ...state.actionModal,
-          network: vtuNetworkInput.value,
+          network: nextNetwork,
           variationId: "",
+          amount: "",
         };
-        void loadVtuDataPlans(vtuNetworkInput.value, { force: true })
+        void loadVtuDataPlans(nextNetwork, { force: true })
           .then(() => render())
           .catch((error) => showError(error.message));
-        render();
+      } else {
+        state.actionModal = {
+          ...state.actionModal,
+          network: nextNetwork,
+        };
       }
+      render();
     });
-  }
+  });
+
+  document.querySelectorAll("[data-vtu-recent]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = (state.vtuTransactions || []).find((transaction) => transaction.id === button.dataset.vtuRecent);
+      if (!item) {
+        return;
+      }
+      state.actionModal = {
+        ...state.actionModal,
+        phone: item.phone || state.actionModal.phone || "",
+        network: item.network || state.actionModal.network || "",
+        amount: item.productType === "airtime" ? String(item.faceValue || item.amountCharged || "") : state.actionModal.amount || "",
+        variationId: "",
+      };
+      if (state.actionModal.type === "vtu-data" && state.actionModal.network) {
+        void loadVtuDataPlans(state.actionModal.network, { force: false })
+          .then(() => render())
+          .catch((error) => showError(error.message));
+      }
+      render();
+    });
+  });
 
   const vtuPhoneInput = document.getElementById("vtu-phone-input");
   if (vtuPhoneInput) {
-    vtuPhoneInput.addEventListener("input", () => saveVtuModalDraft(state.actionModal?.type === "vtu-data" ? "data" : "airtime"));
+    vtuPhoneInput.addEventListener("input", () => {
+      saveVtuModalDraft(state.actionModal?.type === "vtu-data" ? "data" : "airtime");
+      updateVtuReviewButtonState();
+    });
   }
 
   const vtuAmountInput = document.getElementById("vtu-amount-input");
   if (vtuAmountInput) {
     vtuAmountInput.addEventListener("input", () => {
       saveVtuModalDraft("airtime");
-      render();
+      updateVtuReviewButtonState();
     });
   }
 
@@ -9514,6 +9810,52 @@ function bindDashboardActions() {
     });
   }
 
+  const vtuPackageOpenButton = document.getElementById("vtu-package-open-btn");
+  if (vtuPackageOpenButton) {
+    vtuPackageOpenButton.addEventListener("click", () => {
+      saveVtuModalDraft("data");
+      state.actionModal = {
+        ...state.actionModal,
+        packageSheet: true,
+      };
+      render();
+    });
+  }
+
+  const vtuPackageCloseButton = document.getElementById("vtu-package-close-btn");
+  if (vtuPackageCloseButton) {
+    vtuPackageCloseButton.addEventListener("click", () => {
+      state.actionModal = {
+        ...state.actionModal,
+        packageSheet: false,
+      };
+      render();
+    });
+  }
+
+  document.querySelectorAll("[data-vtu-plan-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = {
+        ...state.actionModal,
+        packageCategory: button.dataset.vtuPlanCategory || "Daily",
+      };
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-vtu-plan-select]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const plan = (state.vtuDataPlans || []).find((item) => item.id === button.dataset.vtuPlanSelect || item.variationId === button.dataset.vtuPlanSelect);
+      state.actionModal = {
+        ...state.actionModal,
+        variationId: button.dataset.vtuPlanSelect || "",
+        amount: plan?.sellingPrice || "",
+        packageSheet: false,
+      };
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-vtu-airtime-amount]").forEach((button) => {
     button.addEventListener("click", () => {
       state.actionModal = {
@@ -9523,6 +9865,28 @@ function bindDashboardActions() {
       render();
     });
   });
+
+  const transferSubmitButton = document.getElementById("transfer-submit-btn");
+  if (transferSubmitButton) {
+    const updateTransferDraft = (shouldRender = false) => {
+      saveTransferModalDraft();
+      updateTransferButtonState();
+      if (shouldRender) {
+        render();
+      }
+    };
+    ["transfer-email-input", "transfer-amount-input", "transfer-note-input"].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) {
+        input.addEventListener("input", () => updateTransferDraft(false));
+      }
+    });
+    const transferCurrencyInput = document.getElementById("transfer-currency-input");
+    if (transferCurrencyInput) {
+      transferCurrencyInput.addEventListener("change", () => updateTransferDraft(true));
+    }
+    transferSubmitButton.addEventListener("click", submitInAppTransfer);
+  }
 
   const vtuReviewButton = document.getElementById("vtu-review-btn");
   if (vtuReviewButton) {
