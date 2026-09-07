@@ -3267,7 +3267,7 @@ function renderActionModal() {
     const ngnWallet = getFinancialWallet("NGN");
     const availableNgn = Number(ngnWallet?.availableBalance || 0);
     const network = state.actionModal.network || "";
-    const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === state.actionModal.variationId);
+    const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === state.actionModal.variationId || plan.variationId === state.actionModal.variationId);
     const amount = isData ? selectedPlan?.sellingPrice || "" : state.actionModal.amount || "";
     const canUse = settings.configured && (isData ? settings.dataEnabled : settings.airtimeEnabled);
     return `
@@ -3298,8 +3298,8 @@ function renderActionModal() {
                         <label class="stack-label">
                           <span>Plan</span>
                           <select id="vtu-plan-input" ${state.loadingVtu || !network ? "disabled" : ""}>
-                            <option value="">${state.loadingVtu ? "Loading plans..." : "Choose plan"}</option>
-                            ${state.vtuDataPlans.map((plan) => `<option value="${escapeHtml(plan.id)}" ${state.actionModal.variationId === plan.id ? "selected" : ""}>${escapeHtml(plan.size || plan.name)} - ${formatNaira(plan.sellingPrice)}</option>`).join("")}
+                            <option value="">${state.loadingVtu ? "Loading plans..." : network && !state.vtuDataPlans.length ? "No active plans" : "Choose plan"}</option>
+                            ${state.vtuDataPlans.map((plan) => `<option value="${escapeHtml(plan.variationId || plan.id)}" ${state.actionModal.variationId === (plan.variationId || plan.id) ? "selected" : ""}>${escapeHtml(plan.size || plan.name)} - ${formatNaira(plan.sellingPrice)}</option>`).join("")}
                           </select>
                         </label>
                         ${selectedPlan ? `<p class="wallet-equivalent-preview">${escapeHtml(selectedPlan.validity || selectedPlan.name)} | ${formatNaira(selectedPlan.sellingPrice)}</p>` : ""}
@@ -6002,7 +6002,7 @@ function readVtuModalFields(productType) {
   const network = document.getElementById("vtu-network-input")?.value || state.actionModal?.network || "";
   const variationId = document.getElementById("vtu-plan-input")?.value || state.actionModal?.variationId || "";
   const amount = document.getElementById("vtu-amount-input")?.value?.trim() || state.actionModal?.amount || "";
-  const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === variationId);
+  const selectedPlan = state.vtuDataPlans.find((plan) => plan.id === variationId || plan.variationId === variationId);
   return {
     productType: product,
     phone,
