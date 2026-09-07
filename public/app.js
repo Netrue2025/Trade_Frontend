@@ -7587,10 +7587,14 @@ function renderAdminWithdrawalCard(withdrawal) {
   const equivalent = formatRecordEquivalent(withdrawal, withdrawal.currency);
   const historyKey = financeHistoryKey("withdrawal", withdrawal.id);
   const isNgnBankWithdrawal = withdrawal.currency === "NGN" && destination.type === "NGN_BANK";
-  const canApprove = withdrawal.status === "PENDING" && isNgnBankWithdrawal;
-  const canProcess = withdrawal.status === "PENDING" && !isNgnBankWithdrawal;
-  const canFinalize = ["PENDING", "PROCESSING"].includes(withdrawal.status) && !isNgnBankWithdrawal;
-  const canReject = withdrawal.status === "PENDING";
+  const status = String(withdrawal.status || "").trim().toUpperCase();
+  const paystackMeta = withdrawal.metadata || {};
+  const legacyUnpaidReviewedSuccess = isNgnBankWithdrawal && status === "SUCCESS" && paystackMeta.reviewedApprovalAt && !paystackMeta.paystackStatus && !withdrawal.paystackTransferCode;
+  const canApprove = isNgnBankWithdrawal && (["PENDING", "APPROVED", "PROCESSING"].includes(status) || legacyUnpaidReviewedSuccess);
+  const approveCopy = status === "PENDING" ? "Approve" : status === "PROCESSING" ? "Sync" : "Retry";
+  const canProcess = status === "PENDING" && !isNgnBankWithdrawal;
+  const canFinalize = ["PENDING", "PROCESSING"].includes(status) && !isNgnBankWithdrawal;
+  const canReject = status === "PENDING" || (status === "APPROVED" && !paystackMeta.paystackTransferAttemptedAt && !withdrawal.paystackTransferCode);
   return `
     <div class="asset-card admin-finance-card ${isSuspicious ? "fraud-review-card" : ""}" data-finance-withdrawal-id="${escapeHtml(withdrawal.id || "")}">
       <label class="history-checkbox finance-history-checkbox" aria-label="Select withdrawal">
@@ -7613,10 +7617,10 @@ function renderAdminWithdrawalCard(withdrawal) {
         <span class="wallet-status-badge ${walletStatusClass(withdrawal.status)}">${escapeHtml(formatWalletRequestStatus(withdrawal.status))}</span>
         <p class="muted-copy">${withdrawal.submittedAt ? new Date(withdrawal.submittedAt).toLocaleString() : ""}</p>
         ${
-          canApprove || canFinalize || canReject
+          canApprove || canProcess || canFinalize || canReject
             ? `
               <div class="trade-actions-inline admin-user-actions">
-                ${canApprove ? `<button class="micro-btn primary" data-admin-withdrawal-approve="${withdrawal.id}" type="button">Approve</button>` : ""}
+                ${canApprove ? `<button class="micro-btn primary" data-admin-withdrawal-approve="${withdrawal.id}" type="button">${approveCopy}</button>` : ""}
                 ${canProcess ? `<button class="micro-btn" data-admin-withdrawal-process="${withdrawal.id}" type="button">Process</button>` : ""}
                 ${canFinalize ? `<button class="micro-btn primary" data-admin-withdrawal-complete="${withdrawal.id}" type="button">Complete</button>` : ""}
                 ${canReject ? `<button class="micro-btn danger" data-admin-withdrawal-reject="${withdrawal.id}" type="button">Reject</button>` : ""}
