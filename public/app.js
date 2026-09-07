@@ -4325,6 +4325,18 @@ function updateUserInStateUsers(nextUser) {
   state.users = state.users.map((user) => (user.id === nextUser.id ? { ...user, ...nextUser } : user));
 }
 
+function applyUserFinancePayloadToState(payload = {}) {
+  if (!payload.profile?.user?.id) {
+    return;
+  }
+  updateUserInStateUsers({
+    id: payload.profile.user.id,
+    ledgerWallets: payload.profile.wallets || [],
+    recentTransactions: payload.profile.recentTransactions || [],
+    ...(payload.financeSummary ? { financeSummary: payload.financeSummary } : {}),
+  });
+}
+
 async function refreshTradeStatusData() {
   if (!state.user) {
     return;
@@ -5183,10 +5195,11 @@ async function submitAdminFinanceAction(kind, id) {
   }
 
   await withLoading(async () => {
-    await api(endpoint, {
+    const payload = await api(endpoint, {
       method: "POST",
       body: JSON.stringify({}),
     });
+    applyUserFinancePayloadToState(payload);
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
     render();
     showNotice("Finance queue updated");
@@ -5637,13 +5650,7 @@ async function submitAdminUserBonus(form, userId) {
         note: data.note || "Bonus",
       }),
     });
-    if (payload.profile?.user?.id) {
-      updateUserInStateUsers({
-        id: payload.profile.user.id,
-        ledgerWallets: payload.profile.wallets || [],
-        recentTransactions: payload.profile.recentTransactions || [],
-      });
-    }
+    applyUserFinancePayloadToState(payload);
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
     clearFormDraft(form);
     render();
@@ -5662,17 +5669,10 @@ async function submitAdminUserBalance(form, userId) {
         note: data.note || "Balance updated",
       }),
     });
-    if (payload.profile?.user?.id) {
-      updateUserInStateUsers({
-        id: payload.profile.user.id,
-        ledgerWallets: payload.profile.wallets || [],
-        recentTransactions: payload.profile.recentTransactions || [],
-      });
-    }
+    applyUserFinancePayloadToState(payload);
     clearFormDraft(form);
     state.actionModal = null;
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
-    await loadDashboardData();
     render();
     showNotice("Balance updated");
   }).catch((error) => showError(error.message));
