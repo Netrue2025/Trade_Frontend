@@ -188,6 +188,7 @@ const state = {
     connected: false,
     statusMessage: "Realtime settings sync is offline.",
   },
+  settingsRenderDeferred: false,
   signalAutoTrade: getDefaultSignalAutoTradeState(),
   formDrafts: loadFormDraftsFromStorage(),
   quest: {
@@ -498,15 +499,35 @@ function refreshSettingsPaneDom() {
     return;
   }
 
-  const activeElement = document.activeElement;
-  if (
-    activeElement &&
-    activeElement.closest("form") &&
-    ["INPUT", "SELECT", "TEXTAREA"].includes(activeElement.tagName)
-  ) {
+  if (shouldDeferSettingsRender()) {
+    state.settingsRenderDeferred = true;
     return;
   }
 
+  state.settingsRenderDeferred = false;
+  render();
+}
+
+function shouldDeferSettingsRender() {
+  if (!state.user || state.activeTab !== "settings") {
+    return false;
+  }
+  const activeElement = document.activeElement;
+  if (
+    activeElement &&
+    app?.contains(activeElement) &&
+    ["INPUT", "SELECT", "TEXTAREA"].includes(activeElement.tagName)
+  ) {
+    return true;
+  }
+  return !!(state.actionModal && document.querySelector(".modal-card"));
+}
+
+function flushDeferredSettingsRender() {
+  if (!state.settingsRenderDeferred || shouldDeferSettingsRender()) {
+    return;
+  }
+  state.settingsRenderDeferred = false;
   render();
 }
 
@@ -553,16 +574,21 @@ function toggleSelectAllSignals() {
 
 async function api(path, options = {}) {
   const sessionToken = getAuthSessionToken();
-  const response = await fetch(toApiUrl(path), {
-    credentials: "include",
-    cache: "no-store",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
+  let response;
+  try {
+    response = await fetch(toApiUrl(path), {
+      credentials: "include",
+      cache: "no-store",
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
+        ...(options.headers || {}),
+      },
+    });
+  } catch (error) {
+    throw new Error("Unable to reach the backend. Please wait a moment and try again.");
+  }
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -911,6 +937,9 @@ function bindFormDraftCapture() {
   };
   app.addEventListener("input", handler, true);
   app.addEventListener("change", handler, true);
+  app.addEventListener("focusout", () => {
+    setTimeout(flushDeferredSettingsRender, 0);
+  }, true);
   bindFormDraftCapture.bound = true;
 }
 
@@ -4586,7 +4615,11 @@ async function refreshDashboardLiveData() {
       : [refreshTradeMarketData(), refreshTradeStatusData(), loadFinancialDashboard()];
   tradeRefreshPromise = Promise.allSettled(refreshTasks).finally(() => {
     tradeRefreshPromise = null;
-    render();
+    if (state.activeTab === "settings") {
+      refreshSettingsPaneDom();
+    } else {
+      render();
+    }
   });
 
   return tradeRefreshPromise;
@@ -5027,7 +5060,7 @@ function toggleAdminPasswordVisibility(userId) {
 }
 
 async function submitAdminPasswordReset(userId) {
-  const password = getAdminPasswordDraft(userId).trim();
+  const password = getAdminPasswordDraft(userId);
   if (!password) {
     showError("Enter a new password for this user.");
     return;
@@ -5040,7 +5073,7 @@ async function submitAdminPasswordReset(userId) {
     });
     updateUserInStateUsers(payload.user);
     setAdminPasswordDraft(userId, "");
-    await loadDashboardData();
+    render();
     showNotice("User password updated");
   }).catch((error) => showError(error.message));
 }
@@ -5081,8 +5114,8 @@ async function submitAdminProfileUpdate(form, userId) {
     }
     updateUserInStateUsers(nextUser);
     clearFormDraft(form);
-    state.actionModal = null;
-    await loadDashboardData();
+    state.actionModal = { type: "admin-users" };
+    render();
     showNotice("User profile updated");
   }).catch((error) => showError(error.message));
 }
