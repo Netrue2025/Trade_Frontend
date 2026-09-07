@@ -179,11 +179,13 @@ const state = {
   expandedTradeIds: [],
   expandedPendingOrderIds: [],
   expandedAdminUserIds: [],
+  expandedAdminWithdrawalIds: [],
   expandedListKeys: [],
   settingsDisclosureOpen: {},
   selectedHistoryTradeIds: [],
   selectedFinanceHistoryIds: [],
   adminPasswordDrafts: {},
+  adminWithdrawalManualDrafts: {},
   revealedAdminPasswordIds: [],
   volatileFieldDrafts: {},
   settingsDraft: {
@@ -5365,6 +5367,7 @@ async function submitAdminFinanceAction(kind, id) {
     approveWithdrawal: `/api/admin/withdrawals/${encodeURIComponent(id)}/approve`,
     processWithdrawal: `/api/admin/withdrawals/${encodeURIComponent(id)}/process`,
     completeWithdrawal: `/api/admin/withdrawals/${encodeURIComponent(id)}/complete`,
+    manualWithdrawal: `/api/admin/withdrawals/${encodeURIComponent(id)}/manual-complete`,
     rejectWithdrawal: `/api/admin/withdrawals/${encodeURIComponent(id)}/reject`,
   };
   const endpoint = actionMap[kind];
@@ -5381,6 +5384,43 @@ async function submitAdminFinanceAction(kind, id) {
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
     render();
     showNotice("Finance queue updated");
+  }).catch((error) => showError(error.message));
+}
+
+function saveAdminWithdrawalManualDraft(id, card = null) {
+  const withdrawalId = String(id || "").trim();
+  if (!withdrawalId) {
+    return;
+  }
+  const root = card || document.querySelector(`[data-finance-withdrawal-id="${window.CSS?.escape ? CSS.escape(withdrawalId) : withdrawalId}"]`);
+  const reference = root?.querySelector("[data-manual-withdrawal-reference]")?.value?.trim() || "";
+  const note = root?.querySelector("[data-manual-withdrawal-note]")?.value?.trim() || "";
+  state.adminWithdrawalManualDrafts = {
+    ...state.adminWithdrawalManualDrafts,
+    [withdrawalId]: { reference, note },
+  };
+}
+
+async function submitAdminManualWithdrawal(id, card = null) {
+  saveAdminWithdrawalManualDraft(id, card);
+  const draft = state.adminWithdrawalManualDrafts[id] || {};
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/withdrawals/${encodeURIComponent(id)}/manual-complete`, {
+      method: "POST",
+      body: JSON.stringify({
+        manualReference: draft.reference || "",
+        adminNote: draft.note || "",
+      }),
+    });
+    applyUserFinancePayloadToState(payload);
+    state.adminWithdrawalManualDrafts = {
+      ...state.adminWithdrawalManualDrafts,
+      [id]: { reference: "", note: "" },
+    };
+    state.expandedAdminWithdrawalIds = state.expandedAdminWithdrawalIds.filter((item) => item !== id);
+    await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
+    render();
+    showNotice("Withdrawal marked successful");
   }).catch((error) => showError(error.message));
 }
 
@@ -7595,6 +7635,14 @@ function renderAdminWithdrawalCard(withdrawal) {
   const canProcess = status === "PENDING" && !isNgnBankWithdrawal;
   const canFinalize = ["PENDING", "PROCESSING"].includes(status) && !isNgnBankWithdrawal;
   const canReject = status === "PENDING" || (status === "APPROVED" && !paystackMeta.paystackTransferAttemptedAt && !withdrawal.paystackTransferCode);
+  const canManualComplete = ["PENDING", "APPROVED", "PROCESSING"].includes(status);
+  const isExpanded = state.expandedAdminWithdrawalIds.includes(withdrawal.id);
+  const manualDraft = state.adminWithdrawalManualDrafts[withdrawal.id] || {};
+  const accountNumber = destination.accountNumber || "";
+  const accountName = destination.accountName || "";
+  const bankName = destination.bankName || "";
+  const destinationAddress = destination.address || "";
+  const destinationNetwork = destination.network || "";
   return `
     <div class="asset-card admin-finance-card ${isSuspicious ? "fraud-review-card" : ""}" data-finance-withdrawal-id="${escapeHtml(withdrawal.id || "")}">
       <label class="history-checkbox finance-history-checkbox" aria-label="Select withdrawal">
@@ -7629,6 +7677,70 @@ function renderAdminWithdrawalCard(withdrawal) {
             : ""
         }
       </div>
+      <button class="withdrawal-detail-toggle" data-admin-withdrawal-details="${escapeHtml(withdrawal.id || "")}" type="button" aria-expanded="${isExpanded ? "true" : "false"}">
+        <span>Details</span>
+        ${icon(isExpanded ? "chevronUp" : "chevronDown")}
+      </button>
+      ${
+        isExpanded
+          ? `
+            <div class="withdrawal-manual-panel">
+              <div class="withdrawal-detail-grid">
+                <div>
+                  <span>Amount</span>
+                  <strong>${withdrawal.currency === "NGN" ? formatNaira(withdrawal.amount) : formatUsdtUnit(withdrawal.amount)}</strong>
+                </div>
+                ${
+                  isNgnBankWithdrawal
+                    ? `
+                      <div>
+                        <span>Bank</span>
+                        <strong>${escapeHtml(bankName || "Not provided")}</strong>
+                      </div>
+                      <div>
+                        <span>Name</span>
+                        <strong>${escapeHtml(accountName || "Not provided")}</strong>
+                      </div>
+                      <div>
+                        <span>Account</span>
+                        <strong>${escapeHtml(accountNumber || "Not provided")}</strong>
+                        ${accountNumber ? renderCopyButton(accountNumber, "Copy account number") : ""}
+                      </div>
+                    `
+                    : `
+                      <div>
+                        <span>Network</span>
+                        <strong>${escapeHtml(destinationNetwork || "Not provided")}</strong>
+                      </div>
+                      <div>
+                        <span>Wallet</span>
+                        <strong>${escapeHtml(destinationAddress || "Not provided")}</strong>
+                        ${destinationAddress ? renderCopyButton(destinationAddress, "Copy wallet address") : ""}
+                      </div>
+                    `
+                }
+                <div>
+                  <span>Request ref</span>
+                  <strong>${escapeHtml(withdrawal.paystackReference || withdrawal.externalTransactionReference || withdrawal.id || "")}</strong>
+                </div>
+              </div>
+              <div class="manual-approval-box">
+                <label>
+                  Manual ref
+                  <input data-manual-withdrawal-reference="${escapeHtml(withdrawal.id || "")}" value="${escapeHtml(manualDraft.reference || "")}" placeholder="Bank transfer reference" />
+                </label>
+                <label>
+                  Note
+                  <input data-manual-withdrawal-note="${escapeHtml(withdrawal.id || "")}" value="${escapeHtml(manualDraft.note || "")}" placeholder="Optional" />
+                </label>
+                <button class="button-primary" data-admin-withdrawal-manual="${escapeHtml(withdrawal.id || "")}" type="button" ${canManualComplete ? "" : "disabled"}>
+                  ${icon("check")} Manual approval
+                </button>
+              </div>
+            </div>
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -10186,6 +10298,33 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-admin-withdrawal-approve]").forEach((button) => {
     button.addEventListener("click", () => submitAdminFinanceAction("approveWithdrawal", button.dataset.adminWithdrawalApprove));
+  });
+
+  document.querySelectorAll("[data-admin-withdrawal-details]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const withdrawalId = button.dataset.adminWithdrawalDetails;
+      if (!withdrawalId) {
+        return;
+      }
+      state.expandedAdminWithdrawalIds = state.expandedAdminWithdrawalIds.includes(withdrawalId)
+        ? state.expandedAdminWithdrawalIds.filter((id) => id !== withdrawalId)
+        : [...new Set([...state.expandedAdminWithdrawalIds, withdrawalId])];
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-manual-withdrawal-reference], [data-manual-withdrawal-note]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const withdrawalId = input.dataset.manualWithdrawalReference || input.dataset.manualWithdrawalNote;
+      saveAdminWithdrawalManualDraft(withdrawalId, input.closest("[data-finance-withdrawal-id]"));
+    });
+  });
+
+  document.querySelectorAll("[data-admin-withdrawal-manual]").forEach((button) => {
+    button.addEventListener("click", () => submitAdminManualWithdrawal(
+      button.dataset.adminWithdrawalManual,
+      button.closest("[data-finance-withdrawal-id]")
+    ));
   });
 
   document.querySelectorAll("[data-admin-withdrawal-complete]").forEach((button) => {

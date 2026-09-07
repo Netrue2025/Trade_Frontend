@@ -2828,6 +2828,93 @@ body[data-theme="dark"] .section-loading-card {
 
 .admin-finance-card {
   align-items: flex-start;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.withdrawal-detail-toggle {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.withdrawal-detail-toggle svg {
+  width: 17px;
+  height: 17px;
+}
+
+.withdrawal-manual-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--soft-surface);
+}
+
+.withdrawal-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.withdrawal-detail-grid > div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--surface);
+  display: grid;
+  gap: 5px;
+}
+
+.withdrawal-detail-grid span,
+.manual-approval-box label {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.withdrawal-detail-grid strong {
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+
+.manual-approval-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.manual-approval-box label {
+  display: grid;
+  gap: 6px;
+}
+
+.manual-approval-box input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.manual-approval-box .button-primary {
+  min-height: 42px;
+  white-space: nowrap;
 }
 
 .fraud-review-card {
@@ -4310,6 +4397,15 @@ body[data-theme="dark"] .mirror-guide-pill {
 
   .auth-name-grid {
     grid-template-columns: 1fr;
+  }
+
+  .withdrawal-detail-grid,
+  .manual-approval-box {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-approval-box .button-primary {
+    width: 100%;
   }
 }
 
