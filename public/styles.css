@@ -2121,10 +2121,10 @@ body[data-theme="dark"] .section-loading-card {
 
 .service-action-btn {
   min-height: 104px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--panel-border);
   border-radius: 8px;
-  background: #211d24;
-  color: #f7f1f8;
+  background: var(--panel);
+  color: var(--text);
   display: grid;
   place-items: center;
   gap: 10px;
@@ -2139,8 +2139,8 @@ body[data-theme="dark"] .section-loading-card {
   border-radius: 999px;
   display: grid;
   place-items: center;
-  color: #ffffff;
-  background: transparent;
+  color: var(--accent);
+  background: var(--soft-surface);
 }
 
 .service-action-btn strong {
@@ -2161,7 +2161,7 @@ body[data-theme="dark"] .section-loading-card {
 
 .vtu-screen-backdrop {
   align-items: stretch;
-  background: rgba(8, 6, 10, 0.72);
+  background: rgba(18, 26, 43, 0.26);
   padding: 0;
 }
 
@@ -2172,9 +2172,10 @@ body[data-theme="dark"] .section-loading-card {
   margin: 0 auto;
   overflow-y: auto;
   padding: max(14px, env(safe-area-inset-top)) 22px max(92px, env(safe-area-inset-bottom));
-  background: #171117;
-  color: #f8f4f8;
+  background: var(--modal-bg);
+  color: var(--text);
   font-family: var(--app-font);
+  box-shadow: var(--shadow);
 }
 
 .vtu-screen-header {
@@ -2182,7 +2183,7 @@ body[data-theme="dark"] .section-loading-card {
   grid-template-columns: 60px 1fr 60px;
   align-items: center;
   min-height: 64px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  border-bottom: 1px solid var(--line);
   margin: 0 -22px 22px;
   padding: 0 22px 14px;
 }
@@ -2199,8 +2200,8 @@ body[data-theme="dark"] .section-loading-card {
   height: 52px;
   border: 0;
   border-radius: 8px;
-  background: #211d24;
-  color: #ffffff;
+  background: var(--soft-surface);
+  color: var(--text);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -2228,7 +2229,7 @@ body[data-theme="dark"] .section-loading-card {
 .vtu-network-section > p,
 .vtu-field-section > label {
   margin: 0 0 10px;
-  color: #f6edf6;
+  color: var(--text);
   font-size: 0.96rem;
   font-weight: 500;
 }
@@ -2242,11 +2243,12 @@ body[data-theme="dark"] .section-loading-card {
 .vtu-recent-item {
   border: 0;
   background: transparent;
-  color: #f8f4f8;
+  color: var(--text);
   display: grid;
   justify-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
   cursor: pointer;
 }
 
@@ -2261,21 +2263,22 @@ body[data-theme="dark"] .section-loading-card {
 
 .vtu-recent-item small,
 .vtu-recent-empty {
-  color: rgba(248, 244, 248, 0.72);
+  color: var(--muted);
 }
 
 .vtu-network-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 10px;
 }
 
 .vtu-network-tile {
+  min-width: 0;
   min-height: 108px;
   border: 1px solid transparent;
   border-radius: 6px;
-  background: #211d24;
-  color: #f8f4f8;
+  background: var(--soft-surface);
+  color: var(--text);
   display: grid;
   place-items: center;
   align-content: center;
@@ -2284,8 +2287,8 @@ body[data-theme="dark"] .section-loading-card {
 }
 
 .vtu-network-tile.active {
-  border-color: #c45cf3;
-  box-shadow: inset 0 0 0 1px rgba(196, 92, 243, 0.35);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent);
 }
 
 .vtu-network-tile span:not(.vtu-network-logo) {
@@ -2344,11 +2347,12 @@ body[data-theme="dark"] .section-loading-card {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .vtu-field-section label span,
 .vtu-balance-line {
-  color: rgba(248, 244, 248, 0.68);
+  color: var(--muted);
   font-size: 0.92rem;
 }
 
@@ -2359,10 +2363,10 @@ body[data-theme="dark"] .section-loading-card {
 .vtu-amount-field {
   width: 100%;
   min-height: 74px;
-  border: 0;
-  border-radius: 0;
-  background: #211d24;
-  color: #f8f4f8;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--text);
   font: 500 1.18rem/1.2 var(--app-font);
 }
 
@@ -2374,6 +2378,13 @@ body[data-theme="dark"] .section-loading-card {
   padding: 0 22px;
   text-align: left;
   cursor: pointer;
+}
+
+.vtu-select-field span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .vtu-select-field:disabled,
@@ -2391,34 +2402,34 @@ body[data-theme="dark"] .section-loading-card {
 
 .vtu-field-section > input::placeholder,
 .vtu-transfer-card input::placeholder {
-  color: rgba(248, 244, 248, 0.45);
+  color: color-mix(in srgb, var(--muted) 68%, transparent);
 }
 
 .vtu-amount-field {
   display: grid;
   grid-template-columns: 64px 1fr;
-  border-bottom: 3px solid #f8f4f8;
+  border-bottom: 3px solid var(--text);
 }
 
 .vtu-amount-field > span {
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(248, 244, 248, 0.7);
+  background: var(--soft-surface);
+  color: var(--muted);
   font-size: 1.25rem;
 }
 
 .vtu-amount-field input {
   border: 0;
   background: transparent;
-  color: #ffffff;
+  color: var(--text);
   padding: 0 24px;
   font: 700 1.28rem/1 var(--number-font);
   outline: none;
 }
 
 .vtu-airtime-row {
-  background: #211d24;
+  background: var(--soft-surface);
   padding: 12px;
 }
 
@@ -2426,12 +2437,12 @@ body[data-theme="dark"] .section-loading-card {
   position: sticky;
   bottom: 18px;
   width: 100%;
-  min-height: 80px;
-  margin-top: 108px;
+  min-height: 64px;
+  margin-top: clamp(28px, 8vh, 72px);
   border: 0;
-  border-radius: 6px;
-  background: #9a80bd;
-  color: #efe6f7;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #ffffff;
   font: 800 1.12rem/1 var(--app-font);
   display: inline-flex;
   align-items: center;
@@ -2448,7 +2459,7 @@ body[data-theme="dark"] .section-loading-card {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(8, 6, 10, 0.38);
+  background: rgba(18, 26, 43, 0.32);
 }
 
 .vtu-package-sheet {
@@ -2457,8 +2468,8 @@ body[data-theme="dark"] .section-loading-card {
   min-height: 80dvh;
   overflow: auto;
   border-radius: 10px 10px 0 0;
-  background: #211d24;
-  color: #f8f4f8;
+  background: var(--modal-bg);
+  color: var(--text);
   padding: 14px 22px 28px;
   position: relative;
 }
@@ -2467,7 +2478,7 @@ body[data-theme="dark"] .section-loading-card {
   width: 72px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--line);
   margin: 0 auto 42px;
 }
 
@@ -2476,7 +2487,7 @@ body[data-theme="dark"] .section-loading-card {
   top: 16px;
   right: 22px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--soft-surface);
 }
 
 .vtu-package-sheet h3 {
@@ -2488,7 +2499,7 @@ body[data-theme="dark"] .section-loading-card {
 
 .vtu-package-sheet p {
   margin: 0 0 14px;
-  color: #f8f4f8;
+  color: var(--text);
 }
 
 .vtu-package-tabs {
@@ -2503,13 +2514,13 @@ body[data-theme="dark"] .section-loading-card {
   border-radius: 4px;
   padding: 14px 18px;
   background: transparent;
-  color: #f8f4f8;
+  color: var(--text);
   font: 800 0.95rem/1 var(--app-font);
   cursor: pointer;
 }
 
 .vtu-package-tabs button.active {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--soft-surface);
 }
 
 .vtu-package-list {
@@ -2520,14 +2531,15 @@ body[data-theme="dark"] .section-loading-card {
 .vtu-package-row {
   border: 0;
   background: transparent;
-  color: #f8f4f8;
+  color: var(--text);
   text-align: left;
   font: 500 1.08rem/1.35 var(--app-font);
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .vtu-empty-state {
-  color: rgba(248, 244, 248, 0.65);
+  color: var(--muted);
 }
 
 .vtu-transfer-card {
@@ -2539,13 +2551,63 @@ body[data-theme="dark"] .section-loading-card {
 .vtu-transfer-card label {
   display: grid;
   gap: 9px;
-  color: #f8f4f8;
+  color: var(--text);
   font-weight: 600;
 }
 
 .vtu-balance-line {
   margin: 16px 0 0;
   text-align: right;
+}
+
+body[data-theme="dark"] .service-action-btn,
+body[data-theme="dark"] .vtu-back-btn,
+body[data-theme="dark"] .vtu-sheet-close,
+body[data-theme="dark"] .vtu-network-tile,
+body[data-theme="dark"] .vtu-select-field,
+body[data-theme="dark"] .vtu-field-section > input,
+body[data-theme="dark"] .vtu-transfer-card input,
+body[data-theme="dark"] .vtu-transfer-card select,
+body[data-theme="dark"] .vtu-amount-field,
+body[data-theme="dark"] .vtu-airtime-row {
+  background: #211d24;
+  color: #f8f4f8;
+}
+
+body[data-theme="dark"] .vtu-phone-screen {
+  background: #171117;
+  color: #f8f4f8;
+}
+
+body[data-theme="dark"] .vtu-package-sheet {
+  background: #211d24;
+  color: #f8f4f8;
+}
+
+body[data-theme="dark"] .vtu-recent-row > p,
+body[data-theme="dark"] .vtu-network-section > p,
+body[data-theme="dark"] .vtu-field-section > label,
+body[data-theme="dark"] .vtu-transfer-card label,
+body[data-theme="dark"] .vtu-package-sheet p,
+body[data-theme="dark"] .vtu-package-row,
+body[data-theme="dark"] .vtu-package-tabs button {
+  color: #f8f4f8;
+}
+
+body[data-theme="dark"] .vtu-field-section label span,
+body[data-theme="dark"] .vtu-balance-line,
+body[data-theme="dark"] .vtu-recent-item small,
+body[data-theme="dark"] .vtu-recent-empty,
+body[data-theme="dark"] .vtu-empty-state {
+  color: rgba(248, 244, 248, 0.68);
+}
+
+body[data-theme="dark"] .vtu-amount-field {
+  border-bottom-color: #f8f4f8;
+}
+
+body[data-theme="dark"] .vtu-amount-field input {
+  color: #ffffff;
 }
 
 .settings-status-grid {
@@ -2828,7 +2890,17 @@ body[data-theme="dark"] .section-loading-card {
 
 .admin-finance-card {
   align-items: flex-start;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  flex-wrap: wrap;
+}
+
+.admin-finance-card > label + div {
+  min-width: 0;
+  flex: 1 1 170px;
+}
+
+.admin-finance-card .asset-values {
+  min-width: 112px;
+  flex: 0 0 auto;
 }
 
 .withdrawal-detail-toggle {
@@ -2852,15 +2924,42 @@ body[data-theme="dark"] .section-loading-card {
   height: 17px;
 }
 
-.withdrawal-manual-panel {
-  grid-column: 1 / -1;
+.manual-withdrawal-modal {
+  width: min(520px, calc(100vw - 24px));
+  max-height: min(92dvh, 720px);
+  overflow: auto;
+}
+
+.manual-withdrawal-summary {
   display: grid;
-  gap: 14px;
-  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 14px;
+}
+
+.manual-withdrawal-summary > div {
+  min-width: 0;
   padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--soft-surface);
+  display: grid;
+  gap: 5px;
+}
+
+.manual-withdrawal-summary span,
+.manual-withdrawal-summary small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.manual-withdrawal-summary strong {
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+}
+
+.manual-withdrawal-details {
+  margin-bottom: 14px;
 }
 
 .withdrawal-detail-grid {
@@ -2873,9 +2972,10 @@ body[data-theme="dark"] .section-loading-card {
   min-width: 0;
   padding: 10px;
   border-radius: 14px;
-  background: var(--surface);
+  background: var(--panel);
   display: grid;
   gap: 5px;
+  align-content: start;
 }
 
 .withdrawal-detail-grid span,
@@ -2892,7 +2992,7 @@ body[data-theme="dark"] .section-loading-card {
 
 .manual-approval-box {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
 }

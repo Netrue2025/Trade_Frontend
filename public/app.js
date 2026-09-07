@@ -179,13 +179,11 @@ const state = {
   expandedTradeIds: [],
   expandedPendingOrderIds: [],
   expandedAdminUserIds: [],
-  expandedAdminWithdrawalIds: [],
   expandedListKeys: [],
   settingsDisclosureOpen: {},
   selectedHistoryTradeIds: [],
   selectedFinanceHistoryIds: [],
   adminPasswordDrafts: {},
-  adminWithdrawalManualDrafts: {},
   revealedAdminPasswordIds: [],
   volatileFieldDrafts: {},
   settingsDraft: {
@@ -3291,6 +3289,92 @@ function renderVtuServiceModal() {
   `;
 }
 
+function renderAdminManualWithdrawalModal() {
+  const withdrawal = (state.adminWithdrawals || []).find((item) => item.id === state.actionModal.withdrawalId);
+  if (!withdrawal) {
+    return "";
+  }
+  const destination = withdrawal.bank || withdrawal.destination || {};
+  const status = String(withdrawal.status || "").trim().toUpperCase();
+  const isNgnBankWithdrawal = withdrawal.currency === "NGN" && destination.type === "NGN_BANK";
+  const canManualComplete = ["PENDING", "APPROVED", "PROCESSING"].includes(status);
+  const amount = withdrawal.currency === "NGN" ? formatNaira(withdrawal.amount) : formatUsdtUnit(withdrawal.amount);
+  const reference = withdrawal.paystackReference || withdrawal.externalTransactionReference || withdrawal.id || "";
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card manual-withdrawal-modal" data-withdrawal-manual-modal="${escapeHtml(withdrawal.id || "")}">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Withdrawal</p>
+        <h3>Manual payout</h3>
+        <div class="manual-withdrawal-summary">
+          <div>
+            <span>User</span>
+            <strong>${escapeHtml(withdrawal.user?.name || "Unknown user")}</strong>
+            <small>${escapeHtml(withdrawal.user?.email || "")}</small>
+          </div>
+          <div>
+            <span>Amount</span>
+            <strong>${amount}</strong>
+            <small>${escapeHtml(formatWalletRequestStatus(status))}</small>
+          </div>
+        </div>
+        <div class="withdrawal-detail-grid manual-withdrawal-details">
+          ${
+            isNgnBankWithdrawal
+              ? `
+                <div>
+                  <span>Bank</span>
+                  <strong>${escapeHtml(destination.bankName || "Not provided")}</strong>
+                </div>
+                <div>
+                  <span>Name</span>
+                  <strong>${escapeHtml(destination.accountName || "Not provided")}</strong>
+                </div>
+                <div>
+                  <span>Account</span>
+                  <strong>${escapeHtml(destination.accountNumber || "Not provided")}</strong>
+                  ${destination.accountNumber ? renderCopyButton(destination.accountNumber, "Copy account number") : ""}
+                </div>
+              `
+              : `
+                <div>
+                  <span>Network</span>
+                  <strong>${escapeHtml(destination.network || "Not provided")}</strong>
+                </div>
+                <div>
+                  <span>Wallet</span>
+                  <strong>${escapeHtml(destination.address || "Not provided")}</strong>
+                  ${destination.address ? renderCopyButton(destination.address, "Copy wallet address") : ""}
+                </div>
+              `
+          }
+          <div>
+            <span>Request ref</span>
+            <strong>${escapeHtml(reference)}</strong>
+            ${reference ? renderCopyButton(reference, "Copy request reference") : ""}
+          </div>
+        </div>
+        <div class="manual-approval-box">
+          <label>
+            Manual ref
+            <input id="manual-withdrawal-reference-input" value="${escapeHtml(state.actionModal.manualReference || "")}" placeholder="Bank transfer reference" autocomplete="off" />
+          </label>
+          <label>
+            Note
+            <input id="manual-withdrawal-note-input" value="${escapeHtml(state.actionModal.adminNote || "")}" placeholder="Optional" autocomplete="off" />
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+          <button class="button-primary shimmer-button" id="manual-withdrawal-submit-btn" data-admin-withdrawal-manual="${escapeHtml(withdrawal.id || "")}" type="button" ${canManualComplete ? "" : "disabled"}>
+            ${icon("check")} Manual approval
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderActionModal() {
   if (!state.actionModal) {
     return "";
@@ -3505,6 +3589,10 @@ function renderActionModal() {
 
   if (state.actionModal.type === "vtu-airtime" || state.actionModal.type === "vtu-data") {
     return renderVtuServiceModal();
+  }
+
+  if (state.actionModal.type === "admin-manual-withdrawal") {
+    return renderAdminManualWithdrawalModal();
   }
 
   if (state.actionModal.type === "vtu-confirm") {
@@ -5387,37 +5475,19 @@ async function submitAdminFinanceAction(kind, id) {
   }).catch((error) => showError(error.message));
 }
 
-function saveAdminWithdrawalManualDraft(id, card = null) {
-  const withdrawalId = String(id || "").trim();
-  if (!withdrawalId) {
-    return;
-  }
-  const root = card || document.querySelector(`[data-finance-withdrawal-id="${window.CSS?.escape ? CSS.escape(withdrawalId) : withdrawalId}"]`);
-  const reference = root?.querySelector("[data-manual-withdrawal-reference]")?.value?.trim() || "";
-  const note = root?.querySelector("[data-manual-withdrawal-note]")?.value?.trim() || "";
-  state.adminWithdrawalManualDrafts = {
-    ...state.adminWithdrawalManualDrafts,
-    [withdrawalId]: { reference, note },
-  };
-}
-
-async function submitAdminManualWithdrawal(id, card = null) {
-  saveAdminWithdrawalManualDraft(id, card);
-  const draft = state.adminWithdrawalManualDrafts[id] || {};
+async function submitAdminManualWithdrawal(id) {
+  const manualReference = document.getElementById("manual-withdrawal-reference-input")?.value?.trim() || state.actionModal?.manualReference || "";
+  const adminNote = document.getElementById("manual-withdrawal-note-input")?.value?.trim() || state.actionModal?.adminNote || "";
   await withLoading(async () => {
     const payload = await api(`/api/admin/withdrawals/${encodeURIComponent(id)}/manual-complete`, {
       method: "POST",
       body: JSON.stringify({
-        manualReference: draft.reference || "",
-        adminNote: draft.note || "",
+        manualReference,
+        adminNote,
       }),
     });
     applyUserFinancePayloadToState(payload);
-    state.adminWithdrawalManualDrafts = {
-      ...state.adminWithdrawalManualDrafts,
-      [id]: { reference: "", note: "" },
-    };
-    state.expandedAdminWithdrawalIds = state.expandedAdminWithdrawalIds.filter((item) => item !== id);
+    state.actionModal = null;
     await Promise.all([loadFinancialDashboard(), loadAdminFinanceQueues()]);
     render();
     showNotice("Withdrawal marked successful");
@@ -7635,14 +7705,6 @@ function renderAdminWithdrawalCard(withdrawal) {
   const canProcess = status === "PENDING" && !isNgnBankWithdrawal;
   const canFinalize = ["PENDING", "PROCESSING"].includes(status) && !isNgnBankWithdrawal;
   const canReject = status === "PENDING" || (status === "APPROVED" && !paystackMeta.paystackTransferAttemptedAt && !withdrawal.paystackTransferCode);
-  const canManualComplete = ["PENDING", "APPROVED", "PROCESSING"].includes(status);
-  const isExpanded = state.expandedAdminWithdrawalIds.includes(withdrawal.id);
-  const manualDraft = state.adminWithdrawalManualDrafts[withdrawal.id] || {};
-  const accountNumber = destination.accountNumber || "";
-  const accountName = destination.accountName || "";
-  const bankName = destination.bankName || "";
-  const destinationAddress = destination.address || "";
-  const destinationNetwork = destination.network || "";
   return `
     <div class="asset-card admin-finance-card ${isSuspicious ? "fraud-review-card" : ""}" data-finance-withdrawal-id="${escapeHtml(withdrawal.id || "")}">
       <label class="history-checkbox finance-history-checkbox" aria-label="Select withdrawal">
@@ -7677,70 +7739,10 @@ function renderAdminWithdrawalCard(withdrawal) {
             : ""
         }
       </div>
-      <button class="withdrawal-detail-toggle" data-admin-withdrawal-details="${escapeHtml(withdrawal.id || "")}" type="button" aria-expanded="${isExpanded ? "true" : "false"}">
+      <button class="withdrawal-detail-toggle" data-admin-withdrawal-details="${escapeHtml(withdrawal.id || "")}" type="button">
         <span>Details</span>
-        ${icon(isExpanded ? "chevronUp" : "chevronDown")}
+        ${icon("chevronDown")}
       </button>
-      ${
-        isExpanded
-          ? `
-            <div class="withdrawal-manual-panel">
-              <div class="withdrawal-detail-grid">
-                <div>
-                  <span>Amount</span>
-                  <strong>${withdrawal.currency === "NGN" ? formatNaira(withdrawal.amount) : formatUsdtUnit(withdrawal.amount)}</strong>
-                </div>
-                ${
-                  isNgnBankWithdrawal
-                    ? `
-                      <div>
-                        <span>Bank</span>
-                        <strong>${escapeHtml(bankName || "Not provided")}</strong>
-                      </div>
-                      <div>
-                        <span>Name</span>
-                        <strong>${escapeHtml(accountName || "Not provided")}</strong>
-                      </div>
-                      <div>
-                        <span>Account</span>
-                        <strong>${escapeHtml(accountNumber || "Not provided")}</strong>
-                        ${accountNumber ? renderCopyButton(accountNumber, "Copy account number") : ""}
-                      </div>
-                    `
-                    : `
-                      <div>
-                        <span>Network</span>
-                        <strong>${escapeHtml(destinationNetwork || "Not provided")}</strong>
-                      </div>
-                      <div>
-                        <span>Wallet</span>
-                        <strong>${escapeHtml(destinationAddress || "Not provided")}</strong>
-                        ${destinationAddress ? renderCopyButton(destinationAddress, "Copy wallet address") : ""}
-                      </div>
-                    `
-                }
-                <div>
-                  <span>Request ref</span>
-                  <strong>${escapeHtml(withdrawal.paystackReference || withdrawal.externalTransactionReference || withdrawal.id || "")}</strong>
-                </div>
-              </div>
-              <div class="manual-approval-box">
-                <label>
-                  Manual ref
-                  <input data-manual-withdrawal-reference="${escapeHtml(withdrawal.id || "")}" value="${escapeHtml(manualDraft.reference || "")}" placeholder="Bank transfer reference" />
-                </label>
-                <label>
-                  Note
-                  <input data-manual-withdrawal-note="${escapeHtml(withdrawal.id || "")}" value="${escapeHtml(manualDraft.note || "")}" placeholder="Optional" />
-                </label>
-                <button class="button-primary" data-admin-withdrawal-manual="${escapeHtml(withdrawal.id || "")}" type="button" ${canManualComplete ? "" : "disabled"}>
-                  ${icon("check")} Manual approval
-                </button>
-              </div>
-            </div>
-          `
-          : ""
-      }
     </div>
   `;
 }
@@ -10306,26 +10308,37 @@ function bindDashboardActions() {
       if (!withdrawalId) {
         return;
       }
-      state.expandedAdminWithdrawalIds = state.expandedAdminWithdrawalIds.includes(withdrawalId)
-        ? state.expandedAdminWithdrawalIds.filter((id) => id !== withdrawalId)
-        : [...new Set([...state.expandedAdminWithdrawalIds, withdrawalId])];
+      state.actionModal = {
+        type: "admin-manual-withdrawal",
+        withdrawalId,
+      };
       render();
     });
   });
 
-  document.querySelectorAll("[data-manual-withdrawal-reference], [data-manual-withdrawal-note]").forEach((input) => {
-    input.addEventListener("input", () => {
-      const withdrawalId = input.dataset.manualWithdrawalReference || input.dataset.manualWithdrawalNote;
-      saveAdminWithdrawalManualDraft(withdrawalId, input.closest("[data-finance-withdrawal-id]"));
-    });
+  document.querySelectorAll("[data-admin-withdrawal-manual]").forEach((button) => {
+    button.addEventListener("click", () => submitAdminManualWithdrawal(button.dataset.adminWithdrawalManual));
   });
 
-  document.querySelectorAll("[data-admin-withdrawal-manual]").forEach((button) => {
-    button.addEventListener("click", () => submitAdminManualWithdrawal(
-      button.dataset.adminWithdrawalManual,
-      button.closest("[data-finance-withdrawal-id]")
-    ));
-  });
+  const manualReferenceInput = document.getElementById("manual-withdrawal-reference-input");
+  if (manualReferenceInput) {
+    manualReferenceInput.addEventListener("input", () => {
+      state.actionModal = {
+        ...(state.actionModal || {}),
+        manualReference: manualReferenceInput.value,
+      };
+    });
+  }
+
+  const manualNoteInput = document.getElementById("manual-withdrawal-note-input");
+  if (manualNoteInput) {
+    manualNoteInput.addEventListener("input", () => {
+      state.actionModal = {
+        ...(state.actionModal || {}),
+        adminNote: manualNoteInput.value,
+      };
+    });
+  }
 
   document.querySelectorAll("[data-admin-withdrawal-complete]").forEach((button) => {
     button.addEventListener("click", () => submitAdminFinanceAction("completeWithdrawal", button.dataset.adminWithdrawalComplete));
