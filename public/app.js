@@ -20,6 +20,13 @@ const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
+const APP_VERSION = "1.0.0";
+const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
+const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
+const PWA_INSTALL_DELAY_MS = 9000;
+const PWA_INSTALL_DISMISS_MS = 1000 * 60 * 60 * 24 * 5;
+const PWA_NOTIFICATION_DISMISSED_UNTIL_KEY = "netruefi-pwa-notification-dismissed-until";
+const PWA_NOTIFICATION_DISMISS_MS = 1000 * 60 * 60 * 24 * 3;
 const FORM_DRAFT_EXCLUDED_FIELD_KEYS = new Set([
   "trade-symbol",
   "trade-price",
@@ -228,6 +235,22 @@ const state = {
     selectedIds: [],
     deleting: false,
     switchingTimeframe: false,
+  },
+  pwa: {
+    installEvent: null,
+    installPromptVisible: false,
+    notificationPromptVisible: false,
+    updateAvailable: false,
+    serviceWorkerRegistration: null,
+    pushConfig: { enabled: false, publicKey: "", preferences: {} },
+    pushPreferences: null,
+    pushSubscriptions: [],
+    pushSubscribed: false,
+    notificationPermission: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+    isStandalone: false,
+    isIos: false,
+    isOnline: typeof navigator === "undefined" ? true : navigator.onLine !== false,
+    onlineNoticeVisible: false,
   },
 };
 
@@ -581,6 +604,10 @@ function toggleSelectAllSignals() {
 }
 
 async function api(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  if (typeof navigator !== "undefined" && navigator.onLine === false && !["GET", "HEAD"].includes(method)) {
+    throw new Error("You're offline. Reconnect to continue.");
+  }
   const sessionToken = getAuthSessionToken();
   let response;
   try {
@@ -595,7 +622,11 @@ async function api(path, options = {}) {
       },
     });
   } catch (error) {
-    throw new Error("Unable to reach the backend. Please wait a moment and try again.");
+    throw new Error(
+      typeof navigator !== "undefined" && navigator.onLine === false
+        ? "You're offline. Reconnect to continue."
+        : "We're having trouble reaching NetrueFi services. Please try again."
+    );
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -603,6 +634,231 @@ async function api(path, options = {}) {
     throw new Error(payload.error || "Request failed.");
   }
   return payload;
+}
+
+function isStandalonePwa() {
+  return !!(
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.navigator?.standalone === true
+  );
+}
+
+function isIosLikeDevice() {
+  const platform = String(navigator.platform || "").toLowerCase();
+  const userAgent = String(navigator.userAgent || "").toLowerCase();
+  return /iphone|ipad|ipod/.test(userAgent) || (platform === "macintel" && navigator.maxTouchPoints > 1);
+}
+
+function isPwaDismissed(key) {
+  return Number(localStorage.getItem(key) || 0) > Date.now();
+}
+
+function dismissPwaPrompt(key, durationMs) {
+  localStorage.setItem(key, String(Date.now() + durationMs));
+}
+
+function shouldShowInstallPrompt() {
+  if (!state.user || state.pwa.isStandalone || state.pwa.installPromptVisible || isPwaDismissed(PWA_INSTALL_DISMISSED_UNTIL_KEY)) {
+    return false;
+  }
+  const visits = Number(localStorage.getItem(PWA_INSTALL_VISITS_KEY) || 0);
+  return !!state.pwa.installEvent || state.pwa.isIos || visits >= 2;
+}
+
+function scheduleInstallPrompt() {
+  if (!state.user || state.pwa.isStandalone) {
+    return;
+  }
+  window.setTimeout(() => {
+    if (shouldShowInstallPrompt()) {
+      state.pwa.installPromptVisible = true;
+      render();
+    }
+  }, PWA_INSTALL_DELAY_MS);
+}
+
+function scheduleNotificationPrompt() {
+  window.setTimeout(() => {
+    state.pwa.notificationPermission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+    if (
+      state.user &&
+      canUseWebPush() &&
+      !state.pwa.pushSubscribed &&
+      state.pwa.notificationPermission === "default" &&
+      !state.pwa.notificationPromptVisible &&
+      !isPwaDismissed(PWA_NOTIFICATION_DISMISSED_UNTIL_KEY)
+    ) {
+      state.pwa.notificationPromptVisible = true;
+      render();
+    }
+  }, PWA_INSTALL_DELAY_MS + 4000);
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = `${base64String}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let index = 0; index < rawData.length; index += 1) {
+    outputArray[index] = rawData.charCodeAt(index);
+  }
+  return outputArray;
+}
+
+function canUseWebPush() {
+  return !!(
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window &&
+    state.pwa.pushConfig?.enabled
+  );
+}
+
+async function loadPushSettings() {
+  const config = await api("/api/push/public-key").catch(() => ({ enabled: false, publicKey: "" }));
+  state.pwa.pushConfig = config;
+  state.pwa.notificationPermission = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+  if (!state.user) {
+    return;
+  }
+  const payload = await api("/api/push/preferences").catch(() => null);
+  if (payload) {
+    state.pwa.pushPreferences = payload.preferences || config.preferences || {};
+    state.pwa.pushSubscriptions = payload.subscriptions || [];
+    state.pwa.pushSubscribed = !!state.pwa.pushSubscriptions.length;
+  }
+}
+
+async function subscribeToPushNotifications() {
+  if (!canUseWebPush()) {
+    throw new Error("Push notifications are not available on this device yet.");
+  }
+  if (state.pwa.isIos && !state.pwa.isStandalone) {
+    throw new Error("Install NetrueFi first to enable notifications on iPhone or iPad.");
+  }
+
+  const permission = await Notification.requestPermission();
+  state.pwa.notificationPermission = permission;
+  if (permission !== "granted") {
+    throw new Error("Notification permission was not granted.");
+  }
+
+  const registration = state.pwa.serviceWorkerRegistration || await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(state.pwa.pushConfig.publicKey),
+  });
+  const payload = await api("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify({
+      subscription: subscription.toJSON(),
+      platform: state.pwa.isIos ? "ios" : "web",
+      browser: navigator.userAgent,
+    }),
+  });
+  state.pwa.pushSubscribed = true;
+  state.pwa.pushSubscriptions = payload.subscription ? [payload.subscription] : state.pwa.pushSubscriptions;
+  state.pwa.pushPreferences = payload.preferences || state.pwa.pushPreferences;
+  state.pwa.notificationPromptVisible = false;
+}
+
+async function updatePushPreferences(form) {
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const preferences = {};
+  Object.keys(state.pwa.pushConfig.preferences || {}).forEach((key) => {
+    preferences[key] = payload[key] === "on";
+  });
+  const result = await api("/api/push/preferences", {
+    method: "POST",
+    body: JSON.stringify(preferences),
+  });
+  state.pwa.pushPreferences = result.preferences || preferences;
+}
+
+function hasSensitiveActionInProgress() {
+  const type = String(state.actionModal?.type || "").toLowerCase();
+  return /withdraw|deposit|trade|gift|vtu|airtime|data|quest/.test(type);
+}
+
+function updateAppBadge() {
+  if (!navigator.setAppBadge && !navigator.clearAppBadge) {
+    return;
+  }
+  const count = (state.notifications || []).filter((item) => !item.readAt).length;
+  if (count > 0 && navigator.setAppBadge) {
+    navigator.setAppBadge(count).catch(() => {});
+  } else if (navigator.clearAppBadge) {
+    navigator.clearAppBadge().catch(() => {});
+  }
+}
+
+async function registerNetrueServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    return null;
+  }
+  try {
+    const registration = await navigator.serviceWorker.register("/service-worker.js");
+    state.pwa.serviceWorkerRegistration = registration;
+    if (registration.waiting) {
+      state.pwa.updateAvailable = true;
+      render();
+    }
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) {
+        return;
+      }
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          state.pwa.updateAvailable = true;
+          render();
+        }
+      });
+    });
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      window.location.reload();
+    });
+    return registration;
+  } catch {
+    return null;
+  }
+}
+
+function initPwaExperience() {
+  state.pwa.isStandalone = isStandalonePwa();
+  state.pwa.isIos = isIosLikeDevice();
+  state.pwa.isOnline = navigator.onLine !== false;
+  localStorage.setItem(PWA_INSTALL_VISITS_KEY, String(Number(localStorage.getItem(PWA_INSTALL_VISITS_KEY) || 0) + 1));
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    state.pwa.installEvent = event;
+    scheduleInstallPrompt();
+  });
+  window.addEventListener("appinstalled", () => {
+    state.pwa.installEvent = null;
+    state.pwa.installPromptVisible = false;
+    state.pwa.isStandalone = true;
+    showNotice("NetrueFi installed");
+  });
+  window.addEventListener("online", () => {
+    state.pwa.isOnline = true;
+    state.pwa.onlineNoticeVisible = true;
+    render();
+    if (state.user) {
+      void loadDashboardData();
+    }
+    window.setTimeout(() => {
+      state.pwa.onlineNoticeVisible = false;
+      render();
+    }, 2800);
+  });
+  window.addEventListener("offline", () => {
+    state.pwa.isOnline = false;
+    render();
+  });
+  void registerNetrueServiceWorker();
+  void loadPushSettings();
 }
 
 async function requireSessionUser() {
@@ -2115,6 +2371,7 @@ async function loadFinancialDashboard() {
     : endpoint;
   state.financialDashboard = await api(url);
   state.notifications = state.financialDashboard?.notifications || [];
+  updateAppBadge();
   if (state.user.role === "admin" && state.financialDashboard?.accountSnapshot) {
     applyAccountSnapshot(state.financialDashboard.accountSnapshot);
   }
@@ -2948,6 +3205,292 @@ function getTradeTpPnlValue(trade, targetPrice) {
 
 function renderNotice() {
   return state.notice ? `<div class="floating-notice">${state.notice}</div>` : "";
+}
+
+function renderPwaStatusBanner() {
+  if (!state.pwa.isOnline) {
+    return `<div class="pwa-status-banner offline">Offline</div>`;
+  }
+  if (state.pwa.onlineNoticeVisible) {
+    return `<div class="pwa-status-banner online">Back online</div>`;
+  }
+  return "";
+}
+
+function renderPwaInstallPrompt() {
+  if (!state.pwa.installPromptVisible || state.pwa.isStandalone) {
+    return "";
+  }
+  const isIos = state.pwa.isIos && !state.pwa.installEvent;
+  return `
+    <div class="modal-backdrop pwa-backdrop">
+      <section class="pwa-sheet" role="dialog" aria-modal="true" aria-labelledby="pwa-install-title">
+        <img src="/icons/icon-192.png" alt="" class="pwa-logo" />
+        <h3 id="pwa-install-title">${isIos ? "Install NetrueFi on iPhone" : "Get the NetrueFi App"}</h3>
+        ${
+          isIos
+            ? `
+              <p>Add NetrueFi to your Home Screen for faster access and notifications.</p>
+              <ol class="pwa-steps">
+                <li>Tap Share</li>
+                <li>Choose Add to Home Screen</li>
+                <li>Tap Add</li>
+              </ol>
+            `
+            : `
+              <p>Open NetrueFi faster from your home screen with a full-screen app feel.</p>
+              <div class="pwa-benefits">
+                <span>${icon("check")} Faster access</span>
+                <span>${icon("check")} Secure alerts</span>
+                <span>${icon("check")} Dashboard shortcut</span>
+              </div>
+            `
+        }
+        <div class="modal-actions">
+          <button class="button-secondary" id="pwa-install-later-btn" type="button">${isIos ? "Got it" : "Maybe later"}</button>
+          ${isIos ? "" : `<button class="button-primary shimmer-button" id="pwa-install-now-btn" type="button">Install app</button>`}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderPwaNotificationPrompt() {
+  if (!state.pwa.notificationPromptVisible) {
+    return "";
+  }
+  const needsIosInstall = state.pwa.isIos && !state.pwa.isStandalone;
+  return `
+    <div class="modal-backdrop pwa-backdrop">
+      <section class="pwa-sheet" role="dialog" aria-modal="true" aria-labelledby="pwa-notification-title">
+        <img src="/icons/icon-192.png" alt="" class="pwa-logo" />
+        <h3 id="pwa-notification-title">${needsIosInstall ? "Install first" : "Stay Updated"}</h3>
+        <p>${needsIosInstall ? "Install NetrueFi on your Home Screen first to enable iPhone notifications." : "Get transaction, quest, service, and trading updates when they matter."}</p>
+        <div class="pwa-benefits">
+          <span>${icon("bell")} Transactions</span>
+          <span>${icon("gift")} Quest rewards</span>
+          <span>${icon("signals")} Trading signals</span>
+        </div>
+        <div class="modal-actions">
+          <button class="button-secondary" id="pwa-notification-later-btn" type="button">Not now</button>
+          <button class="button-primary shimmer-button" id="${needsIosInstall ? "pwa-notification-install-btn" : "pwa-notification-enable-btn"}" type="button">
+            ${needsIosInstall ? "How to install" : "Enable notifications"}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderPwaUpdatePrompt() {
+  if (!state.pwa.updateAvailable) {
+    return "";
+  }
+  return `
+    <div class="pwa-update-banner">
+      <div>
+        <strong>NetrueFi update available</strong>
+        <p>A new version is ready.</p>
+      </div>
+      <button class="button-secondary" id="pwa-update-later-btn" type="button">Later</button>
+      <button class="button-primary shimmer-button" id="pwa-update-now-btn" type="button">Update</button>
+    </div>
+  `;
+}
+
+function renderPwaLayer() {
+  return `
+    ${renderPwaStatusBanner()}
+    ${renderPwaInstallPrompt()}
+    ${renderPwaNotificationPrompt()}
+    ${renderPwaUpdatePrompt()}
+  `;
+}
+
+function renderPwaSettingsContent() {
+  const preferences = state.pwa.pushPreferences || state.pwa.pushConfig.preferences || {};
+  const installedLabel = state.pwa.isStandalone ? "Installed" : "Not installed";
+  const notificationLabel = state.pwa.pushSubscribed
+    ? "Enabled"
+    : state.pwa.notificationPermission === "denied"
+      ? "Blocked"
+      : "Disabled";
+  const rows = [
+    ["transactions", "Transaction Updates"],
+    ["quest", "Quest Notifications"],
+    ["lowBalance", "Low Balance Alerts"],
+    ["vtuPurchases", "Airtime & Data"],
+    ["tradingSignals", "Trading Signals"],
+    ["appUpdates", "App Updates"],
+  ];
+  return `
+    <div class="pwa-settings-card">
+      <div class="pwa-settings-title-row">
+        <p class="muted-copy">Install, offline support, and alerts.</p>
+        <span class="app-version-pill">v${escapeHtml(APP_VERSION)}</span>
+      </div>
+      <div class="pwa-settings-grid">
+        <div>
+          <span>Installation</span>
+          <strong>${installedLabel}</strong>
+        </div>
+        <div>
+          <span>Notifications</span>
+          <strong>${notificationLabel}</strong>
+        </div>
+      </div>
+      <div class="pwa-settings-actions">
+        ${state.pwa.isStandalone ? "" : `<button class="button-secondary" id="pwa-settings-install-btn" type="button">${icon("download")} Install NetrueFi</button>`}
+        <button class="button-secondary" id="pwa-settings-notification-btn" type="button">${icon("bell")} Manage notifications</button>
+      </div>
+      <form id="pwa-notification-preferences-form" class="pwa-preference-list">
+        ${rows
+          .map(([key, label]) => `
+            <label class="toggle-row">
+              <span>${label}</span>
+              <input name="${key}" type="checkbox" ${preferences[key] !== false ? "checked" : ""} />
+            </label>
+          `)
+          .join("")}
+        <button class="button-primary shimmer-button" type="submit">Save preferences</button>
+      </form>
+    </div>
+  `;
+}
+
+function renderPwaSettingsCard() {
+  return `
+    <section class="mobile-card settings-card" data-section="app">
+      <div class="section-head">
+        <div>
+          <h3>App</h3>
+          <p class="muted-copy">Install and alerts.</p>
+        </div>
+      </div>
+      ${renderPwaSettingsContent()}
+    </section>
+  `;
+}
+
+async function installNetrueFiApp() {
+  if (state.pwa.isIos && !state.pwa.installEvent) {
+    state.pwa.installPromptVisible = true;
+    render();
+    return;
+  }
+  const promptEvent = state.pwa.installEvent;
+  if (!promptEvent) {
+    showNotice("Install is not available from this browser yet.");
+    return;
+  }
+  state.pwa.installPromptVisible = false;
+  await promptEvent.prompt();
+  await promptEvent.userChoice.catch(() => null);
+  state.pwa.installEvent = null;
+  render();
+}
+
+function showNotificationSoftPrompt() {
+  if (isPwaDismissed(PWA_NOTIFICATION_DISMISSED_UNTIL_KEY)) {
+    showNotice("Notifications can be enabled later from App settings.");
+    return;
+  }
+  state.pwa.notificationPromptVisible = true;
+  render();
+}
+
+async function activatePwaUpdate() {
+  if (hasSensitiveActionInProgress()) {
+    showNotice("Finish your current action before updating.");
+    return;
+  }
+  const registration = state.pwa.serviceWorkerRegistration || await navigator.serviceWorker.ready.catch(() => null);
+  const worker = registration?.waiting;
+  if (!worker) {
+    state.pwa.updateAvailable = false;
+    render();
+    return;
+  }
+  worker.postMessage({ type: "SKIP_WAITING" });
+}
+
+function bindPwaActions() {
+  const installLater = document.getElementById("pwa-install-later-btn");
+  if (installLater) {
+    installLater.onclick = () => {
+      dismissPwaPrompt(PWA_INSTALL_DISMISSED_UNTIL_KEY, PWA_INSTALL_DISMISS_MS);
+      state.pwa.installPromptVisible = false;
+      render();
+    };
+  }
+
+  const installButtons = [
+    document.getElementById("pwa-install-now-btn"),
+    document.getElementById("pwa-settings-install-btn"),
+    document.getElementById("pwa-notification-install-btn"),
+  ].filter(Boolean);
+  installButtons.forEach((button) => {
+    button.onclick = () => {
+      if (state.pwa.isIos && !state.pwa.installEvent) {
+        state.pwa.notificationPromptVisible = false;
+        state.pwa.installPromptVisible = true;
+        render();
+        return;
+      }
+      void installNetrueFiApp().catch((error) => showError(error.message));
+    };
+  });
+
+  const notificationLater = document.getElementById("pwa-notification-later-btn");
+  if (notificationLater) {
+    notificationLater.onclick = () => {
+      dismissPwaPrompt(PWA_NOTIFICATION_DISMISSED_UNTIL_KEY, PWA_NOTIFICATION_DISMISS_MS);
+      state.pwa.notificationPromptVisible = false;
+      render();
+    };
+  }
+
+  const notificationButton = document.getElementById("pwa-settings-notification-btn");
+  if (notificationButton) {
+    notificationButton.onclick = showNotificationSoftPrompt;
+  }
+
+  const notificationEnable = document.getElementById("pwa-notification-enable-btn");
+  if (notificationEnable) {
+    notificationEnable.onclick = () => {
+      void subscribeToPushNotifications()
+        .then(() => {
+          render();
+          showNotice("Notifications enabled");
+        })
+        .catch((error) => showError(error.message));
+    };
+  }
+
+  const preferenceForm = document.getElementById("pwa-notification-preferences-form");
+  if (preferenceForm) {
+    preferenceForm.onsubmit = (event) => {
+      event.preventDefault();
+      void updatePushPreferences(preferenceForm)
+        .then(() => showNotice("Notification preferences saved"))
+        .catch((error) => showError(error.message));
+    };
+  }
+
+  const updateLater = document.getElementById("pwa-update-later-btn");
+  if (updateLater) {
+    updateLater.onclick = () => {
+      state.pwa.updateAvailable = false;
+      render();
+    };
+  }
+
+  const updateNow = document.getElementById("pwa-update-now-btn");
+  if (updateNow) {
+    updateNow.onclick = () => {
+      void activatePwaUpdate().catch((error) => showError(error.message));
+    };
+  }
 }
 
 function getUnreadMessageNotifications() {
@@ -5172,7 +5715,10 @@ async function loadDashboardData() {
   }
 
   updateSignalNotificationPermission();
+  void loadPushSettings().catch(() => undefined);
   ensureSignalAudioAutoUnlock();
+  scheduleInstallPrompt();
+  scheduleNotificationPrompt();
   connectSignalStream();
   if (state.activeTab === "settings") {
     connectSettingsUsersSocket();
@@ -6254,6 +6800,19 @@ function getTabRoute(tab) {
 }
 
 function getNotificationTarget(notification) {
+  const route = String(notification?.route || notification?.metadata?.route || "").trim();
+  if (route.includes("tab=signals")) {
+    return { tab: "signals", section: "signals" };
+  }
+  if (route.includes("tab=quest")) {
+    return { tab: "quest", section: "quest" };
+  }
+  if (route.includes("tab=services")) {
+    return { tab: "home", section: "services" };
+  }
+  if (route.includes("tab=history")) {
+    return { tab: "history", section: "finance" };
+  }
   const type = String(notification?.type || "").toUpperCase();
   const entityType = String(notification?.entityType || "").toUpperCase();
   if (state.user?.role === "admin" && ["DEPOSIT", "WITHDRAWAL"].includes(entityType || type)) {
@@ -6281,6 +6840,7 @@ async function openNotification(notificationId) {
         ? { ...item, readAt: payload.notification?.readAt || new Date().toISOString() }
         : item
     ).filter((item) => item.id !== notificationId);
+    updateAppBadge();
   } catch (error) {
     showError(error.message);
     return;
@@ -6329,6 +6889,7 @@ async function dismissNotification(notificationId) {
     // The message may have expired on the server; remove it locally either way.
   }
   state.notifications = (state.notifications || []).filter((item) => item.id !== notificationId);
+  updateAppBadge();
   render();
 }
 
@@ -8586,6 +9147,7 @@ function renderSettingsPane() {
       ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel })}
       ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
       ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
+      ${renderSettingsDisclosure({ key: "app", title: "App", subtitle: state.pwa.isStandalone ? "Installed" : "Install and alerts", iconName: "download", content: renderPwaSettingsContent(), section: "app" })}
       ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
     `;
   }
@@ -8702,6 +9264,7 @@ function renderSettingsPane() {
       ${renderSettingsDisclosure({ key: "user-exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, open: true, extraClass: loadingClass(state.loadingUsers) })}
       ${renderSettingsDisclosure({ key: "user-bank", title: "Withdrawal Bank", subtitle: savedBank.verified ? "Verified" : "Add account", iconName: "bank", content: bankPanel })}
       ${renderSettingsDisclosure({ key: "user-account", title: "Account", subtitle: state.user.mirrorEnabled ? "Mirror active" : "Mirror off", iconName: "profile", content: accountPanel })}
+      ${renderSettingsDisclosure({ key: "user-app", title: "App", subtitle: state.pwa.isStandalone ? "Installed" : "Install and alerts", iconName: "download", content: renderPwaSettingsContent(), section: "app" })}
       ${renderSettingsDisclosure({ key: "user-support", title: "Support", subtitle: "Password and help", iconName: "contact", content: supportPanel, section: "support" })}
     `;
   }
@@ -8873,6 +9436,7 @@ function renderSettingsPane() {
             </section>
           `
       }
+      ${renderPwaSettingsCard()}
       <section class="mobile-card settings-card" data-section="support">
         <div class="section-head">
           <div>
@@ -9417,6 +9981,7 @@ function renderDashboardShell() {
     ${renderMessageNotificationPopup()}
     ${renderErrorModal()}
     ${renderActionModal()}
+    ${renderPwaLayer()}
     ${renderLoader()}
   `;
   restoreFormDrafts();
@@ -9497,6 +10062,7 @@ function bindInvestmentTradeActions() {
 
 function bindDashboardActions() {
   bindPasswordVisibilityToggles();
+  bindPwaActions();
   bindMarketModeActions();
   bindHistoryActions();
   bindFuturesActions();
@@ -9507,10 +10073,13 @@ function bindDashboardActions() {
   const notificationButton = document.getElementById("notification-toggle-btn");
   if (notificationButton) {
     notificationButton.addEventListener("click", () => {
-      state.showNotifications = !state.showNotifications;
-      render();
-    });
-  }
+          state.showNotifications = !state.showNotifications;
+          if (state.showNotifications) {
+            updateAppBadge();
+          }
+          render();
+        });
+      }
 
   document.querySelectorAll("[data-balance-privacy-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -11120,4 +11689,5 @@ async function bootstrap() {
   }
 }
 
+initPwaExperience();
 bootstrap();
