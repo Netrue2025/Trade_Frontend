@@ -3401,6 +3401,7 @@ async function installNetrueFiApp() {
     return;
   }
   state.pwa.installPromptVisible = false;
+  render();
   try {
     await promptEvent.prompt();
     await promptEvent.userChoice.catch(() => null);
