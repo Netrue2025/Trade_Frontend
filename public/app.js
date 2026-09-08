@@ -1262,7 +1262,7 @@ function announceSignal(signal) {
     const strategyLabel = String(signal.strategyType || "BUY").replace(/_/g, "-");
     new Notification(`${signal.pair} BUY signal`, {
       body: `${strategyLabel} at ${formatNumber(signal.entryPrice, 6)} | Confidence ${Math.round(Number(signal.confidence || 0))}%`,
-      icon: "/netruefx-logo.png",
+      icon: "/netruefi-logo.png",
     });
   }
 
@@ -4058,10 +4058,10 @@ function renderSplashScreen() {
       <div class="splash-aura splash-aura-one"></div>
       <div class="splash-aura splash-aura-two"></div>
       <div class="splash-logo-shell">
-        <img class="splash-logo" src="/netruefx-logo.png" alt="Netrue FX logo" />
+        <img class="splash-logo" src="/netruefi-logo.png" alt="NetrueFi logo" />
       </div>
       <div class="splash-copy">
-        <p class="eyebrow">Netrue FX</p>
+        <p class="eyebrow">NetrueFi</p>
         <h2>Smart trading starts here</h2>
         <p class="muted-copy">Loading your secure trading gateway...</p>
       </div>
@@ -4075,9 +4075,9 @@ function renderAuthLanding() {
     <section class="auth-landing">
       <section class="auth-shell-card">
         <div class="auth-brand-block">
-          <img class="auth-brand-logo" src="/netruefx-logo.png" alt="Netrue FX logo" />
+          <img class="auth-brand-logo" src="/netruefi-logo.png" alt="NetrueFi logo" />
           <div>
-            <p class="eyebrow">Netrue FX</p>
+            <p class="eyebrow">NetrueFi</p>
             <h2>${isRegister ? "Create account" : "Welcome back"}</h2>
             <p class="muted-copy">${isRegister ? "Choose the account type you are requesting." : "Sign in with your account details."}</p>
           </div>

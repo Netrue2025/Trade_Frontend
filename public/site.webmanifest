@@ -1,0 +1,17 @@
+{
+  "name": "NetrueFi",
+  "short_name": "NetrueFi",
+  "description": "Crypto trading, wallet funding, quests, airtime, data, and withdrawals in one fintech dashboard.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07140f",
+  "theme_color": "#07140f",
+  "icons": [
+    {
+      "src": "/netruefi-logo.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
