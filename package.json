@@ -9,6 +9,6 @@
     "check": "node --check public/app.js && node --check public/components/signal-page.js"
   },
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   }
 }
