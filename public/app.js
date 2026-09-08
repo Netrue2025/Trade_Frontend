@@ -496,6 +496,7 @@ function refreshSignalPaneDom() {
     getTradeEntryPrice,
     getTradeCurrentMarket,
     renderExchangeBadge,
+    renderTradeJoinedUsersButton,
   });
   bindSignalFeedActions();
   bindInvestmentTradeActions();
@@ -1655,6 +1656,8 @@ function icon(name) {
       '<path d="M4 17h3l2.5-7 3 11 2.5-6H20" /><circle cx="7" cy="17" r="1.2"/><circle cx="15" cy="15" r="1.2"/>',
     profile:
       '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8c0-3.4 2.8-6 7-6s7 2.6 7 6"/>',
+    users:
+      '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/>',
     contact:
       '<path d="M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v11A2.5 2.5 0 0 1 16.5 20h-9A2.5 2.5 0 0 1 5 17.5v-11Z"/><path d="m8 8 4 3 4-3"/>' ,
     download:
@@ -2471,6 +2474,32 @@ function getTradeExitExecutionSnapshot(exitOrder) {
   return exitOrder?.adminExecution || null;
 }
 
+function getTradeClosedAt(trade) {
+  const exitTimes = (trade.exitOrders || [])
+    .map((exitOrder) => getTradeExitExecutionSnapshot(exitOrder))
+    .filter((execution) => ["FILLED", "PARTIALLY_FILLED"].includes(String(execution?.status || "").toUpperCase()))
+    .map((execution) => Number(execution?.transactTime || execution?.updateTime || execution?.time || 0))
+    .filter((timestamp) => Number.isFinite(timestamp) && timestamp > 0);
+
+  if (exitTimes.length) {
+    return new Date(Math.max(...exitTimes)).toISOString();
+  }
+
+  const entryExecution = state.user?.role === "user" ? trade.mirroredExecution?.order : trade.adminExecution;
+  if (
+    String(trade.lifecycleStatus || "").toUpperCase() === "CLOSED" &&
+    String(entryExecution?.status || "").toUpperCase() === "FILLED" &&
+    String(trade.side || "").toUpperCase() === "SELL"
+  ) {
+    const timestamp = Number(entryExecution.transactTime || entryExecution.updateTime || entryExecution.time || 0);
+    if (Number.isFinite(timestamp) && timestamp > 0) {
+      return new Date(timestamp).toISOString();
+    }
+  }
+
+  return trade.closedAt || trade.updatedAt || "";
+}
+
 function getExecutionAveragePrice(execution, fallbackPrice = 0) {
   const directPrice = Number(execution?.price || 0);
   if (directPrice > 0) {
@@ -2585,7 +2614,7 @@ function getTradeStaticPnlValue(trade) {
 
 function getTradeReportPnlValue(trade) {
   const status = String(trade.lifecycleStatus || "").toUpperCase();
-  if (["CLOSED", "CANCELED"].includes(status)) {
+  if (status === "CLOSED") {
     return getTradeStaticPnlValue(trade);
   }
   return getTradePnlValue(trade);
@@ -2600,7 +2629,7 @@ function getWeekStartKey(date) {
 }
 
 function getTradeReportKey(trade, period) {
-  const date = new Date(trade.closedAt || trade.updatedAt || trade.createdAt || Date.now());
+  const date = new Date(getTradeClosedAt(trade) || Date.now());
   if (period === "months") {
     return date.toISOString().slice(0, 7);
   }
@@ -2612,7 +2641,7 @@ function getTradeReportKey(trade, period) {
 
 function getTradeReportExitPrice(trade) {
   if (String(trade.lifecycleStatus || "").toUpperCase() !== "CLOSED") {
-    return Number(getTradeCurrentMarket(trade.symbol)?.price || 0);
+    return 0;
   }
   const filledExitExecutions = (trade.exitOrders || [])
     .map((exitOrder) => ({
@@ -2631,12 +2660,11 @@ function getTradeReportExitPrice(trade) {
 }
 
 function buildProfitLossTradeBreakdown(trade, pnlValue) {
-  const pnlPercent = String(trade.lifecycleStatus || "").toUpperCase() === "CLOSED"
-    ? getTradeStaticPnlPercent(trade)
-    : getTradePnlPercent(trade);
+  const pnlPercent = getTradeStaticPnlPercent(trade);
   const investedUsdt = state.user?.role === "user" && trade.userInvestment?.amountUsdt
     ? Number(trade.userInvestment.amountUsdt || 0)
     : getTradeEntryPrice(trade) * getTradeExecutedQuantity(trade);
+  const closedAt = getTradeClosedAt(trade);
   return {
     id: trade.id,
     symbol: trade.symbol || "-",
@@ -2648,13 +2676,46 @@ function buildProfitLossTradeBreakdown(trade, pnlValue) {
     investedUsdt,
     pnlPercent,
     pnlValue,
-    createdAt: trade.createdAt || "",
+    createdAt: closedAt || trade.createdAt || "",
+    closedAt,
   };
 }
 
 function shouldIncludeTradeInProfitLossReport(trade) {
   const symbol = normalizeTradeSymbolValue(trade?.symbol);
-  return !EXCLUDED_PROFIT_LOSS_REPORT_SYMBOLS.has(symbol);
+  if (EXCLUDED_PROFIT_LOSS_REPORT_SYMBOLS.has(symbol)) {
+    return false;
+  }
+  return String(trade?.lifecycleStatus || "").toUpperCase() === "CLOSED" && !!getTradeClosedAt(trade);
+}
+
+function getTradeJoinedUsers(trade) {
+  return Array.isArray(trade?.joinedUsers) ? trade.joinedUsers : [];
+}
+
+function getTradeJoinedUsersCount(trade) {
+  const count = Number(trade?.joinedUsersCount ?? getTradeJoinedUsers(trade).length ?? 0);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+function renderTradeJoinedUsersButton(trade) {
+  if (state.user?.role !== "admin") {
+    return "";
+  }
+
+  const count = getTradeJoinedUsersCount(trade);
+  return `
+    <button
+      class="trade-joined-count-btn"
+      data-open-trade-joined-users="${escapeHtml(trade.id || "")}"
+      type="button"
+      aria-label="View joined users for ${escapeHtml(trade.symbol || "trade")}"
+      title="View joined users"
+    >
+      ${icon("users")}
+      <span>${count.toLocaleString()}</span>
+    </button>
+  `;
 }
 
 function getProfitLossReportRows(period = state.reportPeriod) {
@@ -2745,7 +2806,7 @@ function createProfitLossPdfBlob(rows, period) {
     { label: "Trade", x: 46, width: 82 },
     { label: "Side", x: 130, width: 38 },
     { label: "Entry", x: 172, width: 70 },
-    { label: "Exit/Now", x: 244, width: 70 },
+    { label: "Exit", x: 244, width: 70 },
     { label: "Size", x: 316, width: 74 },
     { label: "P&L %", x: 392, width: 62 },
     { label: "P&L", x: 456, width: 104 },
@@ -2795,7 +2856,7 @@ function createProfitLossPdfBlob(rows, period) {
 
   renderPageHeader(true);
   if (!rows.length) {
-    commands.push(pdfText("No trade history available.", 46, y, { size: 11, color: [0.38, 0.43, 0.5] }));
+    commands.push(pdfText("No closed trade history available.", 46, y, { size: 11, color: [0.38, 0.43, 0.5] }));
   }
 
   rows.forEach((group) => {
@@ -3390,6 +3451,49 @@ function renderActionModal() {
           formatNumber,
         })
       : "";
+  }
+
+  if (state.actionModal.type === "trade-joined-users") {
+    const trade = state.trades.find((item) => item.id === state.actionModal.tradeId);
+    if (!trade) {
+      return "";
+    }
+    const users = getTradeJoinedUsers(trade);
+    const count = getTradeJoinedUsersCount(trade);
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card trade-joined-users-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">${escapeHtml(trade.symbol || "Trade")}</p>
+          <h3>${count.toLocaleString()} connected</h3>
+          <div class="trade-joined-users-list">
+            ${
+              users.length
+                ? users
+                    .map(
+                      (item) => `
+                        <div class="trade-joined-user-row">
+                          <div>
+                            <strong>${escapeHtml(item.name || "User")}</strong>
+                            <p class="muted-copy">${escapeHtml(item.email || "")}</p>
+                          </div>
+                          <div>
+                            <strong>${formatUsdtUnit(item.amountUsdt || 0)}</strong>
+                            <p class="muted-copy">${item.joinedAt ? new Date(item.joinedAt).toLocaleString() : ""}</p>
+                          </div>
+                        </div>
+                      `
+                    )
+                    .join("")
+                : `<p class="muted-copy">No user has joined this trade yet.</p>`
+            }
+          </div>
+          <div class="modal-actions single">
+            <button class="button-primary shimmer-button" id="action-modal-cancel-btn" type="button">Close</button>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   if (state.actionModal.type === "withdraw-blocked") {
@@ -7268,6 +7372,7 @@ function renderOpenOrdersSection() {
                         <div class="asset-values">
                           ${renderTradeStatusBadge(trade.lifecycleStatus)}
                           <strong class="${pnlPercent >= 0 ? "positive" : "negative"}" data-trade-pnl>${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>
+                          ${canManageTrades ? renderTradeJoinedUsersButton(trade) : ""}
                         </div>
                       </summary>
                       <div class="trade-disclosure-body">
@@ -8839,6 +8944,7 @@ function renderSignalsPane() {
           getTradeEntryPrice,
           getTradeCurrentMarket,
           renderExchangeBadge,
+          renderTradeJoinedUsersButton,
         })}
       </div>
     `
@@ -8857,6 +8963,7 @@ function renderHomeOpenTradeSection() {
         getTradeEntryPrice,
         getTradeCurrentMarket,
         renderExchangeBadge,
+        renderTradeJoinedUsersButton,
         title: "Open Trades",
         description: "Live entries",
         layout: "carousel",
@@ -9368,6 +9475,17 @@ function renderDashboardShell() {
 }
 
 function bindInvestmentTradeActions() {
+  document.querySelectorAll("[data-open-trade-joined-users]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showActionModal({
+        type: "trade-joined-users",
+        tradeId: button.dataset.openTradeJoinedUsers,
+      });
+    });
+  });
+
   document.querySelectorAll("[data-join-trade]").forEach((button) => {
     button.addEventListener("click", () => joinTradeNow(button.dataset.joinTrade));
   });

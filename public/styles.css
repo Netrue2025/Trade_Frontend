@@ -452,6 +452,35 @@ button {
   flex-shrink: 0;
 }
 
+.trade-joined-count-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  justify-self: end;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--soft-surface);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.trade-joined-count-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.trade-joined-count-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .signal-row-top {
   display: flex;
   align-items: center;
@@ -3561,6 +3590,42 @@ body[data-theme="dark"] .mirror-guide-pill {
 
 .action-modal-card .modal-actions {
   margin-top: 0;
+}
+
+.modal-actions.single {
+  grid-template-columns: 1fr;
+}
+
+.trade-joined-users-modal {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.trade-joined-users-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.trade-joined-user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--soft-surface);
+}
+
+.trade-joined-user-row > div:last-child {
+  text-align: right;
+}
+
+.trade-joined-user-row strong,
+.trade-joined-user-row p {
+  overflow-wrap: anywhere;
 }
 
 .message-reply-modal {

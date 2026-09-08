@@ -44,6 +44,7 @@
     getTradeEntryPrice,
     getTradeCurrentMarket,
     renderExchangeBadge,
+    renderTradeJoinedUsersButton,
     title = "Open Trades",
     description = "Select a trade to start P&L from the current market point.",
     layout = "list",
@@ -94,6 +95,7 @@
                           <div class="signal-list-side">
                             <strong class="${toneClass(pnlPercent)}">${pnlPercent > 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>
                             <p class="muted-copy">${isJoined ? `${formatUsdtUnit(investment.amountUsdt)} joined` : formatUsdtUnit(currentValue)}</p>
+                            ${user?.role === "admin" && typeof renderTradeJoinedUsersButton === "function" ? renderTradeJoinedUsersButton(trade) : ""}
                             ${isJoined ? `<p class="${toneClass(joinedPnl)}">${joinedPnl > 0 ? "+" : joinedPnl < 0 ? "-" : ""}${formatUsdtUnit(Math.abs(joinedPnl))}</p>` : ""}
                           </div>
                         </div>
@@ -139,6 +141,7 @@
     getTradeEntryPrice,
     getTradeCurrentMarket,
     renderExchangeBadge,
+    renderTradeJoinedUsersButton,
   }) {
     const signals = signalFeed?.signals || [];
     const openTrades = (trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()));
@@ -212,6 +215,7 @@
           getTradeEntryPrice,
           getTradeCurrentMarket,
           renderExchangeBadge,
+          renderTradeJoinedUsersButton,
         })}
 
         <section class="signal-board-card">
