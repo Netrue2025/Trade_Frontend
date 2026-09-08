@@ -730,6 +730,12 @@ async function loadPushSettings() {
 }
 
 async function subscribeToPushNotifications() {
+  if (!state.pwa.pushConfig?.enabled || !state.pwa.pushConfig?.publicKey) {
+    await loadPushSettings();
+  }
+  if (!state.pwa.serviceWorkerRegistration) {
+    await registerNetrueServiceWorker();
+  }
   if (!canUseWebPush()) {
     throw new Error("Push notifications are not available on this device yet.");
   }
@@ -744,10 +750,13 @@ async function subscribeToPushNotifications() {
   }
 
   const registration = state.pwa.serviceWorkerRegistration || await navigator.serviceWorker.ready;
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(state.pwa.pushConfig.publicKey),
-  });
+  let subscription = await registration.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(state.pwa.pushConfig.publicKey),
+    });
+  }
   const payload = await api("/api/push/subscribe", {
     method: "POST",
     body: JSON.stringify({
@@ -757,7 +766,12 @@ async function subscribeToPushNotifications() {
     }),
   });
   state.pwa.pushSubscribed = true;
-  state.pwa.pushSubscriptions = payload.subscription ? [payload.subscription] : state.pwa.pushSubscriptions;
+  state.pwa.pushSubscriptions = payload.subscription
+    ? [
+        payload.subscription,
+        ...state.pwa.pushSubscriptions.filter((item) => item.id !== payload.subscription.id),
+      ]
+    : state.pwa.pushSubscriptions;
   state.pwa.pushPreferences = payload.preferences || state.pwa.pushPreferences;
   state.pwa.notificationPromptVisible = false;
 }
@@ -3380,12 +3394,19 @@ async function installNetrueFiApp() {
   }
   const promptEvent = state.pwa.installEvent;
   if (!promptEvent) {
+    state.pwa.installPromptVisible = false;
+    dismissPwaPrompt(PWA_INSTALL_DISMISSED_UNTIL_KEY, PWA_INSTALL_DISMISS_MS);
+    render();
     showNotice("Install is not available from this browser yet.");
     return;
   }
   state.pwa.installPromptVisible = false;
-  await promptEvent.prompt();
-  await promptEvent.userChoice.catch(() => null);
+  try {
+    await promptEvent.prompt();
+    await promptEvent.userChoice.catch(() => null);
+  } finally {
+    dismissPwaPrompt(PWA_INSTALL_DISMISSED_UNTIL_KEY, PWA_INSTALL_DISMISS_MS);
+  }
   state.pwa.installEvent = null;
   render();
 }
@@ -3431,6 +3452,7 @@ function bindPwaActions() {
   ].filter(Boolean);
   installButtons.forEach((button) => {
     button.onclick = () => {
+      button.disabled = true;
       if (state.pwa.isIos && !state.pwa.installEvent) {
         state.pwa.notificationPromptVisible = false;
         state.pwa.installPromptVisible = true;
@@ -3458,12 +3480,17 @@ function bindPwaActions() {
   const notificationEnable = document.getElementById("pwa-notification-enable-btn");
   if (notificationEnable) {
     notificationEnable.onclick = () => {
+      notificationEnable.disabled = true;
       void subscribeToPushNotifications()
         .then(() => {
           render();
           showNotice("Notifications enabled");
         })
-        .catch((error) => showError(error.message));
+        .catch((error) => {
+          state.pwa.notificationPromptVisible = false;
+          render();
+          showError(error.message);
+        });
     };
   }
 
