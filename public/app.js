@@ -520,6 +520,8 @@ function refreshSignalPaneDom() {
     getTradeCurrentMarket,
     renderExchangeBadge,
     renderTradeJoinedUsersButton,
+    minTradeJoinUsdt: getMinimumTradeJoinUsdt(),
+    tradeJoinBalanceUsdt: getTradeJoinBalanceUsdt(),
   });
   bindSignalFeedActions();
   bindInvestmentTradeActions();
@@ -2339,6 +2341,26 @@ function getInvestmentDailyReturnNgn() {
 
 function getFinancialSettings() {
   return state.financialDashboard?.settings || {};
+}
+
+function getTradingSettings() {
+  return getFinancialSettings().trading || {};
+}
+
+function getMinimumTradeJoinUsdt() {
+  const configured = Number(getTradingSettings().minJoinUsdt || 1);
+  return Number.isFinite(configured) && configured > 0 ? configured : 1;
+}
+
+function getTradeJoinBalanceUsdt() {
+  const totalBalance = state.financialDashboard?.totalBalance || {};
+  const usdtWallet = getFinancialWallet("USDT");
+  const ngnWallet = getFinancialWallet("NGN");
+  const rate = Number(totalBalance.usdtToNgnRate || getUsdtToNgnRate() || 0);
+  const availableUsdt = Number(usdtWallet?.availableBalance || 0);
+  const availableNgnAsUsdt = rate > 0 ? Number(ngnWallet?.availableBalance || 0) / rate : 0;
+  const balance = availableUsdt + availableNgnAsUsdt;
+  return Number.isFinite(balance) && balance > 0 ? balance : 0;
 }
 
 function getFinancialWallet(currency) {
@@ -4315,6 +4337,35 @@ function renderActionModal() {
     `;
   }
 
+  if (state.actionModal.type === "withdraw-review") {
+    const payload = state.actionModal.withdrawalPayload || {};
+    const currency = String(payload.currency || "USDT").toUpperCase();
+    const amount = Number(payload.amount || 0);
+    const settings = getFinancialSettings();
+    const feeValue = currency === "NGN" ? Number(settings.withdrawal?.ngnFee || 100) : 0;
+    const fee = Number.isFinite(feeValue) && feeValue > 0 ? feeValue : 0;
+    const payout = Math.max(amount - fee, 0);
+    const formatAmount = currency === "NGN" ? formatNaira : formatUsdtUnit;
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Withdrawal Review</p>
+          <h3>Confirm withdrawal</h3>
+          <div class="action-metric-stack">
+            <div class="action-metric"><span>Wallet debit</span><strong>${formatAmount(amount)}</strong></div>
+            <div class="action-metric"><span>Withdrawal fee</span><strong>${formatAmount(fee)}</strong></div>
+            <div class="action-metric"><span>Sent for approval</span><strong>${formatAmount(payout)}</strong></div>
+          </div>
+          <div class="modal-actions">
+            <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+            <button class="button-primary shimmer-button" id="withdraw-review-confirm-btn" type="button">${icon("check")} Submit withdrawal</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "deposit" || state.actionModal.type === "withdraw") {
     const isDeposit = state.actionModal.type === "deposit";
     const isGiftRedeem = isDeposit && state.actionModal.depositMode === "gift";
@@ -4338,6 +4389,9 @@ function renderActionModal() {
     const liveBalance = state.financialDashboard?.totalBalance || {};
     const liveAvailableUsdt = Number(liveBalance.liveUsdt || liveBalance.usdt || usdtWallet?.availableBalance || 0);
     const liveAvailableNgn = Number(liveBalance.liveNgnEquivalent || liveBalance.ngnEquivalent || ngnWallet?.availableBalance || 0);
+    const minWithdrawalNgn = withdrawalSettings.minNgn || "500";
+    const minWithdrawalUsdt = withdrawalSettings.minUsdt || "50";
+    const ngnWithdrawalFee = withdrawalSettings.ngnFee || "100";
     const currencyLabel = currency === "NGN" ? "Naira" : currency;
     const title = isGiftRedeem ? "Redeem Gift Card" : isDeposit ? "Deposit" : "Withdraw";
     const eyebrow = isDeposit ? "Wallet" : "Cashout";
@@ -4353,8 +4407,8 @@ function renderActionModal() {
             : "Admin confirms Naira deposits."
           : `Network: ${depositSettings.usdtNetwork || "USDT"}.`
         : currency === "NGN"
-          ? `Available ${formatNaira(liveAvailableNgn)}`
-          : `Available: ${formatUsdtUnit(liveAvailableUsdt)}.`;
+          ? `Available ${formatNaira(liveAvailableNgn)} | Min ${formatNaira(minWithdrawalNgn)} | Fee ${formatNaira(ngnWithdrawalFee)}`
+          : `Available: ${formatUsdtUnit(liveAvailableUsdt)} | Min ${formatUsdtUnit(minWithdrawalUsdt)}.`;
     const amountField = (label, step, min = "0") => `
       <label class="stack-label wallet-amount-field">
         <span>${label}</span>
@@ -4448,7 +4502,7 @@ function renderActionModal() {
       `
       : "";
     const newBankForm = `
-      ${amountField("Amount (Naira)", "1", "500")}
+      ${amountField("Amount (Naira)", "1", minWithdrawalNgn)}
       <label class="stack-label">
         <span>Bank</span>
         <select id="wallet-bank-code-input">
@@ -4484,13 +4538,13 @@ function renderActionModal() {
         ? `
           ${savedBankList}
           ${selectedSavedBankCard}
-          ${amountField("Amount (Naira)", "1", "500")}
+          ${amountField("Amount (Naira)", "1", minWithdrawalNgn)}
           <button class="button-ghost compact-link" id="wallet-use-new-bank-btn" type="button">New account</button>
         `
         : newBankForm
       : currency === "USDT"
         ? `
-          ${amountField("Amount (USDT)", "0.00000001", "50")}
+          ${amountField("Amount (USDT)", "0.00000001", minWithdrawalUsdt)}
           <label class="stack-label">
             <span>Wallet address</span>
             <input id="wallet-address-input" type="text" placeholder="USDT address" />
@@ -5242,6 +5296,9 @@ function statusClass(status) {
   }
   if (value === "CLOSED") {
     return "status-closed";
+  }
+  if (value === "CANCELLED" || value === "CANCELED") {
+    return "status-canceled";
   }
   return "status-neutral";
 }
@@ -6384,6 +6441,14 @@ async function submitAdminDepositSettings(form) {
         exchangeRate: {
           usdtToNgn: data.usdtToNgn || getUsdtToNgnRate(),
         },
+        withdrawal: {
+          minNgn: data.minWithdrawalNgn || "500",
+          minUsdt: data.minWithdrawalUsdt || "50",
+          ngnFee: data.ngnWithdrawalFee || "100",
+        },
+        trading: {
+          minJoinUsdt: data.minTradeJoinUsdt || "1",
+        },
         telegram: {
           channelUsername: data.telegramChannelUsername || "",
         },
@@ -6602,6 +6667,33 @@ async function stopJoinedTrade(tradeId) {
     });
     await loadDashboardData();
     showNotice("Trade stopped");
+  }).catch((error) => showError(error.message));
+}
+
+async function hideStoppedTrade(tradeId) {
+  await withLoading(async () => {
+    await api(`/api/trades/${encodeURIComponent(tradeId)}/hide`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await loadDashboardData();
+    showNotice("Trade removed from your view");
+  }).catch((error) => showError(error.message));
+}
+
+async function submitReviewedWithdrawal(payload = state.actionModal?.withdrawalPayload || {}) {
+  await withLoading(async () => {
+    const headers = { "Idempotency-Key": `withdraw-${Date.now()}-${Math.random().toString(16).slice(2)}` };
+    await api("/api/withdrawals", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    await loadFinancialDashboard();
+    clearWalletDrafts();
+    clearActionModal();
+    showNotice("Withdrawal submitted. Funds are locked while admin reviews it.");
+    render();
   }).catch((error) => showError(error.message));
 }
 
@@ -8389,6 +8481,9 @@ function renderAdminWithdrawalCard(withdrawal) {
     .map((source) => formatCurrencyAmount(source.amount, source.currency))
     .join(" + ");
   const equivalent = formatRecordEquivalent(withdrawal, withdrawal.currency);
+  const debitedAmount = withdrawal.requestedAmount || withdrawal.amount;
+  const feeAmount = withdrawal.fee || "0";
+  const payoutAmount = withdrawal.netAmount || withdrawal.amount;
   const historyKey = financeHistoryKey("withdrawal", withdrawal.id);
   const isNgnBankWithdrawal = withdrawal.currency === "NGN" && destination.type === "NGN_BANK";
   const status = String(withdrawal.status || "").trim().toUpperCase();
@@ -8410,7 +8505,8 @@ function renderAdminWithdrawalCard(withdrawal) {
       <div>
         <strong>${escapeHtml(withdrawal.user?.name || "Unknown user")}</strong>
         <p class="muted-copy">${escapeHtml(withdrawal.user?.email || "")}</p>
-        <p class="muted-copy">${withdrawal.currency === "NGN" ? formatNaira(withdrawal.amount) : formatUsdtUnit(withdrawal.amount)}</p>
+        <p class="muted-copy">${withdrawal.currency === "NGN" ? `Debited ${formatNaira(debitedAmount)}` : formatUsdtUnit(withdrawal.amount)}</p>
+        ${withdrawal.currency === "NGN" ? `<p class="muted-copy">Pay ${formatNaira(payoutAmount)} | Fee ${formatNaira(feeAmount)}</p>` : ""}
         ${isSuspicious ? `<p class="fraud-review-line">Name mismatch${fraudReview.relatedUserIds?.length ? ` | ${fraudReview.relatedUserIds.length} related` : ""}</p>` : ""}
         ${equivalent ? `<p class="muted-copy">Eq ${equivalent}</p>` : ""}
         ${fundingCopy ? `<p class="muted-copy">From ${fundingCopy}</p>` : ""}
@@ -9008,6 +9104,8 @@ function renderSettingsPane() {
   const signalAutoTradeRuntime = signalAutoTrade.runtime || {};
   const financeSettings = getFinancialSettings();
   const depositSettings = financeSettings.deposit || {};
+  const withdrawalSettings = financeSettings.withdrawal || {};
+  const tradingSettings = financeSettings.trading || {};
   const exchangeRateSettings = financeSettings.exchangeRate || {};
   const telegramSettings = financeSettings.telegram || {};
   const vtuSettings = state.vtuSettings || financeSettings.vtu || {};
@@ -9063,6 +9161,10 @@ function renderSettingsPane() {
         <label>USDT address <input name="usdtAddress" value="${escapeHtml(depositSettingValue("usdtAddress", depositSettings.usdtAddress || ""))}" placeholder="Wallet address" /></label>
         <label>USDT network <input name="usdtNetwork" value="${escapeHtml(depositSettingValue("usdtNetwork", depositSettings.usdtNetwork || "TRC20"))}" placeholder="TRC20" /></label>
         <label>USDT to Naira <input name="usdtToNgn" type="number" min="1" step="0.01" value="${escapeHtml(depositSettingValue("usdtToNgn", exchangeRateSettings.usdtToNgn || getUsdtToNgnRate() || ""))}" placeholder="1600" /></label>
+        <label>Min trade join (USDT) <input name="minTradeJoinUsdt" type="number" min="0.00000001" step="0.00000001" value="${escapeHtml(depositSettingValue("minTradeJoinUsdt", tradingSettings.minJoinUsdt || "1"))}" placeholder="1" /></label>
+        <label>Min NGN withdrawal <input name="minWithdrawalNgn" type="number" min="1" step="1" value="${escapeHtml(depositSettingValue("minWithdrawalNgn", withdrawalSettings.minNgn || "500"))}" placeholder="500" /></label>
+        <label>Min USDT withdrawal <input name="minWithdrawalUsdt" type="number" min="0.00000001" step="0.00000001" value="${escapeHtml(depositSettingValue("minWithdrawalUsdt", withdrawalSettings.minUsdt || "50"))}" placeholder="50" /></label>
+        <label>NGN withdrawal fee <input name="ngnWithdrawalFee" type="number" min="0" step="1" value="${escapeHtml(depositSettingValue("ngnWithdrawalFee", withdrawalSettings.ngnFee || "100"))}" placeholder="100" /></label>
         <label>Telegram channel <input name="telegramChannelUsername" value="${escapeHtml(depositSettingValue("telegramChannelUsername", telegramSettings.channelUsername || "netruesignal"))}" placeholder="netruesignal" /></label>
         <label>Bank note <textarea name="bankNote" rows="2" placeholder="Short note">${escapeHtml(depositSettingValue("bankNote", depositSettings.bankNote || ""))}</textarea></label>
         <button class="button-secondary shimmer-button" type="submit">${icon("bank")} Save</button>
@@ -9537,6 +9639,8 @@ function renderSignalsPane() {
           getTradeCurrentMarket,
           renderExchangeBadge,
           renderTradeJoinedUsersButton,
+          minTradeJoinUsdt: getMinimumTradeJoinUsdt(),
+          tradeJoinBalanceUsdt: getTradeJoinBalanceUsdt(),
         })}
       </div>
     `
@@ -9556,6 +9660,8 @@ function renderHomeOpenTradeSection() {
         getTradeCurrentMarket,
         renderExchangeBadge,
         renderTradeJoinedUsersButton,
+        minTradeJoinUsdt: getMinimumTradeJoinUsdt(),
+        tradeJoinBalanceUsdt: getTradeJoinBalanceUsdt(),
         title: "Open Trades",
         description: "Live entries",
         layout: "carousel",
@@ -9864,8 +9970,9 @@ function renderHistoryContent() {
           const currentValue = (remainingQuantity || getTradeExecutedQuantity(trade)) * currentPrice;
           const useStaticPnl = ["CANCELED", "CLOSED"].includes(String(trade.lifecycleStatus || "").toUpperCase());
           const pnlPercent = useStaticPnl ? getTradeStaticPnlPercent(trade) : (entryPrice && currentPrice ? getTradePnlPercent(trade) : 0);
+          const canHideStoppedTrade = state.user?.role === "user" && trade.userInvestment?.status === "STOPPED";
           return `
-            <div class="asset-card history-row" data-trade-symbol-row="${trade.symbol}" data-trade-entry="${entryPrice}" data-trade-side="${trade.side}" data-trade-quantity="${remainingQuantity || getTradeExecutedQuantity(trade)}" data-trade-pnl-static="${useStaticPnl ? "true" : "false"}">
+            <div class="asset-card history-row" data-trade-id="${escapeHtml(trade.id || "")}" data-trade-symbol-row="${trade.symbol}" data-trade-entry="${entryPrice}" data-trade-side="${trade.side}" data-trade-quantity="${remainingQuantity || getTradeExecutedQuantity(trade)}" data-trade-pnl-static="${useStaticPnl ? "true" : "false"}">
               ${
                 canClearHistory
                   ? `
@@ -9889,6 +9996,7 @@ function renderHistoryContent() {
                 ${renderTradeStatusBadge(trade.lifecycleStatus)}
                 <strong class="${pnlPercent >= 0 ? "positive" : "negative"}" data-trade-pnl>${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>
                 <p class="muted-copy trade-meta-line" data-trade-entry>Entry ${entryPrice ? formatNumber(entryPrice, 8) : "Market"}</p>
+                ${canHideStoppedTrade ? `<button class="micro-btn" data-hide-stopped-trade="${escapeHtml(trade.id || "")}" type="button">Remove</button>` : ""}
               </div>
             </div>
           `;
@@ -10085,6 +10193,10 @@ function bindInvestmentTradeActions() {
 
   document.querySelectorAll("[data-stop-trade-investment]").forEach((button) => {
     button.addEventListener("click", () => stopJoinedTrade(button.dataset.stopTradeInvestment));
+  });
+
+  document.querySelectorAll("[data-hide-stopped-trade]").forEach((button) => {
+    button.addEventListener("click", () => hideStoppedTrade(button.dataset.hideStoppedTrade));
   });
 }
 
@@ -10731,6 +10843,11 @@ function bindDashboardActions() {
     vtuConfirmButton.addEventListener("click", submitVtuPurchase);
   }
 
+  const withdrawReviewConfirmButton = document.getElementById("withdraw-review-confirm-btn");
+  if (withdrawReviewConfirmButton) {
+    withdrawReviewConfirmButton.addEventListener("click", () => submitReviewedWithdrawal());
+  }
+
   const manualDepositButton = document.getElementById("wallet-manual-deposit-btn");
   if (manualDepositButton) {
     manualDepositButton.addEventListener("click", () => {
@@ -10921,9 +11038,15 @@ function bindDashboardActions() {
         return;
       }
       if (mode === "withdraw") {
-        const minimum = currency === "NGN" ? 500 : 50;
+        const settings = getFinancialSettings();
+        const minimum = Number(currency === "NGN" ? settings.withdrawal?.minNgn || 500 : settings.withdrawal?.minUsdt || 50);
         if (Number(amount) < minimum) {
           showError(`Minimum withdrawal is ${currency === "NGN" ? formatNaira(minimum) : formatUsdtUnit(minimum)}.`);
+          return;
+        }
+        const fee = Number(currency === "NGN" ? settings.withdrawal?.ngnFee || 100 : 0);
+        if (Number.isFinite(fee) && fee > 0 && Number(amount) <= fee) {
+          showError(`Withdrawal amount must be greater than the ${currency === "NGN" ? formatNaira(fee) : formatUsdtUnit(fee)} fee.`);
           return;
         }
       }
@@ -10962,6 +11085,15 @@ function bindDashboardActions() {
         }
       }
 
+      if (mode === "withdraw") {
+        state.actionModal = {
+          type: "withdraw-review",
+          withdrawalPayload,
+        };
+        render();
+        return;
+      }
+
       await withLoading(async () => {
         const headers = { "Idempotency-Key": `${mode}-${Date.now()}-${Math.random().toString(16).slice(2)}` };
         if (mode === "deposit") {
@@ -10978,16 +11110,6 @@ function bindDashboardActions() {
           return;
         }
 
-        await api("/api/withdrawals", {
-          method: "POST",
-          headers,
-          body: JSON.stringify(withdrawalPayload),
-        });
-        await loadFinancialDashboard();
-        clearWalletDrafts();
-        clearActionModal();
-        showNotice("Withdrawal submitted. Funds are locked while admin reviews it.");
-        render();
       }).catch((error) => showError(error.message));
     });
   }

@@ -45,6 +45,8 @@
     getTradeCurrentMarket,
     renderExchangeBadge,
     renderTradeJoinedUsersButton,
+    minTradeJoinUsdt = 1,
+    tradeJoinBalanceUsdt = 0,
     title = "Open Trades",
     description = "Select a trade to start P&L from the current market point.",
     layout = "list",
@@ -73,7 +75,10 @@
                     const isQueued = lifecycleStatus === "PENDING";
                     const pnlPercent = typeof getTradePnlPercent === "function" ? getTradePnlPercent(trade) : 0;
                     const adminIsPositive = pnlPercent >= 0;
-                    const canJoin = lifecycleStatus === "OPEN" && adminIsPositive;
+                    const minJoin = Number(minTradeJoinUsdt || 1);
+                    const joinBalance = Number(tradeJoinBalanceUsdt || 0);
+                    const hasMinimumBalance = joinBalance >= minJoin;
+                    const canJoin = lifecycleStatus === "OPEN" && adminIsPositive && hasMinimumBalance;
                     const currentValue = typeof getTradeCurrentValue === "function" ? getTradeCurrentValue(trade) : 0;
                     const entryPrice = typeof getTradeEntryPrice === "function" ? getTradeEntryPrice(trade) : Number(trade.price || 0);
                     const currentPrice = typeof getTradeCurrentMarket === "function" ? Number(getTradeCurrentMarket(trade.symbol)?.price || 0) : 0;
@@ -108,7 +113,7 @@
                                     ? `<button class="mini-action danger" data-stop-trade-investment="${trade.id}" type="button">Stop</button>`
                                     : canJoin
                                       ? `<button class="mini-action" data-join-trade="${trade.id}" type="button">Join</button>`
-                                      : `<button class="mini-action muted" type="button" disabled>${isQueued ? "Queued" : "Hold"}</button>`
+                                      : `<button class="mini-action muted" type="button" disabled>${isQueued ? "Queued" : !hasMinimumBalance ? `Min ${formatUsdtUnit(minJoin)}` : "Hold"}</button>`
                                 }
                               </div>
                             `
@@ -142,6 +147,8 @@
     getTradeCurrentMarket,
     renderExchangeBadge,
     renderTradeJoinedUsersButton,
+    minTradeJoinUsdt = 1,
+    tradeJoinBalanceUsdt = 0,
   }) {
     const signals = signalFeed?.signals || [];
     const openTrades = (trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()));
@@ -216,6 +223,8 @@
           getTradeCurrentMarket,
           renderExchangeBadge,
           renderTradeJoinedUsersButton,
+          minTradeJoinUsdt,
+          tradeJoinBalanceUsdt,
         })}
 
         <section class="signal-board-card">

@@ -3383,6 +3383,11 @@ body[data-theme="dark"] .mirror-guide-pill {
   color: #d83a5a;
 }
 
+.status-canceled {
+  background: rgba(148, 163, 184, 0.2);
+  color: #64748b;
+}
+
 .status-neutral {
   background: var(--soft-surface);
   color: var(--muted);
