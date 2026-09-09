@@ -7,7 +7,7 @@ services:
     staticPublishPath: public
     envVars:
       - key: TRADE_API_BASE_URL
-        value: https://trade-backend-0bdr.onrender.com
+        value: https://tradebackend-production-8530.up.railway.app
     routes:
       - type: rewrite
         source: /*
