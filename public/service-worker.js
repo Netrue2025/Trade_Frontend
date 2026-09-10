@@ -1,4 +1,4 @@
-const CACHE_VERSION = "netruefi-pwa-v2";
+const CACHE_VERSION = "netruefi-pwa-v3";
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [
@@ -25,6 +25,7 @@ const SAFE_ROUTE_PREFIXES = [
   "/?tab=wallet",
   "/?tab=history",
   "/?tab=signals",
+  "/?tab=referral",
   "/?tab=quest",
   "/?tab=settings",
   "/?tab=services",

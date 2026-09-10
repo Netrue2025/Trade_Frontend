@@ -20,13 +20,14 @@ const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
 const PWA_INSTALL_DISMISS_MS = 1000 * 60 * 60 * 24 * 5;
 const PWA_NOTIFICATION_DISMISSED_UNTIL_KEY = "netruefi-pwa-notification-dismissed-until";
 const PWA_NOTIFICATION_DISMISS_MS = 1000 * 60 * 60 * 24 * 3;
+const REFERRAL_CODE_STORAGE_KEY = "netruefi-referral-code";
 const FORM_DRAFT_EXCLUDED_FIELD_KEYS = new Set([
   "trade-symbol",
   "trade-price",
@@ -138,6 +139,9 @@ const state = {
   adminTransactions: [],
   adminGiftCards: [],
   adminVtuTransactions: [],
+  referralProfile: null,
+  adminReferrals: null,
+  loadingReferral: false,
   paymentBanks: [],
   paymentBanksLoadedAt: 0,
   resolvedBankAccount: null,
@@ -323,9 +327,9 @@ function shouldRefreshTradeLive() {
     return false;
   }
   if (state.user.role === "admin") {
-    return ["home", "history", "settings", "signals", "adminQuests"].includes(state.activeTab);
+    return ["home", "history", "settings", "signals", "referral", "adminQuests"].includes(state.activeTab);
   }
-  return ["home", "history", "signals", "quest"].includes(state.activeTab);
+  return ["home", "history", "signals", "referral", "quest"].includes(state.activeTab);
 }
 
 function getExchangeLabel(exchange) {
@@ -2343,8 +2347,78 @@ function getFinancialSettings() {
   return state.financialDashboard?.settings || {};
 }
 
+function getReferralSettings() {
+  return state.referralProfile?.settings
+    || state.adminReferrals?.settings
+    || state.financialDashboard?.settings?.referral
+    || state.financialDashboard?.referral?.settings
+    || {};
+}
+
 function getTradingSettings() {
   return getFinancialSettings().trading || {};
+}
+
+function captureReferralCodeFromUrl() {
+  const params = new URLSearchParams(window.location?.search || "");
+  const code = String(params.get("ref") || params.get("referral") || "").trim().toUpperCase();
+  if (code) {
+    sessionStorage.setItem(REFERRAL_CODE_STORAGE_KEY, code);
+    state.authTab = "register";
+  }
+  if (/^\/signup\/?$/.test(String(window.location?.pathname || "")) || params.get("signup") === "1") {
+    state.authTab = "register";
+  }
+  return code || sessionStorage.getItem(REFERRAL_CODE_STORAGE_KEY) || "";
+}
+
+function getPendingReferralCode() {
+  return String(sessionStorage.getItem(REFERRAL_CODE_STORAGE_KEY) || "").trim().toUpperCase();
+}
+
+function clearPendingReferralCode() {
+  sessionStorage.removeItem(REFERRAL_CODE_STORAGE_KEY);
+}
+
+function getReferralLink(profile = state.referralProfile) {
+  const path = profile?.referralCode ? `/?signup=1&ref=${encodeURIComponent(profile.referralCode)}` : (profile?.referralPath || "");
+  return path ? new URL(path, window.location.origin).toString() : "";
+}
+
+function formatReferralStatus(status = "") {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "in_progress") {
+    return "In Progress";
+  }
+  return normalized ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}` : "Registered";
+}
+
+function renderReferralCheck(done) {
+  return `<span class="referral-check ${done ? "done" : ""}">${done ? icon("check") : icon("lock")}</span>`;
+}
+
+async function loadReferralProfile() {
+  if (!state.user || state.user.role !== "user") {
+    state.referralProfile = null;
+    return null;
+  }
+  state.loadingReferral = true;
+  try {
+    state.referralProfile = await api("/api/referrals/me");
+    return state.referralProfile;
+  } finally {
+    state.loadingReferral = false;
+  }
+}
+
+async function loadAdminReferralData(offset = 0) {
+  if (!state.user || state.user.role !== "admin") {
+    state.adminReferrals = null;
+    return null;
+  }
+  const payload = await api(`/api/admin/referrals?limit=25&offset=${encodeURIComponent(offset)}`);
+  state.adminReferrals = payload;
+  return payload;
 }
 
 function getMinimumTradeJoinUsdt() {
@@ -4792,8 +4866,11 @@ function startSplashSequence(force = false) {
 
 function renderAuthPane() {
   if (state.authTab === "register") {
+    const referralCode = getPendingReferralCode();
     return `
       <form id="register-form" class="auth-form">
+        ${referralCode ? `<div class="referral-signup-note">${icon("gift")} Referral code applied</div>` : ""}
+        <input type="hidden" name="referralCode" value="${escapeHtml(referralCode)}" />
         <div class="auth-name-grid">
           <label>First name <input name="firstName" placeholder="First name" autocomplete="given-name" required /></label>
           <label>Last name <input name="lastName" placeholder="Last name" autocomplete="family-name" required /></label>
@@ -5108,6 +5185,7 @@ function bindAuthForms() {
       await withLoading(async () => {
         const payload = Object.fromEntries(new FormData(registerForm).entries());
         payload.name = `${payload.firstName || ""} ${payload.lastName || ""}`.replace(/\s+/g, " ").trim();
+        payload.referralCode = payload.referralCode || getPendingReferralCode();
         const result = await api("/api/auth/register", {
           method: "POST",
           body: JSON.stringify(payload),
@@ -5121,6 +5199,7 @@ function bindAuthForms() {
         }
         await loadDashboardData();
         clearFormDraft(registerForm);
+        clearPendingReferralCode();
         showNotice("Account created");
       }).catch((error) => showError(error.message));
     });
@@ -5915,6 +5994,9 @@ async function loadDashboardData() {
     .catch(() => {
       render();
     });
+  const referralPromise = state.user.role === "user"
+    ? loadReferralProfile().then(() => render()).catch(() => render())
+    : loadAdminReferralData().then(() => render()).catch(() => render());
   const settingsPromise = loadSavedExchangeSettings(getActiveExchange()).then(() => {
     render();
   });
@@ -6029,6 +6111,7 @@ async function loadDashboardData() {
   void financialPromise;
   void adminFinancePromise;
   void questPromise;
+  void referralPromise;
 }
 
 function bindHistoryActions() {
@@ -6528,6 +6611,35 @@ async function submitAdminDepositSettings(form) {
   }).catch((error) => showError(error.message));
 }
 
+async function submitAdminReferralSettings(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    const payload = await api("/api/admin/referrals/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        enabled: data.enabled === "true",
+        bonusAmountNgn: data.bonusAmountNgn || "0",
+        minimumDepositNgn: data.minimumDepositNgn || "2000",
+        minimumSpendNgn: data.minimumSpendNgn || "2000",
+        minimumTrades: data.minimumTrades || "2",
+        maximumEarningsNgn: data.maximumEarningsNgn || "100000",
+        campaignMaximumNgn: data.campaignMaximumNgn || data.maximumEarningsNgn || "100000",
+      }),
+    });
+    state.financialDashboard = {
+      ...(state.financialDashboard || {}),
+      settings: {
+        ...(state.financialDashboard?.settings || {}),
+        referral: payload.settings,
+      },
+    };
+    await loadAdminReferralData();
+    clearFormDraft(form);
+    render();
+    showNotice("Referral settings saved");
+  }).catch((error) => showError(error.message));
+}
+
 async function submitAdminVtuSettings(form) {
   const data = Object.fromEntries(new FormData(form).entries());
   await withLoading(async () => {
@@ -6983,6 +7095,9 @@ function renderBankNameWarning(account) {
 }
 
 function getTabRoute(tab) {
+  if (tab === "referral") {
+    return "/?tab=referral";
+  }
   if (tab === "quest") {
     return "/?tab=quest";
   }
@@ -7002,6 +7117,9 @@ function getNotificationTarget(notification) {
   }
   if (route.includes("tab=quest")) {
     return { tab: "quest", section: "quest" };
+  }
+  if (route.includes("tab=referral")) {
+    return { tab: "referral", section: "referral" };
   }
   if (route.includes("tab=services")) {
     return { tab: "home", section: "services" };
@@ -7313,6 +7431,7 @@ function renderBottomNav() {
   const tabs = [
     { id: "home", label: "Home", iconName: "home" },
     { id: "signals", label: "Signals", iconName: "signals" },
+    ...(state.user?.role === "user" ? [{ id: "referral", label: "Refer", iconName: "gift" }] : []),
     { id: "history", label: "History", iconName: "profile" },
     { id: "settings", label: "Settings", iconName: "settings" },
   ];
@@ -8724,6 +8843,82 @@ function renderAdminGiftCardsPanel() {
   `;
 }
 
+function renderAdminReferralPanel() {
+  const payload = state.adminReferrals || state.financialDashboard?.referral || {};
+  const settings = payload.settings || getReferralSettings();
+  const stats = payload.stats || {};
+  const referrals = payload.referrals || [];
+  const total = Number(payload.total || referrals.length || 0);
+  const limit = Number(payload.limit || 25);
+  const offset = Number(payload.offset || 0);
+  const previousOffset = Math.max(0, offset - limit);
+  const nextOffset = offset + limit;
+  const progressAmount = (progress = {}) => `${formatNaira(progress.amount || 0).replace(".00", "")} / ${formatNaira(progress.required || 0).replace(".00", "")}`;
+  return `
+    <div class="admin-referral-panel">
+      <div class="admin-referral-stats">
+        <div><span>Total Referrals</span><strong>${Number(stats.totalReferrals || 0).toLocaleString()}</strong></div>
+        <div><span>Qualified</span><strong>${Number(stats.qualifiedReferrals || 0).toLocaleString()}</strong></div>
+        <div><span>Pending</span><strong>${Number(stats.pendingReferrals || 0).toLocaleString()}</strong></div>
+        <div><span>Rewards Paid</span><strong>${Number(stats.rewardsPaid || 0).toLocaleString()}</strong></div>
+        <div><span>Total Payout</span><strong>${formatNaira(stats.totalReferralPayout || 0)}</strong></div>
+      </div>
+      <form id="admin-referral-settings-form" class="stack-form subtle-form progressive-settings-form">
+        <label>Referral Program
+          <select name="enabled">
+            <option value="true" ${settings.enabled !== false ? "selected" : ""}>Enabled</option>
+            <option value="false" ${settings.enabled === false ? "selected" : ""}>Disabled</option>
+          </select>
+        </label>
+        <label>Referral Bonus Amount <input name="bonusAmountNgn" type="number" min="0" step="1" value="${escapeHtml(settings.bonusAmountNgn || "500")}" /></label>
+        <label>Minimum Deposit <input name="minimumDepositNgn" type="number" min="0" step="1" value="${escapeHtml(settings.minimumDepositNgn || "2000")}" /></label>
+        <label>Minimum Airtime/Data Spend <input name="minimumSpendNgn" type="number" min="0" step="1" value="${escapeHtml(settings.minimumSpendNgn || "2000")}" /></label>
+        <label>Minimum Joined Trades <input name="minimumTrades" type="number" min="0" step="1" value="${escapeHtml(settings.minimumTrades ?? 2)}" /></label>
+        <label>Maximum Referral Earnings <input name="maximumEarningsNgn" type="number" min="0" step="1" value="${escapeHtml(settings.maximumEarningsNgn || "100000")}" /></label>
+        <label>Campaign Display Maximum <input name="campaignMaximumNgn" type="number" min="0" step="1" value="${escapeHtml(settings.campaignMaximumNgn || settings.maximumEarningsNgn || "100000")}" /></label>
+        <button class="button-primary shimmer-button" type="submit">${icon("settings")} Save Referral Settings</button>
+      </form>
+      <div class="admin-referral-table-wrap">
+        <table class="admin-referral-table">
+          <thead>
+            <tr>
+              <th>Referrer</th>
+              <th>Referred User</th>
+              <th>Deposit</th>
+              <th>Spend</th>
+              <th>Trades</th>
+              <th>Status</th>
+              <th>Reward</th>
+              <th>Dates</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              referrals.map((referral) => `
+                <tr>
+                  <td><strong>${escapeHtml(referral.referrer?.name || "User")}</strong><small>${escapeHtml(referral.referrer?.email || "")}</small></td>
+                  <td><strong>${escapeHtml(referral.referredUser?.name || "User")}</strong><small>${escapeHtml(referral.referredUser?.email || "")}</small></td>
+                  <td>${progressAmount(referral.depositProgress)}</td>
+                  <td>${progressAmount(referral.spendProgress)}</td>
+                  <td>${Number(referral.tradeProgress?.count || 0)} / ${Number(referral.tradeProgress?.required || 0)}</td>
+                  <td><span class="wallet-status-badge ${walletStatusClass(referral.status)}">${escapeHtml(formatReferralStatus(referral.status))}</span></td>
+                  <td>${formatNaira(referral.rewardAmount || 0)}</td>
+                  <td><small>${referral.rewardedAt ? `Rewarded ${new Date(referral.rewardedAt).toLocaleDateString()}` : "Not rewarded"}</small><small>Created ${referral.createdAt ? new Date(referral.createdAt).toLocaleDateString() : "-"}</small></td>
+                </tr>
+              `).join("") || `<tr><td colspan="8">No referrals yet.</td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
+      <div class="referral-pagination">
+        <button class="button-secondary" data-admin-referral-page="${previousOffset}" type="button" ${offset <= 0 ? "disabled" : ""}>Previous</button>
+        <span>${total ? `${offset + 1}-${Math.min(total, offset + limit)} of ${total}` : "0 referrals"}</span>
+        <button class="button-secondary" data-admin-referral-page="${nextOffset}" type="button" ${nextOffset >= total ? "disabled" : ""}>Next</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderAdminSettingsOverview() {
   if (state.user.role !== "admin") {
     return "";
@@ -8732,6 +8927,7 @@ function renderAdminSettingsOverview() {
   const pendingDeposits = (state.adminDeposits || []).filter((item) => String(item.status || "").toUpperCase() === "PENDING").length;
   const pendingWithdrawals = (state.adminWithdrawals || []).filter((item) => ["PENDING", "PROCESSING"].includes(String(item.status || "").toUpperCase())).length;
   const activeGiftCards = (state.adminGiftCards || []).filter((card) => String(card.status || "").toUpperCase() !== "USED").length;
+  const referralStats = state.adminReferrals?.stats || state.financialDashboard?.referral?.stats || {};
   return `
     <section class="mobile-card settings-card admin-settings-overview">
       <div class="section-head">
@@ -8755,6 +8951,11 @@ function renderAdminSettingsOverview() {
           <span class="card-icon">${icon("gift")}</span>
           <strong>${activeGiftCards.toLocaleString()}</strong>
           <small>Gift cards</small>
+        </div>
+        <div class="admin-control-tile passive">
+          <span class="card-icon">${icon("users")}</span>
+          <strong>${Number(referralStats.rewardsPaid || 0).toLocaleString()}</strong>
+          <small>Referral rewards</small>
         </div>
         <button class="admin-control-tile" data-tab="adminQuests" type="button">
           <span class="card-icon">${icon("star")}</span>
@@ -9353,6 +9554,7 @@ function renderSettingsPane() {
       ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel })}
       ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
       ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
+      ${renderSettingsDisclosure({ key: "referrals", title: "Referral Management", subtitle: "Rewards and progress", iconName: "users", content: renderAdminReferralPanel(), extraClass: "admin-referral-section" })}
       ${renderSettingsDisclosure({ key: "app", title: "App", subtitle: state.pwa.isStandalone ? "Installed" : "Install and alerts", iconName: "download", content: renderPwaSettingsContent(), section: "app" })}
       ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
     `;
@@ -9630,6 +9832,15 @@ function renderSettingsPane() {
             <section class="mobile-card settings-card admin-gift-card-section">
               ${renderAdminGiftCardsPanel()}
             </section>
+            <section class="mobile-card settings-card admin-referral-section">
+              <div class="section-head">
+                <div>
+                  <h3>Referral Management</h3>
+                  <p class="muted-copy">Rewards, thresholds, and referral progress.</p>
+                </div>
+              </div>
+              ${renderAdminReferralPanel()}
+            </section>
           `
           : `
             <section class="mobile-card settings-card">
@@ -9867,6 +10078,10 @@ function formatWalletRequestStatus(status) {
 function applyRouteTarget() {
   const pathname = String(window.location?.pathname || "");
   const params = new URLSearchParams(window.location?.search || "");
+  if (params.get("tab") === "referral" || /^\/referral\/?$/.test(pathname)) {
+    state.activeTab = "referral";
+    return;
+  }
   if (params.get("tab") === "quest") {
     state.activeTab = "quest";
     const view = String(params.get("questView") || "play").trim();
@@ -10132,8 +10347,116 @@ function renderHistoryPane() {
   `;
 }
 
+function renderReferralBanner() {
+  const settings = getReferralSettings();
+  const maximum = Number(settings.campaignMaximumNgn || settings.maximumEarningsNgn || 0);
+  const headline = maximum > 0 ? `Earn up to ${formatNaira(maximum).replace(".00", "")}` : "Earn rewards";
+  return `
+    <button class="referral-promo-banner" data-tab="referral" type="button">
+      <span class="referral-promo-copy">
+        <small>Refer & Earn</small>
+        <strong>${escapeHtml(headline)}</strong>
+        <span>Invite friends and earn when they complete 2 simple tasks.</span>
+        <em>Refer now</em>
+      </span>
+      <span class="referral-promo-art" aria-hidden="true">
+        <span class="referral-gift-box">N</span>
+        <span class="referral-coin coin-one"></span>
+        <span class="referral-coin coin-two"></span>
+        <span class="referral-user-orbit">${icon("users")}</span>
+      </span>
+    </button>
+  `;
+}
+
+function renderReferralProgressLine(referral) {
+  const spend = referral.spendProgress || {};
+  const trades = referral.tradeProgress || {};
+  const activityDone = referral.spendQualified || referral.tradeQualified;
+  const activityText = referral.spendQualified
+    ? `Spend ${formatNaira(spend.amount || 0).replace(".00", "")}`
+    : `Activity ${Number(trades.count || 0)}/${Number(trades.required || 0)} trades`;
+  return `
+    <article class="referral-list-card">
+      <div>
+        <strong>${escapeHtml(referral.referredUser?.label || "User ****")}</strong>
+        <p class="muted-copy">${escapeHtml(formatReferralStatus(referral.status))}</p>
+      </div>
+      <div class="referral-progress-tags">
+        <span>${renderReferralCheck(referral.depositQualified)} Deposit</span>
+        <span>${renderReferralCheck(activityDone)} ${escapeHtml(activityText)}</span>
+        <span>${renderReferralCheck(!!referral.rewardedAt)} Rewarded</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderReferralPane() {
+  const profile = state.referralProfile || {};
+  const settings = getReferralSettings();
+  const stats = profile.stats || {};
+  const link = getReferralLink(profile);
+  const referrals = profile.referrals || [];
+  return `
+    <section class="referral-page${loadingClass(state.loadingReferral)}">
+      ${state.loadingReferral ? renderSectionLoadingOverlay("Loading referrals", "Checking reward progress") : ""}
+      <section class="referral-hero mobile-card">
+        <div>
+          <p class="eyebrow">Refer & Earn</p>
+          <h2>Invite your friends to NetrueFi and earn rewards when they become active users.</h2>
+        </div>
+        <div class="referral-bonus-chip">
+          <span>Referral Bonus</span>
+          <strong>${formatNaira(settings.bonusAmountNgn || 0)}</strong>
+        </div>
+      </section>
+      <section class="referral-stats-grid">
+        <div><span>Total Referrals</span><strong>${Number(stats.totalReferrals || 0).toLocaleString()}</strong></div>
+        <div><span>Qualified</span><strong>${Number(stats.qualifiedReferrals || 0).toLocaleString()}</strong></div>
+        <div><span>Pending</span><strong>${Number(stats.pendingReferrals || 0).toLocaleString()}</strong></div>
+        <div><span>Total Earnings</span><strong>${formatNaira(stats.totalReferralEarnings || 0)}</strong></div>
+      </section>
+      <section class="mobile-card referral-link-card">
+        <div class="section-head">
+          <div>
+            <h3>Your Referral Link</h3>
+            <p class="muted-copy">${escapeHtml(profile.referralCode || "Loading code")}</p>
+          </div>
+        </div>
+        <div class="referral-link-box">${escapeHtml(link || "Preparing link")}</div>
+        <div class="referral-actions">
+          <button class="button-secondary" data-copy-text="${escapeHtml(link)}" type="button">${icon("copy")} Copy link</button>
+          <button class="button-primary shimmer-button" id="referral-share-btn" type="button">${icon("send")} Share</button>
+        </div>
+      </section>
+      <section class="mobile-card referral-steps-card">
+        <div class="section-head">
+          <div>
+            <h3>How To Earn Your Referral Bonus</h3>
+            <p class="muted-copy">Once both steps are completed, your reward is automatically credited.</p>
+          </div>
+        </div>
+        <div class="referral-step-list">
+          <div><span>1</span><strong>Fund Account</strong><p>Your referred friend must deposit ${formatNaira(settings.minimumDepositNgn || 0)} or more.</p></div>
+          <div><span>2</span><strong>Use NetrueFi</strong><p>Your friend must either spend ${formatNaira(settings.minimumSpendNgn || 0)} or more on airtime/data OR successfully join at least ${Number(settings.minimumTrades || 0)} eligible trades.</p></div>
+        </div>
+      </section>
+      <section class="mobile-card referral-list-section">
+        <div class="section-head">
+          <div>
+            <h3>Your Referrals</h3>
+            <p class="muted-copy">Progress is shown without exposing private details.</p>
+          </div>
+        </div>
+        ${referrals.map(renderReferralProgressLine).join("") || `<p class="muted-copy">No referrals yet.</p>`}
+      </section>
+    </section>
+  `;
+}
+
 function renderHomePane() {
     const userHomeContent = `
+      ${renderReferralBanner()}
       ${renderVtuQuickActions()}
       ${renderWalletHistorySection({
         limit: 3,
@@ -10181,6 +10504,7 @@ function renderDashboardShell() {
     settings: renderSettingsPane(),
     signals: renderSignalsPane(),
     history: renderHistoryPane(),
+    referral: renderReferralPane(),
     quest: renderQuestPane(),
     adminQuests: renderAdminQuestPane(),
   };
@@ -10247,6 +10571,9 @@ function renderDashboardShell() {
       }
       if (nextTab === "quest") {
         await withLoading(loadQuestData).catch((error) => showError(error.message));
+      }
+      if (nextTab === "referral") {
+        await withLoading(loadReferralProfile).catch((error) => showError(error.message));
       }
       if (nextTab === "adminQuests") {
         await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
@@ -10472,6 +10799,26 @@ function bindDashboardActions() {
     });
   });
 
+  const referralShareButton = document.getElementById("referral-share-btn");
+  if (referralShareButton) {
+    referralShareButton.addEventListener("click", async () => {
+      const link = getReferralLink();
+      if (!link) {
+        showError("Referral link is still loading.");
+        return;
+      }
+      if (navigator.share) {
+        await navigator.share({
+          title: "Join NetrueFi",
+          text: "Join me on NetrueFi and complete 2 simple tasks.",
+          url: link,
+        }).catch(() => undefined);
+        return;
+      }
+      await copyTextToClipboard(link).then(() => showNotice("Referral link copied")).catch((error) => showError(error.message || "Share failed"));
+    });
+  }
+
   const exchangeSelectForm = document.getElementById("exchange-select-form");
   if (exchangeSelectForm) {
     const exchangeSelect = exchangeSelectForm.querySelector('select[name="exchange"]');
@@ -10609,6 +10956,21 @@ function bindDashboardActions() {
       submitAdminDepositSettings(adminDepositSettingsForm);
     });
   }
+
+  const adminReferralSettingsForm = document.getElementById("admin-referral-settings-form");
+  if (adminReferralSettingsForm) {
+    adminReferralSettingsForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminReferralSettings(adminReferralSettingsForm);
+    });
+  }
+
+  document.querySelectorAll("[data-admin-referral-page]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const offset = Number(button.dataset.adminReferralPage || 0);
+      await withLoading(() => loadAdminReferralData(offset).then(() => render())).catch((error) => showError(error.message));
+    });
+  });
 
   const adminVtuSettingsForm = document.getElementById("admin-vtu-settings-form");
   if (adminVtuSettingsForm) {
@@ -11883,6 +12245,7 @@ function render() {
 
 async function bootstrap() {
   applyTheme();
+  captureReferralCodeFromUrl();
   beginLoading();
   try {
     const me = await api("/api/auth/me");
