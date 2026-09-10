@@ -1,4 +1,4 @@
-const CACHE_VERSION = "netruefi-pwa-v1";
+const CACHE_VERSION = "netruefi-pwa-v2";
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [
@@ -99,6 +99,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (url.pathname === "/config.js") {
+    event.respondWith(networkFirstStatic(request));
+    return;
+  }
+  if ([".js", ".css"].some((extension) => url.pathname.endsWith(extension))) {
     event.respondWith(networkFirstStatic(request));
     return;
   }
