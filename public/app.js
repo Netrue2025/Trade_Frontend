@@ -3364,6 +3364,7 @@ function renderPwaSettingsContent() {
       : "Disabled";
   const rows = [
     ["transactions", "Transaction Updates"],
+    ["messages", "Messages"],
     ["quest", "Quest Notifications"],
     ["lowBalance", "Low Balance Alerts"],
     ["vtuPurchases", "Airtime & Data"],
