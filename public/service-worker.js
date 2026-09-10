@@ -11,6 +11,7 @@ const STATIC_ASSETS = [
   "/components/signal-page.js",
   "/vendor/lightweight-charts.js",
   "/favicon.png",
+  "/og-image-whatsapp.jpg",
   "/netruefi-logo.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
