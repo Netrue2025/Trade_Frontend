@@ -20,7 +20,7 @@ const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -271,6 +271,7 @@ let tradeSymbolRefreshTimer = null;
 let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
 let questCountdownTimer = null;
+let homePromoTimer = null;
 const seenSignalIds = new Set();
 
 function getAuthSessionToken() {
@@ -1264,6 +1265,94 @@ function syncQuestCountdownTimer() {
     }
     render();
   }, 1000);
+}
+
+function updateHomePromoDom() {
+  const track = document.querySelector("[data-home-promo-track]");
+  const dots = [...document.querySelectorAll("[data-home-promo-slide]")];
+  if (!track || dots.length < 2) {
+    return;
+  }
+  const activeSlide = Math.min(Math.max(Number(state.homePromoSlide || 0), 0), dots.length - 1);
+  track.style.transform = `translateX(-${activeSlide * 100}%)`;
+  dots.forEach((dot, index) => {
+    dot.classList.toggle("active", index === activeSlide);
+  });
+}
+
+function syncHomePromoSliderTimer() {
+  const shouldRun = !!(
+    state.user?.role === "user" &&
+    state.activeTab === "home" &&
+    isDocumentVisible()
+  );
+  if (!shouldRun) {
+    if (homePromoTimer) {
+      window.clearInterval(homePromoTimer);
+      homePromoTimer = null;
+    }
+    return;
+  }
+  if (homePromoTimer) {
+    return;
+  }
+  homePromoTimer = window.setInterval(() => {
+    const slideCount = document.querySelectorAll("[data-home-promo-slide]").length || 2;
+    if (slideCount < 2 || !isDocumentVisible() || state.activeTab !== "home") {
+      syncHomePromoSliderTimer();
+      return;
+    }
+    state.homePromoSlide = (Number(state.homePromoSlide || 0) + 1) % slideCount;
+    updateHomePromoDom();
+  }, 5000);
+}
+
+function playQuestWinSound() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+      return;
+    }
+    const context = new AudioContext();
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const start = context.currentTime + index * 0.1;
+      oscillator.type = index % 2 ? "triangle" : "sine";
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.24);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(start);
+      oscillator.stop(start + 0.28);
+    });
+    window.setTimeout(() => context.close().catch(() => undefined), 900);
+  } catch {
+    // Browsers may block audio until the user interacts; the quest still works.
+  }
+}
+
+function parseQuestStagesJson(stagesJson = "[]") {
+  try {
+    const stages = JSON.parse(stagesJson || "[]");
+    return Array.isArray(stages) ? stages : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeQuestStage(stage = {}) {
+  const options = Array.isArray(stage.options) ? stage.options : [];
+  return {
+    type: stage.type || "multiple-choice",
+    prompt: stage.prompt || "",
+    options: [...options, "", "", "", ""].slice(0, 4),
+    correctAnswer: stage.correctAnswer || options[0] || "",
+    explanation: stage.explanation || "",
+    hint: stage.hint || "",
+  };
 }
 
 function showActionModal(modal) {
@@ -2629,26 +2718,33 @@ function buildFrontendPath(path) {
 }
 
 function getQuestDraft() {
-  return state.quest.draft || {
+  const fallbackStages = [
+    {
+      type: "multiple-choice",
+      prompt: "What does P&L show?",
+      options: ["Profit and loss", "Password and login", "Payment limit", ""],
+      correctAnswer: "Profit and loss",
+      explanation: "P&L tracks profit and loss after entry.",
+    },
+  ];
+  const draft = state.quest.draft || {
     id: "",
     title: "",
     category: "crypto",
     difficulty: "easy",
     description: "",
     active: true,
-    stagesJson: JSON.stringify([
-      {
-        type: "multiple-choice",
-        prompt: "What does P&L show?",
-        options: ["Profit and loss", "Password and login", "Payment limit"],
-        correctAnswer: "Profit and loss",
-        explanation: "P&L tracks profit and loss after entry.",
-      },
-    ], null, 2),
+    stagesJson: JSON.stringify(fallbackStages, null, 2),
+  };
+  const stages = (draft.stages || parseQuestStagesJson(draft.stagesJson || "[]"));
+  return {
+    ...draft,
+    stages: (stages.length ? stages : fallbackStages).map(normalizeQuestStage),
   };
 }
 
 function setQuestDraftFromQuest(quest) {
+  const stages = (quest.stages || []).map(normalizeQuestStage);
   state.quest.draft = {
     id: quest.id || "",
     title: quest.title || "",
@@ -2656,14 +2752,8 @@ function setQuestDraftFromQuest(quest) {
     difficulty: quest.difficulty || "easy",
     description: quest.description || "",
     active: quest.active !== false,
-    stagesJson: JSON.stringify((quest.stages || []).map((stage) => ({
-      type: stage.type || "multiple-choice",
-      prompt: stage.prompt || "",
-      options: stage.options || [],
-      correctAnswer: stage.correctAnswer || "",
-      explanation: stage.explanation || "",
-      hint: stage.hint || "",
-    })), null, 2),
+    stages,
+    stagesJson: JSON.stringify(stages, null, 2),
   };
 }
 
@@ -6487,6 +6577,7 @@ async function completeQuestReward() {
       body: JSON.stringify({}),
     });
     await loadQuestData();
+    playQuestWinSound();
     showNotice("Reward unlocked");
     render();
   }).catch((error) => showError(error.message));
@@ -6503,6 +6594,7 @@ async function revealQuestReward() {
       body: JSON.stringify({}),
     });
     await loadQuestData();
+    playQuestWinSound();
     showNotice("Gift card revealed");
     render();
   }).catch((error) => showError(error.message));
@@ -6524,13 +6616,44 @@ async function redeemQuestReward() {
   }).catch((error) => showError(error.message));
 }
 
+function readAdminQuestStagesFromForm(form) {
+  const rows = [...form.querySelectorAll("[data-admin-quest-stage]")];
+  return rows.map((row) => {
+    const index = row.dataset.adminQuestStage;
+    const options = [...row.querySelectorAll(`[data-admin-quest-option="${index}"]`)]
+      .map((input) => input.value.trim())
+      .filter(Boolean);
+    return {
+      type: row.querySelector(`[name="stageType-${index}"]`)?.value || "multiple-choice",
+      prompt: row.querySelector(`[name="stagePrompt-${index}"]`)?.value.trim() || "",
+      options,
+      correctAnswer: row.querySelector(`[name="stageAnswer-${index}"]`)?.value.trim() || options[0] || "",
+      explanation: row.querySelector(`[name="stageExplanation-${index}"]`)?.value.trim() || "",
+      hint: row.querySelector(`[name="stageHint-${index}"]`)?.value.trim() || "",
+    };
+  }).filter((stage) => stage.prompt && (stage.options.length || stage.correctAnswer));
+}
+
+function setAdminQuestDraftFromForm(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  const stages = readAdminQuestStagesFromForm(form).map(normalizeQuestStage);
+  state.quest.draft = {
+    id: data.id || "",
+    title: data.title || "",
+    category: data.category || "crypto",
+    difficulty: data.difficulty || "easy",
+    description: data.description || "",
+    active: data.active === "on",
+    stages,
+    stagesJson: JSON.stringify(stages, null, 2),
+  };
+}
+
 async function submitAdminQuest(form) {
   const data = Object.fromEntries(new FormData(form).entries());
-  let stages = [];
-  try {
-    stages = JSON.parse(data.stagesJson || "[]");
-  } catch {
-    showError("Stages JSON is not valid.");
+  const stages = readAdminQuestStagesFromForm(form);
+  if (!stages.length) {
+    showError("Add at least one question with an answer.");
     return;
   }
   const payload = {
@@ -9051,36 +9174,52 @@ function renderQuestRewardCard(reward = {}) {
   const revealed = !!reward.code;
   const used = ["USED", "REDEEMED"].includes(String(reward.status || "").toUpperCase());
   return `
-    <section class="quest-congrats-panel">
-      <span>${icon("star")}</span>
-      <strong>Congratulations</strong>
-      <small>Reward unlocked</small>
-    </section>
-    <div class="quest-reward-card ${revealed ? "revealed" : ""}">
-      <div class="quest-ribbon ${revealed ? "open" : ""}">
-        <span>${revealed ? "Prize revealed" : "Pull ribbon"}</span>
+    <section class="quest-prize-stage">
+      <div class="quest-confetti" aria-hidden="true">
+        ${Array.from({ length: 18 }).map((_, index) => `<i style="--i:${index};"></i>`).join("")}
       </div>
-      <div>
-        <p class="eyebrow">Reward</p>
-        <strong>${formatCurrencyAmount(reward.amount || "0", reward.currency || "NGN")}</strong>
-        <p>${escapeHtml(reward.note || "Netrue Quest Gift Card")}</p>
+      <div class="quest-ribbon-wrap" aria-hidden="true">
+        <span></span><span></span><span></span>
       </div>
-      ${
-        revealed
-          ? `
-            <div class="quest-code-grid">
-              <span>Card <b>${escapeHtml(formatGiftCardCode(reward.code))}</b></span>
-              <span>PIN <b>${escapeHtml(reward.pin || "------")}</b></span>
-            </div>
-          `
-          : `<div class="quest-scratch-mask">Scratch</div>`
-      }
+      <div class="quest-congrats-panel">
+        <span>${icon("star")}</span>
+        <strong>${revealed ? "Prize Revealed" : "You Won"}</strong>
+        <small>${revealed ? "Scratch complete" : "Scratch the PIN area"}</small>
+      </div>
+      <div class="quest-gift-card ${revealed ? "revealed" : ""}">
+        <div class="quest-gift-card-band">
+          <span>NetrueFi</span>
+          <b>Gift Card</b>
+        </div>
+        <div class="quest-gift-card-body">
+          <p>${escapeHtml(reward.note || "Quest Reward")}</p>
+          <strong>${formatCurrencyAmount(reward.amount || "0", reward.currency || "NGN")}</strong>
+        </div>
+        <div class="quest-gift-card-code">
+          <span>Card Number</span>
+          <b>${revealed ? escapeHtml(formatGiftCardCode(reward.code)) : "---- ---- ---- --"}</b>
+        </div>
+        ${
+          revealed
+            ? `
+              <div class="quest-pin-revealed">
+                <span>PIN</span>
+                <b>${escapeHtml(reward.pin || "------")}</b>
+              </div>
+            `
+            : `
+              <button class="quest-scratch-mask" data-quest-reveal type="button">
+                <span>Scratch PIN</span>
+              </button>
+            `
+        }
+      </div>
       <div class="quest-actions">
-        ${!revealed ? `<button class="button-secondary shimmer-button" data-quest-reveal type="button">View reward</button>` : ""}
+        ${!revealed ? `<button class="button-primary shimmer-button" type="button" disabled>${icon("gift")} Add to wallet</button>` : ""}
         ${revealed && !used ? `<button class="button-primary shimmer-button" data-quest-redeem type="button">${icon("gift")} Add to wallet</button>` : ""}
         ${used ? `<span class="wallet-status-badge wallet-status-success">Credited</span>` : ""}
       </div>
-    </div>
+    </section>
   `;
 }
 
@@ -9160,11 +9299,11 @@ function renderQuestUnavailablePopup() {
   `;
 }
 
-function renderQuestHistoryList() {
+function renderQuestHistoryList(view = "all") {
   const rewards = state.quest.rewards || [];
   const history = state.quest.history || [];
   return `
-    <section class="mobile-card">
+    ${view !== "history" ? `<section class="mobile-card">
       <div class="section-head compact">
         <div>
           <h3>Rewards</h3>
@@ -9182,8 +9321,8 @@ function renderQuestHistoryList() {
           </div>
         `).join("") || `<p class="muted-copy">No rewards yet.</p>`}
       </div>
-    </section>
-    <section class="mobile-card">
+    </section>` : ""}
+    ${view !== "rewards" ? `<section class="mobile-card">
       <div class="section-head compact">
         <div>
           <h3>Quest History</h3>
@@ -9201,71 +9340,135 @@ function renderQuestHistoryList() {
           </div>
         `).join("") || `<p class="muted-copy">No quest history yet.</p>`}
       </div>
-    </section>
+    </section>` : ""}
   `;
 }
 
 function renderQuestPane() {
   const status = state.quest.status;
+  const view = state.quest.view || "play";
+  const renderQuestNav = () => `
+    <div class="quest-pill-nav">
+      <button class="${view === "play" ? "active" : ""}" data-quest-view="play" type="button">Play</button>
+      <button class="${view === "rewards" ? "active" : ""}" data-quest-view="rewards" type="button">Rewards</button>
+      <button class="${view === "history" ? "active" : ""}" data-quest-view="history" type="button">History</button>
+    </div>
+  `;
   if (["rewards", "history"].includes(state.quest.view)) {
     return `
-      <section class="mobile-card quest-admin-hero">
-        <div>
-          <p class="eyebrow">Netrue Quest</p>
-          <h3>${state.quest.view === "rewards" ? "Rewards" : "History"}</h3>
+      <section class="quest-playfield quest-view-${escapeHtml(view)}">
+        <div class="quest-playfield-bg" aria-hidden="true"></div>
+        <div class="quest-hero">
+          <div>
+            <p class="eyebrow">Netrue Quest</p>
+            <h2>${state.quest.view === "rewards" ? "Rewards" : "History"}</h2>
+          </div>
+          ${renderQuestNav()}
         </div>
-        <button class="micro-btn" data-quest-view="play" type="button">${icon("play")} Play</button>
+        <div class="quest-view-panel">
+          ${renderQuestHistoryList(view)}
+        </div>
       </section>
-      ${renderQuestHistoryList()}
     `;
   }
   if (!status) {
     return `
-      <section class="mobile-card quest-card">
-        <h3>Netrue Quest</h3>
-        <p class="muted-copy">Loading rewards.</p>
-        <button class="button-secondary shimmer-button" data-quest-refresh type="button">Refresh</button>
+      <section class="quest-playfield">
+        <div class="quest-playfield-bg" aria-hidden="true"></div>
+        <div class="quest-loading-card">
+          <span>${icon("star")}</span>
+          <h2>Netrue Quest</h2>
+          <p>Loading rewards.</p>
+          <button class="button-secondary shimmer-button" data-quest-refresh type="button">Refresh</button>
+        </div>
       </section>
     `;
   }
   const activeSession = status.activeSession;
   const reward = state.quest.rewards.find((item) => item.id === status.reward?.id) || status.reward;
   const cooldown = Number(status.cooldownRemainingMs || 0);
-  if (!activeSession && cooldown > 0) {
-    return renderQuestCountdownCard(cooldown);
-  }
-  if (!activeSession && !status.canStart && !cooldown) {
-    return renderQuestUnavailablePopup();
-  }
+  const mainContent = !activeSession && cooldown > 0
+    ? renderQuestCountdownCard(cooldown)
+    : !activeSession && !status.canStart && !cooldown
+      ? renderQuestUnavailablePopup()
+      : `
+        ${
+          !activeSession && status.canStart
+            ? `
+              <section class="quest-start-card">
+                <span>${icon("play")}</span>
+                <h3>${escapeHtml(status.activeQuest?.title || "Daily Quest")}</h3>
+                <p>${escapeHtml(status.activeQuest?.description || "One play every 12 hours.")}</p>
+                <button class="button-primary shimmer-button" data-quest-start="${escapeHtml(status.activeQuest?.id || "")}" type="button">${icon("play")} Start quest</button>
+              </section>
+            `
+            : ""
+        }
+        ${activeSession && ["IN_PROGRESS", "STARTED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestStage(activeSession) : ""}
+        ${activeSession && String(activeSession.status || "").toUpperCase() === "COMPLETED" ? renderQuestStage(activeSession) : ""}
+        ${activeSession && ["REWARD_ASSIGNED", "REVEALED", "REDEEMED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestRewardCard(reward || {}) : ""}
+      `;
   return `
-    <section class="quest-world">
+    <section class="quest-playfield quest-view-play">
+      <div class="quest-playfield-bg" aria-hidden="true"></div>
       <div class="quest-hero">
-        <p class="eyebrow">Netrue Quest</p>
-        <h2>Choose. Win. Credit.</h2>
+        <div>
+          <p class="eyebrow">Netrue Quest</p>
+          <h2>Choose. Win. Credit.</h2>
+        </div>
+        ${renderQuestNav()}
       </div>
-      <div class="quest-world-grid">
+      <div class="quest-world-grid" aria-hidden="true">
         <span>Tech</span><span>AI</span><span>Farm</span><span>Crypto</span>
       </div>
-      <div class="quest-pill-nav">
-        <button data-quest-view="rewards" type="button">Rewards</button>
-        <button data-quest-view="history" type="button">History</button>
+      <div class="quest-play-zone">
+        ${mainContent}
       </div>
     </section>
-    ${
-      !activeSession && status.canStart
-        ? `
-          <section class="mobile-card quest-card">
-            <h3>${escapeHtml(status.activeQuest?.title || "Daily Quest")}</h3>
-            <p class="muted-copy">${escapeHtml(status.activeQuest?.description || "One play every 12 hours.")}</p>
-            <button class="button-primary shimmer-button" data-quest-start="${escapeHtml(status.activeQuest?.id || "")}" type="button">${icon("play")} Start quest</button>
+  `;
+}
+
+function renderAdminQuestStageBuilder(stages = []) {
+  const normalizedStages = (stages.length ? stages : [normalizeQuestStage()]).map(normalizeQuestStage);
+  return `
+    <div class="admin-quest-builder">
+      ${normalizedStages.map((stage, index) => {
+        const answerOptions = [...new Set([...stage.options.filter(Boolean), stage.correctAnswer].filter(Boolean))];
+        return `
+          <section class="admin-quest-stage-card" data-admin-quest-stage="${index}">
+            <div class="admin-quest-stage-head">
+              <strong>Question ${index + 1}</strong>
+              <button class="icon-btn danger" data-admin-quest-remove-stage="${index}" type="button" title="Remove question" ${normalizedStages.length <= 1 ? "disabled" : ""}>${icon("trash")}</button>
+            </div>
+            <label>Question
+              <textarea name="stagePrompt-${index}" rows="2" placeholder="Type the question" required>${escapeHtml(stage.prompt)}</textarea>
+            </label>
+            <div class="admin-quest-stage-grid">
+              <label>Type
+                <select name="stageType-${index}">
+                  ${["multiple-choice", "true-false"].map((type) => `<option value="${type}" ${stage.type === type ? "selected" : ""}>${type === "true-false" ? "True / False" : "Multiple choice"}</option>`).join("")}
+                </select>
+              </label>
+              <label>Correct Answer
+                <select name="stageAnswer-${index}">
+                  ${answerOptions.map((option) => `<option value="${escapeHtml(option)}" ${stage.correctAnswer === option ? "selected" : ""}>${escapeHtml(option)}</option>`).join("") || `<option value="">Add options first</option>`}
+                </select>
+              </label>
+            </div>
+            <div class="admin-quest-options-grid">
+              ${stage.options.map((option, optionIndex) => `
+                <label>Option ${optionIndex + 1}
+                  <input name="stageOption-${index}-${optionIndex}" data-admin-quest-option="${index}" value="${escapeHtml(option)}" placeholder="Answer option" />
+                </label>
+              `).join("")}
+            </div>
+            <label>Hint <input name="stageHint-${index}" value="${escapeHtml(stage.hint || "")}" placeholder="Optional hint" /></label>
+            <label>Explanation <textarea name="stageExplanation-${index}" rows="2" placeholder="Shown after answer">${escapeHtml(stage.explanation || "")}</textarea></label>
           </section>
-        `
-        : ""
-    }
-    ${activeSession && ["IN_PROGRESS", "STARTED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestStage(activeSession) : ""}
-    ${activeSession && String(activeSession.status || "").toUpperCase() === "COMPLETED" ? renderQuestStage(activeSession) : ""}
-    ${activeSession && ["REWARD_ASSIGNED", "REVEALED", "REDEEMED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestRewardCard(reward || {}) : ""}
-    ${renderQuestHistoryList()}
+        `;
+      }).join("")}
+      <button class="button-secondary" data-admin-quest-add-stage type="button">${icon("plus")} Add Question</button>
+    </div>
   `;
 }
 
@@ -9303,7 +9506,7 @@ function renderAdminQuestPane() {
         </label>
         <label>Difficulty <input name="difficulty" value="${escapeHtml(draft.difficulty)}" placeholder="easy" /></label>
         <label>Description <textarea name="description" rows="2">${escapeHtml(draft.description)}</textarea></label>
-        <label>Stages JSON <textarea name="stagesJson" rows="8" class="quest-json-input">${escapeHtml(draft.stagesJson)}</textarea></label>
+        ${renderAdminQuestStageBuilder(draft.stages || [])}
         <label class="inline-check"><input name="active" type="checkbox" ${draft.active ? "checked" : ""} /> Active</label>
         <button class="button-primary shimmer-button" type="submit">${icon("star")} ${draft.id ? "Save quest" : "Create quest"}</button>
       </form>
@@ -10444,7 +10647,7 @@ function renderHomePromoSlider() {
   return `
     <section class="home-promo-slider" aria-label="Promotions">
       <div class="home-promo-viewport">
-        <div class="home-promo-track" style="transform: translateX(-${activeSlide * 100}%);">
+        <div class="home-promo-track" data-home-promo-track style="transform: translateX(-${activeSlide * 100}%);">
           ${slides.map((slide) => `<div class="home-promo-slide">${slide.content}</div>`).join("")}
         </div>
       </div>
@@ -10634,7 +10837,7 @@ function renderDashboardShell() {
   app.innerHTML = `
     <section class="app-shell">
       ${renderDashboardTopBar()}
-      <section class="app-screen">
+      <section class="app-screen app-screen-${escapeHtml(state.activeTab || "home")}">
         ${paneMap[state.activeTab] || paneMap.home}
       </section>
       ${renderBottomNav()}
@@ -10889,6 +11092,51 @@ function bindDashboardActions() {
     adminQuestForm.addEventListener("submit", (event) => {
       event.preventDefault();
       submitAdminQuest(adminQuestForm);
+    });
+    adminQuestForm.querySelectorAll("[data-admin-quest-option], [name^='stagePrompt-'], [name^='stageAnswer-'], [name^='stageExplanation-'], [name^='stageHint-']").forEach((field) => {
+      field.addEventListener("change", () => {
+        setAdminQuestDraftFromForm(adminQuestForm);
+        render();
+      });
+    });
+    adminQuestForm.querySelectorAll("[name^='stageType-']").forEach((field) => {
+      field.addEventListener("change", () => {
+        setAdminQuestDraftFromForm(adminQuestForm);
+        const index = field.name.replace("stageType-", "");
+        const stages = state.quest.draft?.stages || [];
+        if (field.value === "true-false" && stages[index]) {
+          stages[index] = {
+            ...stages[index],
+            type: "true-false",
+            options: ["True", "False", "", ""],
+            correctAnswer: stages[index].correctAnswer === "False" ? "False" : "True",
+          };
+        }
+        render();
+      });
+    });
+    const addStageButton = adminQuestForm.querySelector("[data-admin-quest-add-stage]");
+    if (addStageButton) {
+      addStageButton.addEventListener("click", () => {
+        setAdminQuestDraftFromForm(adminQuestForm);
+        state.quest.draft = {
+          ...state.quest.draft,
+          stages: [...(state.quest.draft?.stages || []), normalizeQuestStage()],
+        };
+        render();
+      });
+    }
+    adminQuestForm.querySelectorAll("[data-admin-quest-remove-stage]").forEach((button) => {
+      button.addEventListener("click", () => {
+        setAdminQuestDraftFromForm(adminQuestForm);
+        const removeIndex = Number(button.dataset.adminQuestRemoveStage || 0);
+        const stages = (state.quest.draft?.stages || []).filter((_, index) => index !== removeIndex);
+        state.quest.draft = {
+          ...state.quest.draft,
+          stages: stages.length ? stages : [normalizeQuestStage()],
+        };
+        render();
+      });
     });
   }
 
@@ -12382,14 +12630,17 @@ function bindFuturesDisclosureToggles() {
 
 function render() {
   applyTheme();
+  document.body.dataset.activeTab = state.user ? state.activeTab : "guest";
   renderTopbarActions();
   if (!state.user) {
+    syncHomePromoSliderTimer();
     renderLanding();
     refreshWatchlistDom();
     return;
   }
   renderDashboardShell();
   syncQuestCountdownTimer();
+  syncHomePromoSliderTimer();
   bindTradeTicketActions();
   refreshWatchlistDom();
   refreshTradeDom();
