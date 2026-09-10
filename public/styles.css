@@ -1026,6 +1026,10 @@ textarea {
   color: #fff;
 }
 
+.button-primary.danger-action {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+
 .button-secondary {
   background: var(--soft-surface-2);
   color: var(--accent);

@@ -2896,6 +2896,17 @@ function getTradePnlValue(trade) {
   return (current - entry) * quantity * multiplier;
 }
 
+function getUserInvestmentPnlPercent(trade) {
+  if (state.user?.role !== "user" || trade.userInvestment?.status !== "ACTIVE") {
+    return getTradePnlPercent(trade);
+  }
+  const amountUsdt = Number(trade.userInvestment.amountUsdt || 0);
+  if (!amountUsdt) {
+    return 0;
+  }
+  return (getTradePnlValue(trade) / amountUsdt) * 100;
+}
+
 function getTradeStaticPnlValue(trade) {
   const entry = getTradeEntryPrice(trade);
   const quantity = getTradeExecutedQuantity(trade);
@@ -4598,6 +4609,52 @@ function renderActionModal() {
     return "";
   }
 
+  if (state.actionModal.type === "stop-investment") {
+    const investment = trade.userInvestment || {};
+    const amountUsdt = Number(investment.amountUsdt || 0);
+    const pnlPercent = getUserInvestmentPnlPercent(trade);
+    const pnlValue = getTradePnlValue(trade);
+    const currentValue = Math.max(amountUsdt + pnlValue, 0);
+    const currentPrice = Number(getTradeCurrentMarket(trade.symbol)?.price || 0);
+    const pnlTone = pnlValue >= 0 ? "positive" : "negative";
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Stop Trade</p>
+          <h3>Are you sure you want to stop this trade?</h3>
+          <div class="action-metric-stack">
+            <div class="action-metric">
+              <span>Coin</span>
+              <strong>${escapeHtml(trade.symbol || "Trade")}</strong>
+            </div>
+            <div class="action-metric">
+              <span>Joined amount</span>
+              <strong>${formatUsdtUnit(amountUsdt)}</strong>
+            </div>
+            <div class="action-metric">
+              <span>Estimated value</span>
+              <strong>${formatUsdtUnit(currentValue)}</strong>
+            </div>
+            <div class="action-metric">
+              <span>Current price</span>
+              <strong>${currentPrice ? formatNumber(currentPrice, 8) : "-"}</strong>
+            </div>
+            <div class="action-metric">
+              <span>Estimated P&L</span>
+              <strong class="${pnlTone}">${pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(pnlValue))} (${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%)</strong>
+            </div>
+          </div>
+          <p class="modal-text">Stopping cancels this trade only for you. It stays active for other joined users and admin until they close or stop their own connection.</p>
+          <div class="modal-actions">
+            <button class="button-secondary" id="action-modal-cancel-btn" type="button">No</button>
+            <button class="button-primary shimmer-button danger-action" id="confirm-stop-investment-btn" data-trade-id="${escapeHtml(trade.id || "")}" type="button">Yes, stop trade</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "sell") {
     const pnlPercent = getTradePnlPercent(trade);
     const pnlValue = getTradePnlValue(trade);
@@ -4958,6 +5015,11 @@ function bindModalActions() {
   const confirmSellButton = document.getElementById("confirm-sell-btn");
   if (confirmSellButton) {
     confirmSellButton.addEventListener("click", () => confirmMarketSell(confirmSellButton.dataset.tradeId));
+  }
+
+  const confirmStopInvestmentButton = document.getElementById("confirm-stop-investment-btn");
+  if (confirmStopInvestmentButton) {
+    confirmStopInvestmentButton.addEventListener("click", () => stopJoinedTrade(confirmStopInvestmentButton.dataset.tradeId));
   }
 
   const confirmTpButton = document.getElementById("confirm-tp-btn");
@@ -6665,9 +6727,22 @@ async function stopJoinedTrade(tradeId) {
       method: "POST",
       body: JSON.stringify({}),
     });
+    clearActionModal();
     await loadDashboardData();
     showNotice("Trade stopped");
   }).catch((error) => showError(error.message));
+}
+
+function reviewStopJoinedTrade(tradeId) {
+  const trade = state.trades.find((item) => item.id === tradeId);
+  if (!trade?.userInvestment || trade.userInvestment.status !== "ACTIVE") {
+    showError("No active joined trade found.");
+    return;
+  }
+  showActionModal({
+    type: "stop-investment",
+    tradeId,
+  });
 }
 
 async function hideStoppedTrade(tradeId) {
@@ -9273,7 +9348,7 @@ function renderSettingsPane() {
       ${renderAdminSettingsOverview()}
       ${renderSettingsDisclosure({ key: "appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
       ${renderSettingsDisclosure({ key: "exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
-      ${renderSettingsDisclosure({ key: "deposit-channel", title: "Deposit & Channel", subtitle: "Bank, wallet, rate", iconName: "bank", content: depositPanel, open: true })}
+      ${renderSettingsDisclosure({ key: "deposit-channel", title: "Wallet Rules", subtitle: "Bank, fees, minimums", iconName: "bank", content: depositPanel, open: true })}
       ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel })}
       ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
       ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
@@ -9513,6 +9588,10 @@ function renderSettingsPane() {
                 <label>USDT address <input name="usdtAddress" value="${escapeHtml(depositSettingValue("usdtAddress", depositSettings.usdtAddress || ""))}" placeholder="Wallet address" /></label>
                 <label>USDT network <input name="usdtNetwork" value="${escapeHtml(depositSettingValue("usdtNetwork", depositSettings.usdtNetwork || "TRC20"))}" placeholder="TRC20" /></label>
                 <label>USDT to Naira <input name="usdtToNgn" type="number" min="1" step="0.01" value="${escapeHtml(depositSettingValue("usdtToNgn", exchangeRateSettings.usdtToNgn || getUsdtToNgnRate() || ""))}" placeholder="1600" /></label>
+                <label>Min trade join (USDT) <input name="minTradeJoinUsdt" type="number" min="0.00000001" step="0.00000001" value="${escapeHtml(depositSettingValue("minTradeJoinUsdt", tradingSettings.minJoinUsdt || "1"))}" placeholder="1" /></label>
+                <label>Min NGN withdrawal <input name="minWithdrawalNgn" type="number" min="1" step="1" value="${escapeHtml(depositSettingValue("minWithdrawalNgn", withdrawalSettings.minNgn || "500"))}" placeholder="500" /></label>
+                <label>Min USDT withdrawal <input name="minWithdrawalUsdt" type="number" min="0.00000001" step="0.00000001" value="${escapeHtml(depositSettingValue("minWithdrawalUsdt", withdrawalSettings.minUsdt || "50"))}" placeholder="50" /></label>
+                <label>NGN withdrawal fee <input name="ngnWithdrawalFee" type="number" min="0" step="1" value="${escapeHtml(depositSettingValue("ngnWithdrawalFee", withdrawalSettings.ngnFee || "100"))}" placeholder="100" /></label>
                 <label>Telegram channel <input name="telegramChannelUsername" value="${escapeHtml(depositSettingValue("telegramChannelUsername", telegramSettings.channelUsername || "netruesignal"))}" placeholder="netruesignal" /></label>
                 <button class="button-secondary shimmer-button" type="submit">${icon("bank")} Save</button>
               </form>
@@ -10192,7 +10271,11 @@ function bindInvestmentTradeActions() {
   });
 
   document.querySelectorAll("[data-stop-trade-investment]").forEach((button) => {
-    button.addEventListener("click", () => stopJoinedTrade(button.dataset.stopTradeInvestment));
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      reviewStopJoinedTrade(button.dataset.stopTradeInvestment);
+    });
   });
 
   document.querySelectorAll("[data-hide-stopped-trade]").forEach((button) => {
