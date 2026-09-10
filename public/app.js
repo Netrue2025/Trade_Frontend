@@ -152,6 +152,16 @@ const state = {
   vtuDataPlansNetwork: "",
   vtuTransactions: [],
   loadingVtu: false,
+  digitalServices: {
+    settings: null,
+    products: [],
+    categories: [],
+    orders: [],
+    query: "",
+    category: "",
+    loading: false,
+    admin: null,
+  },
   notifications: [],
   showNotifications: false,
   totalUsdt: 0,
@@ -330,9 +340,9 @@ function shouldRefreshTradeLive() {
     return false;
   }
   if (state.user.role === "admin") {
-    return ["home", "history", "settings", "signals", "referral", "adminQuests"].includes(state.activeTab);
+    return ["home", "history", "settings", "signals", "services", "referral", "adminQuests"].includes(state.activeTab);
   }
-  return ["home", "history", "signals", "referral", "quest"].includes(state.activeTab);
+  return ["home", "history", "signals", "services", "referral", "quest"].includes(state.activeTab);
 }
 
 function getExchangeLabel(exchange) {
@@ -2579,6 +2589,7 @@ async function loadFinancialDashboard() {
     applyAccountSnapshot(state.financialDashboard.accountSnapshot);
   }
   await loadVtuSnapshot().catch(() => undefined);
+  await loadDigitalServicesSnapshot().catch(() => undefined);
 }
 
 async function refreshTradingAccountSnapshot({ force = false, silent = false } = {}) {
@@ -4462,6 +4473,22 @@ function renderActionModal() {
 
   if (state.actionModal.type === "transfer") {
     return renderTransferModal();
+  }
+
+  if (state.actionModal.type === "digital-services") {
+    return renderDigitalServiceBrowserModal();
+  }
+
+  if (state.actionModal.type === "digital-service-detail") {
+    return renderDigitalServiceDetailModal();
+  }
+
+  if (state.actionModal.type === "digital-service-confirm") {
+    return renderDigitalServiceConfirmModal();
+  }
+
+  if (state.actionModal.type === "digital-service-receipt") {
+    return renderDigitalServiceReceiptModal();
   }
 
   if (state.actionModal.type === "vtu-airtime" || state.actionModal.type === "vtu-data") {
@@ -6819,6 +6846,113 @@ async function refreshAdminVtuConnection(action = "test") {
   }).catch((error) => showError(error.message));
 }
 
+async function submitAdminDigitalServicesSettings(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    const payload = await api("/api/admin/integrations/digital-services/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        enabled: data.enabled === "true",
+        globalMarkupPercent: data.globalMarkupPercent || "20",
+        allowedImageDomains: String(data.allowedImageDomains || "akunding.shop")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      }),
+    });
+    state.digitalServices.settings = payload.settings;
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      settings: payload.settings,
+      supplier: payload.supplier || state.digitalServices.admin?.supplier,
+    };
+    state.financialDashboard = {
+      ...(state.financialDashboard || {}),
+      settings: {
+        ...(state.financialDashboard?.settings || {}),
+        digitalServices: payload.settings,
+      },
+    };
+    clearFormDraft(form);
+    render();
+    showNotice("Digital Services settings saved");
+  }).catch((error) => showError(error.message));
+}
+
+async function syncAdminDigitalServices() {
+  await withLoading(async () => {
+    const payload = await api("/api/admin/integrations/digital-services/sync", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      products: payload.products || [],
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    state.digitalServices.products = payload.products || [];
+    state.digitalServices.settings = payload.summary?.settings || state.digitalServices.settings;
+    render();
+    showNotice(`${(payload.products || []).length} products synced`);
+  }).catch((error) => showError(error.message));
+}
+
+async function submitAdminDigitalProductOverride(form) {
+  const productId = form.dataset.adminDigitalProductForm;
+  if (!productId) {
+    return;
+  }
+  const data = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/products/${encodeURIComponent(productId)}/override`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        enabled: data.enabled === "true",
+        featured: data.featured === "true",
+        displayName: data.displayName || "",
+        customImageUrl: data.customImageUrl || "",
+        markupMode: data.markupMode || "percentage",
+        markupValue: data.markupValue || "0",
+        customPriceNgn: data.customPriceNgn || "0",
+        order: data.order || "0",
+      }),
+    });
+    state.digitalServices.products = (state.digitalServices.products || []).map((product) =>
+      product.id === productId ? payload.product : product
+    );
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      products: (state.digitalServices.admin?.products || state.digitalServices.products || []).map((product) =>
+        product.id === productId ? payload.product : product
+      ),
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    render();
+    showNotice("Product override saved");
+  }).catch((error) => showError(error.message));
+}
+
+async function requeryAdminDigitalOrder(orderId) {
+  if (!orderId) {
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/orders/${encodeURIComponent(orderId)}/requery`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.digitalServices.orders = (state.digitalServices.orders || []).map((order) => order.id === orderId ? payload.order : order);
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      orders: (state.digitalServices.admin?.orders || state.digitalServices.orders || []).map((order) => order.id === orderId ? payload.order : order),
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    await loadFinancialDashboard();
+    render();
+    showNotice("Digital service order checked");
+  }).catch((error) => showError(error.message));
+}
+
 async function requeryAdminVtuTransaction(transactionId) {
   if (!transactionId) {
     return;
@@ -7231,7 +7365,7 @@ function getTabRoute(tab) {
   if (tab === "adminQuests") {
     return "/?tab=adminQuests";
   }
-  if (["home", "settings", "signals", "history"].includes(tab)) {
+  if (["home", "settings", "signals", "services", "history"].includes(tab)) {
     return `/?tab=${encodeURIComponent(tab)}`;
   }
   return "/?tab=home";
@@ -7249,7 +7383,7 @@ function getNotificationTarget(notification) {
     return { tab: "referral", section: "referral" };
   }
   if (route.includes("tab=services")) {
-    return { tab: "home", section: "services" };
+    return { tab: "services", section: "services" };
   }
   if (route.includes("tab=history")) {
     return { tab: "history", section: "finance" };
@@ -7415,6 +7549,75 @@ async function openGiftCardRedeemModal() {
   }
 }
 
+async function openDigitalServicesModal({ force = false } = {}) {
+  state.menuSheetOpen = false;
+  state.actionModal = {
+    type: "digital-services",
+  };
+  render();
+  await loadDigitalServiceProducts({ force }).catch((error) => showError(error.message));
+  await loadDigitalServicesSnapshot().catch(() => undefined);
+  render();
+}
+
+async function loadDigitalServicesSnapshot({ force = false } = {}) {
+  if (!state.user) {
+    state.digitalServices = {
+      settings: null,
+      products: [],
+      categories: [],
+      orders: [],
+      query: "",
+      category: "",
+      loading: false,
+      admin: null,
+    };
+    return;
+  }
+  if (state.user.role === "admin") {
+    const payload = await api("/api/admin/integrations/digital-services").catch(() => null);
+    if (payload) {
+      state.digitalServices.admin = payload;
+      state.digitalServices.settings = payload.settings || payload.summary?.settings || state.digitalServices.settings;
+      state.digitalServices.products = payload.products || state.digitalServices.products || [];
+      state.digitalServices.orders = payload.orders || state.digitalServices.orders || [];
+      state.digitalServices.categories = [...new Set((state.digitalServices.products || []).map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    }
+    return;
+  }
+  const [statusPayload, ordersPayload] = await Promise.all([
+    api("/api/digital-services/status").catch(() => ({ settings: null })),
+    api("/api/digital-services/orders?limit=20").catch(() => ({ orders: [] })),
+  ]);
+  state.digitalServices.settings = statusPayload.settings || null;
+  state.digitalServices.orders = ordersPayload.orders || [];
+}
+
+async function loadDigitalServiceProducts({ force = false } = {}) {
+  if (!state.user || state.user.role !== "user") {
+    return [];
+  }
+  const query = String(state.digitalServices.query || "").trim();
+  const category = String(state.digitalServices.category || "").trim();
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  if (category) params.set("category", category);
+  if (force) params.set("refresh", "1");
+  state.digitalServices.loading = true;
+  try {
+    const payload = await api(`/api/digital-services/products${params.toString() ? `?${params}` : ""}`);
+    state.digitalServices.products = payload.products || [];
+    state.digitalServices.categories = payload.categories || [];
+    state.digitalServices.settings = {
+      ...(state.digitalServices.settings || {}),
+      ...(payload.status?.settings || payload.status || {}),
+    };
+    return state.digitalServices.products;
+  } finally {
+    state.digitalServices.loading = false;
+  }
+}
+
 function readVtuModalFields(productType) {
   const product = String(productType || "").trim().toLowerCase();
   const phone = document.getElementById("vtu-phone-input")?.value?.trim() || state.actionModal?.phone || "";
@@ -7577,6 +7780,7 @@ function getMenuSheetItems() {
     ];
   }
   return [
+    { id: "services", label: "Services", iconName: "gift", action: "digital-services" },
     { id: "history", label: "History", iconName: "profile", tab: "history" },
     { id: "referral", label: "Refer", iconName: "gift", tab: "referral" },
     { id: "quest", label: "Quest", iconName: "star", tab: "quest" },
@@ -7588,6 +7792,48 @@ function getMenuSheetItems() {
     { id: "data", label: "Data", iconName: "wifi", action: "data" },
     { id: "gift-card", label: "Gift Card", iconName: "gift", action: "gift-card" },
   ];
+}
+
+function reviewDigitalServicePurchase() {
+  const product = getDigitalServiceProductById(state.actionModal?.productId) || state.actionModal?.product;
+  if (!product) {
+    showError("Select a digital service.");
+    return;
+  }
+  const quantity = Math.max(1, Math.min(Number(document.getElementById("digital-service-quantity-input")?.value || state.actionModal.quantity || 1), 1000));
+  state.actionModal = {
+    type: "digital-service-confirm",
+    productId: product.id,
+    product,
+    quantity,
+  };
+  render();
+}
+
+async function submitDigitalServicePurchase() {
+  const product = getDigitalServiceProductById(state.actionModal?.productId) || state.actionModal?.product;
+  if (!product) {
+    showError("Select a digital service.");
+    return;
+  }
+  const quantity = Math.max(1, Math.min(Number(state.actionModal.quantity || 1), 1000));
+  await withLoading(async () => {
+    const response = await api("/api/digital-services/orders", {
+      method: "POST",
+      headers: { "Idempotency-Key": `digital-${product.id}-${Date.now()}-${Math.random().toString(16).slice(2)}` },
+      body: JSON.stringify({
+        productId: product.id,
+        quantity,
+      }),
+    });
+    state.actionModal = {
+      type: "digital-service-receipt",
+      order: response.order,
+    };
+    await Promise.all([loadFinancialDashboard(), loadDigitalServicesSnapshot()]);
+    render();
+    showNotice("Digital service order submitted.");
+  }).catch((error) => showError(error.message));
 }
 
 function renderMenuSheet() {
@@ -7612,6 +7858,181 @@ function renderMenuSheet() {
           <span>Close</span>
         </button>
       </section>
+    </div>
+  `;
+}
+
+function getDigitalServiceProductById(productId) {
+  const id = String(productId || "").trim();
+  return (state.digitalServices.products || []).find((product) => String(product.id) === id) || null;
+}
+
+function renderDigitalServiceImage(product = {}, className = "digital-service-img") {
+  const src = product.imageUrl || "/services/default-digital-service.png";
+  return `<img class="${className}" src="${escapeHtml(src)}" alt="${escapeHtml(product.name || "Digital service")}" loading="lazy" onerror="this.onerror=null;this.src='/services/default-digital-service.png';" />`;
+}
+
+function renderDigitalServiceBrowserModal() {
+  const settings = state.digitalServices.settings || {};
+  const products = state.digitalServices.products || [];
+  const orders = state.digitalServices.orders || [];
+  const categories = state.digitalServices.categories || [];
+  const query = state.digitalServices.query || "";
+  const activeCategory = state.digitalServices.category || "";
+  const availableBalance = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  return `
+    <div class="modal-backdrop vtu-screen-backdrop">
+      <div class="vtu-phone-screen digital-services-screen">
+        <header class="vtu-screen-header">
+          <button class="vtu-back-btn" id="action-modal-cancel-btn" type="button">${icon("arrowLeft")}</button>
+          <strong>Digital Services</strong>
+          <button class="vtu-sheet-close" data-digital-services-refresh type="button" aria-label="Refresh services">${icon("refresh")}</button>
+        </header>
+        <section class="digital-services-hero">
+          <div>
+            <h3>Digital Services</h3>
+            <p>Premium digital tools at affordable prices.</p>
+          </div>
+          <span>${icon("gift")}</span>
+        </section>
+        ${
+          settings.enabled === false
+            ? `<p class="warning-copy">Digital Services is not available now.</p>`
+            : `
+              <div class="digital-search">
+                <span>${icon("signals")}</span>
+                <input id="digital-service-search-input" type="search" value="${escapeHtml(query)}" placeholder="Search services..." autocomplete="off" />
+              </div>
+              <div class="digital-category-row">
+                <button class="${activeCategory ? "" : "active"}" data-digital-service-category="" type="button">All</button>
+                ${categories.map((category) => `<button class="${activeCategory === category ? "active" : ""}" data-digital-service-category="${escapeHtml(category)}" type="button">${escapeHtml(category)}</button>`).join("")}
+              </div>
+              ${state.digitalServices.loading ? renderSectionLoadingOverlay("Loading services", "Checking available digital tools") : ""}
+              <div class="digital-product-grid">
+                ${products.map((product) => `
+                  <button class="digital-product-card" data-digital-service-product="${escapeHtml(product.id)}" type="button">
+                    ${renderDigitalServiceImage(product)}
+                    <strong>${escapeHtml(product.name)}</strong>
+                    <span>${escapeHtml(product.category || "Digital")}</span>
+                    <b>${formatNaira(product.price || product.sellingPrice || 0).replace(".00", "")}</b>
+                  </button>
+                `).join("") || `<p class="vtu-empty-state">No digital service found.</p>`}
+              </div>
+              <section class="digital-orders-panel">
+                <div class="section-head compact">
+                  <div>
+                    <h3>My Purchases</h3>
+                    <p class="muted-copy">Balance: ${formatNaira(availableBalance)}</p>
+                  </div>
+                </div>
+                <div class="compact-list">
+                  ${orders.slice(0, 4).map(renderDigitalServiceOrderRow).join("") || `<p class="muted-copy">No digital service purchase yet.</p>`}
+                </div>
+              </section>
+            `
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderDigitalServiceOrderRow(order = {}) {
+  const status = String(order.status || "processing").toUpperCase();
+  return `
+    <div class="asset-card digital-order-row">
+      <div>
+        <strong>${escapeHtml(order.productName || "Digital service")}</strong>
+        <p class="muted-copy">
+          <span class="wallet-status-badge ${walletStatusClass(status)}">${escapeHtml(formatWalletRequestStatus(status))}</span>
+          ${order.createdAt ? `<span>${new Date(order.createdAt).toLocaleString()}</span>` : ""}
+        </p>
+        ${order.delivery ? `<p class="muted-copy">Delivery available in receipt.</p>` : ""}
+      </div>
+      <div class="asset-values">
+        <strong>${formatNaira(order.amountCharged || 0)}</strong>
+        <p class="muted-copy">${escapeHtml(order.requestId || "")}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderDigitalServiceDetailModal() {
+  const product = getDigitalServiceProductById(state.actionModal.productId) || state.actionModal.product || {};
+  const quantity = Math.max(1, Number(state.actionModal.quantity || 1));
+  const unitPrice = Number(product.price || product.sellingPrice || 0);
+  const total = unitPrice * quantity;
+  const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card digital-service-detail-modal">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        ${renderDigitalServiceImage(product, "digital-service-detail-img")}
+        <p class="modal-eyebrow neutral">${escapeHtml(product.category || "Digital")}</p>
+        <h3>${escapeHtml(product.name || "Digital Service")}</h3>
+        <p class="modal-text">${escapeHtml(product.description || "Premium digital access delivered after purchase.")}</p>
+        <div class="action-metric-stack">
+          ${product.planLabel ? `<div class="action-metric"><span>Plan</span><strong>${escapeHtml(product.planLabel)}</strong></div>` : ""}
+          <div class="action-metric"><span>Delivery</span><strong>${escapeHtml(product.deliveryLabel || "After purchase")}</strong></div>
+          <div class="action-metric"><span>Stock</span><strong>${Number(product.stock || 0).toLocaleString()}</strong></div>
+          <div class="action-metric"><span>Total</span><strong>${formatNaira(total)}</strong></div>
+        </div>
+        <label class="stack-label">
+          <span>Quantity</span>
+          <input id="digital-service-quantity-input" type="number" min="1" max="1000" step="1" value="${escapeHtml(quantity)}" />
+        </label>
+        <p class="muted-copy">Wallet balance ${formatNaira(available)}</p>
+        <div class="modal-actions">
+          <button class="button-secondary" data-digital-services-back type="button">Back</button>
+          <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 && available >= total ? "" : "disabled"}>${icon("check")} Buy now</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDigitalServiceConfirmModal() {
+  const product = getDigitalServiceProductById(state.actionModal.productId) || state.actionModal.product || {};
+  const quantity = Math.max(1, Number(state.actionModal.quantity || 1));
+  const total = Number(product.price || product.sellingPrice || 0) * quantity;
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Confirm</p>
+        <h3>Buy digital service</h3>
+        <div class="action-metric-stack">
+          <div class="action-metric"><span>Service</span><strong>${escapeHtml(product.name || "")}</strong></div>
+          <div class="action-metric"><span>Quantity</span><strong>${quantity.toLocaleString()}</strong></div>
+          <div class="action-metric"><span>Wallet debit</span><strong>${formatNaira(total)}</strong></div>
+        </div>
+        <div class="modal-actions">
+          <button class="button-secondary" data-digital-services-back-detail type="button">Cancel</button>
+          <button class="button-primary shimmer-button" id="digital-service-confirm-btn" type="button">${icon("check")} Pay</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDigitalServiceReceiptModal() {
+  const order = state.actionModal.order || {};
+  const delivery = order.delivery || null;
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card digital-service-receipt-modal">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Receipt</p>
+        <h3>${escapeHtml(formatWalletRequestStatus(order.status || "processing"))}</h3>
+        <div class="action-metric-stack">
+          <div class="action-metric"><span>Service</span><strong>${escapeHtml(order.productName || "")}</strong></div>
+          <div class="action-metric"><span>Amount</span><strong>${formatNaira(order.amountCharged || 0)}</strong></div>
+          <div class="action-metric"><span>Ref</span><strong>${escapeHtml(order.requestId || "")}</strong></div>
+        </div>
+        ${delivery ? `<pre class="digital-delivery-box">${escapeHtml(JSON.stringify(delivery, null, 2))}</pre>` : `<p class="muted-copy">Delivery is processing. You will get a notification when it is ready.</p>`}
+        <div class="modal-actions single">
+          <button class="button-primary shimmer-button" id="action-modal-cancel-btn" type="button">Done</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -8780,7 +9201,8 @@ function renderVtuQuickActions() {
     return "";
   }
   const settings = state.vtuSettings || getFinancialSettings().vtu || {};
-  if (!settings.configured || (!settings.airtimeEnabled && !settings.dataEnabled)) {
+  const digitalSettings = state.digitalServices.settings || getFinancialSettings().digitalServices || {};
+  if (!digitalSettings.enabled && (!settings.configured || (!settings.airtimeEnabled && !settings.dataEnabled))) {
     return "";
   }
   return `
@@ -8788,10 +9210,14 @@ function renderVtuQuickActions() {
       <div class="section-head compact">
         <div>
           <h3>Services</h3>
-          <p class="muted-copy">Transfer, airtime and data</p>
+          <p class="muted-copy">Digital tools, transfer, airtime and data</p>
         </div>
       </div>
       <div class="vtu-action-grid">
+        <button class="service-action-btn digital-service-entry" data-digital-services-open type="button" ${digitalSettings.enabled === false ? "disabled" : ""}>
+          <span>${icon("gift")}</span>
+          <strong>Digital</strong>
+        </button>
         <button class="service-action-btn" data-transfer-open type="button">
           <span>${icon("bank")}</span>
           <strong>Transfer</strong>
@@ -9020,6 +9446,112 @@ function renderAdminGiftCardsPanel() {
       </form>
       <div class="compact-list">
         ${visibleCards.map(renderAdminGiftCardCard).join("") || `<p class="muted-copy">No gift cards yet.</p>`}
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminDigitalServicesPanel() {
+  const adminPayload = state.digitalServices.admin || {};
+  const settings = adminPayload.settings || state.digitalServices.settings || {};
+  const summary = adminPayload.summary || {};
+  const products = adminPayload.products || state.digitalServices.products || [];
+  const orders = adminPayload.orders || state.digitalServices.orders || [];
+  const supplier = adminPayload.supplier || {};
+  return `
+    <div class="admin-digital-panel">
+      <form id="admin-digital-services-settings-form" class="stack-form subtle-form progressive-settings-form">
+        <div class="settings-status-grid">
+          <span class="wallet-status-badge ${supplier.configured ? "wallet-status-success" : "wallet-status-pending"}">${supplier.configured ? "Supplier ready" : "API key missing"}</span>
+          <span class="muted-copy">${Number(summary.productCount || products.length || 0).toLocaleString()} products</span>
+        </div>
+        <label>
+          Digital Services
+          <select name="enabled">
+            <option value="true" ${settings.enabled ? "selected" : ""}>Enabled</option>
+            <option value="false" ${!settings.enabled ? "selected" : ""}>Disabled</option>
+          </select>
+        </label>
+        <label>Global markup % <input name="globalMarkupPercent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(settings.globalMarkupPercent || "20")}" /></label>
+        <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop"]).join(", "))}" placeholder="akunding.shop" /></label>
+        <div class="modal-actions inline-modal-actions">
+          <button class="button-secondary" id="admin-digital-services-sync-btn" type="button">${icon("refresh")} Sync products</button>
+          <button class="button-primary shimmer-button" type="submit">${icon("settings")} Save</button>
+        </div>
+      </form>
+      <div class="admin-digital-summary">
+        <div><span>Today</span><strong>${Number(summary.ordersToday || 0).toLocaleString()}</strong></div>
+        <div><span>Revenue</span><strong>${formatNaira(summary.revenue || 0)}</strong></div>
+        <div><span>Profit</span><strong>${formatNaira(summary.profit || 0)}</strong></div>
+      </div>
+      <details class="settings-disclosure nested-disclosure" open>
+        <summary><span>${icon("gift")}</span><strong>Product Overrides</strong></summary>
+        <div class="admin-digital-product-list">
+          ${products.slice(0, 20).map(renderAdminDigitalProductForm).join("") || `<p class="muted-copy">Sync products to manage Digital Services.</p>`}
+        </div>
+      </details>
+      <details class="settings-disclosure nested-disclosure">
+        <summary><span>${icon("profile")}</span><strong>Recent Orders</strong></summary>
+        <div class="compact-list">
+          ${orders.slice(0, 12).map(renderAdminDigitalOrderRow).join("") || `<p class="muted-copy">No Digital Services order yet.</p>`}
+        </div>
+      </details>
+    </div>
+  `;
+}
+
+function renderAdminDigitalProductForm(product = {}) {
+  const override = product.override || {};
+  return `
+    <form class="admin-digital-product-card" data-admin-digital-product-form="${escapeHtml(product.id || "")}">
+      ${renderDigitalServiceImage(product)}
+      <div class="admin-digital-product-main">
+        <strong>${escapeHtml(product.name || "Digital Service")}</strong>
+        <p class="muted-copy">${escapeHtml(product.category || "Digital")} | Cost ${formatNaira(product.providerCostNgn || 0)} | Sell ${formatNaira(product.sellingPrice || product.price || 0)}</p>
+        <div class="admin-digital-product-grid">
+          <label>Name <input name="displayName" value="${escapeHtml(override.displayName || "")}" placeholder="${escapeHtml(product.name || "")}" /></label>
+          <label>Image <input name="customImageUrl" value="${escapeHtml(override.customImageUrl || "")}" placeholder="https://..." /></label>
+          <label>Status
+            <select name="enabled">
+              <option value="true" ${override.enabled !== false ? "selected" : ""}>Enabled</option>
+              <option value="false" ${override.enabled === false ? "selected" : ""}>Disabled</option>
+            </select>
+          </label>
+          <label>Featured
+            <select name="featured">
+              <option value="false" ${!override.featured ? "selected" : ""}>No</option>
+              <option value="true" ${override.featured ? "selected" : ""}>Yes</option>
+            </select>
+          </label>
+          <label>Markup mode
+            <select name="markupMode">
+              ${["percentage", "fixed", "custom"].map((mode) => `<option value="${mode}" ${String(override.markupMode || "percentage") === mode ? "selected" : ""}>${mode}</option>`).join("")}
+            </select>
+          </label>
+          <label>Markup value <input name="markupValue" type="number" min="0" step="0.01" value="${escapeHtml(override.markupValue || "0")}" /></label>
+          <label>Custom price <input name="customPriceNgn" type="number" min="0" step="1" value="${escapeHtml(override.customPriceNgn || "0")}" /></label>
+          <label>Order <input name="order" type="number" min="0" step="1" value="${escapeHtml(override.order || "0")}" /></label>
+        </div>
+        <button class="micro-btn primary" type="submit">${icon("check")} Save product</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderAdminDigitalOrderRow(order = {}) {
+  const status = String(order.status || "processing").toUpperCase();
+  const canRequery = ["PAYMENT_RESERVED", "SUBMITTED", "PROCESSING"].includes(status) && order.supplierOrderId;
+  return `
+    <div class="asset-card admin-finance-card">
+      <div>
+        <strong>${escapeHtml(order.productName || "Digital service")}</strong>
+        <p class="muted-copy">${escapeHtml(order.user?.name || "User")} | ${escapeHtml(order.user?.email || "")}</p>
+        <p class="muted-copy">Ref: ${escapeHtml(order.requestId || "")}</p>
+      </div>
+      <div class="asset-values">
+        <span class="wallet-status-badge ${walletStatusClass(status)}">${escapeHtml(formatWalletRequestStatus(status))}</span>
+        <strong>${formatNaira(order.amountCharged || 0)}</strong>
+        ${canRequery ? `<button class="micro-btn" data-admin-digital-order-requery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Requery</button>` : ""}
       </div>
     </div>
   `;
@@ -9648,6 +10180,7 @@ function renderSettingsPane() {
   const exchangeRateSettings = financeSettings.exchangeRate || {};
   const telegramSettings = financeSettings.telegram || {};
   const vtuSettings = state.vtuSettings || financeSettings.vtu || {};
+  const digitalServiceSettings = state.digitalServices.settings || financeSettings.digitalServices || {};
   const adminDepositSettingsDraft = state.adminDepositSettingsDraft || {};
   const savedBank = getSavedBankAccount();
   const settingsBankOptions = (state.paymentBanks || [])
@@ -9814,6 +10347,7 @@ function renderSettingsPane() {
       ${renderSettingsDisclosure({ key: "exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
       ${renderSettingsDisclosure({ key: "deposit-channel", title: "Wallet Rules", subtitle: "Bank, fees, minimums", iconName: "bank", content: depositPanel, open: true })}
       ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel })}
+      ${renderSettingsDisclosure({ key: "digital-services", title: "Digital Services", subtitle: digitalServiceSettings.enabled ? "Akunding" : "Disabled", iconName: "gift", content: renderAdminDigitalServicesPanel() })}
       ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
       ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
       ${renderSettingsDisclosure({ key: "referrals", title: "Referral Management", subtitle: "Rewards and progress", iconName: "users", content: renderAdminReferralPanel(), extraClass: "admin-referral-section" })}
@@ -10398,7 +10932,7 @@ function applyRouteTarget() {
     state.routeScrollSection = String(params.get("section") || "finance").trim() || "finance";
     return;
   }
-  if (["home", "settings", "history", "signals"].includes(params.get("tab"))) {
+  if (["home", "settings", "history", "signals", "services"].includes(params.get("tab"))) {
     state.activeTab = params.get("tab");
   }
 }
@@ -10772,6 +11306,41 @@ function renderHomePane() {
     `;
 }
 
+function renderDigitalServicesPane() {
+  const settings = state.digitalServices.settings || {};
+  const orders = state.digitalServices.orders || [];
+  const balance = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  return `
+    <section class="mobile-card digital-services-page">
+      <div class="section-head">
+        <div>
+          <h3>Digital Services</h3>
+          <p class="muted-copy">Premium digital tools at affordable prices.</p>
+        </div>
+        <button class="text-link" data-digital-services-open type="button">Browse</button>
+      </div>
+      <div class="digital-services-hero inline-hero">
+        <div>
+          <h3>${settings.enabled === false ? "Currently unavailable" : "Ready to shop"}</h3>
+          <p>Wallet balance ${formatNaira(balance)}</p>
+        </div>
+        <span>${icon("gift")}</span>
+      </div>
+    </section>
+    <section class="mobile-card">
+      <div class="section-head">
+        <div>
+          <h3>My Purchases</h3>
+          <p class="muted-copy">Your digital service orders and delivery status.</p>
+        </div>
+      </div>
+      <div class="compact-list">
+        ${orders.map(renderDigitalServiceOrderRow).join("") || `<p class="muted-copy">No digital service purchase yet.</p>`}
+      </div>
+    </section>
+  `;
+}
+
 async function navigateToTab(nextTab) {
   if (!nextTab) {
     return;
@@ -10801,6 +11370,9 @@ async function navigateToTab(nextTab) {
   if (nextTab === "referral") {
     await withLoading(loadReferralProfile).catch((error) => showError(error.message));
   }
+  if (nextTab === "services") {
+    await withLoading(() => loadDigitalServicesSnapshot({ force: true })).catch((error) => showError(error.message));
+  }
   if (nextTab === "adminQuests") {
     await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
   }
@@ -10826,6 +11398,7 @@ function renderDashboardShell() {
 
   const paneMap = {
     home: renderHomePane(),
+    services: renderDigitalServicesPane(),
     settings: renderSettingsPane(),
     signals: renderSignalsPane(),
     history: renderHistoryPane(),
@@ -10964,6 +11537,9 @@ function bindDashboardActions() {
       }
       if (action === "transfer") {
         openTransferModal();
+      }
+      if (action === "digital-services") {
+        openDigitalServicesModal();
       }
       if (action === "airtime") {
         openVtuModal("airtime");
@@ -11394,6 +11970,30 @@ function bindDashboardActions() {
     button.addEventListener("click", () => requeryAdminVtuTransaction(button.dataset.adminVtuRequery));
   });
 
+  const adminDigitalServicesForm = document.getElementById("admin-digital-services-settings-form");
+  if (adminDigitalServicesForm) {
+    adminDigitalServicesForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminDigitalServicesSettings(adminDigitalServicesForm);
+    });
+  }
+
+  const adminDigitalServicesSyncButton = document.getElementById("admin-digital-services-sync-btn");
+  if (adminDigitalServicesSyncButton) {
+    adminDigitalServicesSyncButton.addEventListener("click", syncAdminDigitalServices);
+  }
+
+  document.querySelectorAll("[data-admin-digital-product-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminDigitalProductOverride(form);
+    });
+  });
+
+  document.querySelectorAll("[data-admin-digital-order-requery]").forEach((button) => {
+    button.addEventListener("click", () => requeryAdminDigitalOrder(button.dataset.adminDigitalOrderRequery));
+  });
+
   document.querySelectorAll("[data-admin-bonus-form]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -11524,6 +12124,86 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-vtu-open]").forEach((button) => {
     button.addEventListener("click", () => openVtuModal(button.dataset.vtuOpen));
   });
+
+  document.querySelectorAll("[data-digital-services-open]").forEach((button) => {
+    button.addEventListener("click", () => openDigitalServicesModal());
+  });
+
+  document.querySelectorAll("[data-digital-services-refresh]").forEach((button) => {
+    button.addEventListener("click", () => openDigitalServicesModal({ force: true }));
+  });
+
+  const digitalSearchInput = document.getElementById("digital-service-search-input");
+  if (digitalSearchInput) {
+    digitalSearchInput.addEventListener("input", () => {
+      state.digitalServices.query = digitalSearchInput.value;
+      window.clearTimeout(state.digitalServices.searchTimer);
+      state.digitalServices.searchTimer = window.setTimeout(() => {
+        void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      }, 250);
+    });
+  }
+
+  document.querySelectorAll("[data-digital-service-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.digitalServices.category = button.dataset.digitalServiceCategory || "";
+      void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-digital-service-product]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const product = getDigitalServiceProductById(button.dataset.digitalServiceProduct);
+      if (!product) {
+        return;
+      }
+      state.actionModal = {
+        type: "digital-service-detail",
+        productId: product.id,
+        product,
+        quantity: 1,
+      };
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-digital-services-back]").forEach((button) => {
+    button.addEventListener("click", () => openDigitalServicesModal());
+  });
+
+  document.querySelectorAll("[data-digital-services-back-detail]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = {
+        type: "digital-service-detail",
+        productId: state.actionModal?.productId,
+        product: state.actionModal?.product,
+        quantity: state.actionModal?.quantity || 1,
+      };
+      render();
+    });
+  });
+
+  const digitalQuantityInput = document.getElementById("digital-service-quantity-input");
+  if (digitalQuantityInput) {
+    digitalQuantityInput.addEventListener("input", () => {
+      state.actionModal = {
+        ...state.actionModal,
+        quantity: Math.max(1, Math.min(Number(digitalQuantityInput.value || 1), 1000)),
+      };
+      render();
+    });
+  }
+
+  const digitalReviewButton = document.getElementById("digital-service-review-btn");
+  if (digitalReviewButton) {
+    digitalReviewButton.addEventListener("click", reviewDigitalServicePurchase);
+  }
+
+  const digitalConfirmButton = document.getElementById("digital-service-confirm-btn");
+  if (digitalConfirmButton) {
+    digitalConfirmButton.addEventListener("click", submitDigitalServicePurchase);
+  }
 
   const transferOpenButton = document.querySelector("[data-transfer-open]");
   if (transferOpenButton) {

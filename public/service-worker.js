@@ -1,4 +1,4 @@
-const CACHE_VERSION = "netruefi-pwa-v5";
+const CACHE_VERSION = "netruefi-pwa-v6";
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [
@@ -12,6 +12,7 @@ const STATIC_ASSETS = [
   "/vendor/lightweight-charts.js",
   "/favicon.png",
   "/og-image-whatsapp.jpg",
+  "/services/default-digital-service.png",
   "/netruefi-logo.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
