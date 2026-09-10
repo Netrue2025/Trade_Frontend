@@ -20,7 +20,7 @@ const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -117,6 +117,7 @@ const state = {
   isLoading: false,
   modalError: null,
   actionModal: null,
+  menuSheetOpen: false,
   notice: null,
   balances: [],
   openOrders: [],
@@ -220,6 +221,7 @@ const state = {
     feedback: null,
     draft: null,
   },
+  homePromoSlide: 0,
   socket: null,
   socketRetry: null,
   socketRefreshTimer: null,
@@ -1930,6 +1932,8 @@ function icon(name) {
       '<path d="M12 8.7a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Zm8 3.3-.9-.5a7.5 7.5 0 0 0-.4-1l.5-1a1 1 0 0 0-.2-1.1l-1.2-1.2a1 1 0 0 0-1.1-.2l-1 .5c-.3-.2-.7-.3-1-.4L14 3h-4l-.4 1.1c-.3.1-.7.2-1 .4l-1-.5a1 1 0 0 0-1.1.2L5 5.4a1 1 0 0 0-.2 1.1l.5 1c-.2.3-.3.7-.4 1L4 12v.1l.9.4c.1.3.2.7.4 1l-.5 1a1 1 0 0 0 .2 1.1l1.2 1.2a1 1 0 0 0 1.1.2l1-.5c.3.2.7.3 1 .4L10 21h4l.4-1.1c.3-.1.7-.2 1-.4l1 .5a1 1 0 0 0 1.1-.2l1.2-1.2a1 1 0 0 0 .2-1.1l-.5-1c.2-.3.3-.7.4-1l.9-.4V12Z"/>',
     signals:
       '<path d="M4 17h3l2.5-7 3 11 2.5-6H20" /><circle cx="7" cy="17" r="1.2"/><circle cx="15" cy="15" r="1.2"/>',
+    menu:
+      '<circle cx="6" cy="7" r="2.2"/><circle cx="17" cy="6" r="2.8"/><circle cx="8" cy="18" r="2.6"/><circle cx="18" cy="17" r="2.1"/>',
     profile:
       '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8c0-3.4 2.8-6 7-6s7 2.6 7 6"/>',
     users:
@@ -7276,6 +7280,18 @@ function openTransferModal() {
   render();
 }
 
+async function openGiftCardRedeemModal() {
+  await openWalletActionModal("deposit");
+  if (state.actionModal?.type === "deposit") {
+    state.actionModal = {
+      ...state.actionModal,
+      currency: "NGN",
+      depositMode: "gift",
+    };
+    render();
+  }
+}
+
 function readVtuModalFields(productType) {
   const product = String(productType || "").trim().toLowerCase();
   const phone = document.getElementById("vtu-phone-input")?.value?.trim() || state.actionModal?.phone || "";
@@ -7427,27 +7443,70 @@ async function submitVtuPurchase() {
   }).catch((error) => showError(error.message));
 }
 
-function renderBottomNav() {
-  const tabs = [
-    { id: "home", label: "Home", iconName: "home" },
-    { id: "signals", label: "Signals", iconName: "signals" },
-    ...(state.user?.role === "user" ? [{ id: "referral", label: "Refer", iconName: "gift" }] : []),
-    { id: "history", label: "History", iconName: "profile" },
-    { id: "settings", label: "Settings", iconName: "settings" },
+function getMenuSheetItems() {
+  const isAdmin = state.user?.role === "admin";
+  if (isAdmin) {
+    return [
+      { id: "history", label: "History", iconName: "profile", tab: "history" },
+      { id: "settings", label: "Settings", iconName: "settings", tab: "settings" },
+      { id: "adminQuests", label: "Quest", iconName: "star", tab: "adminQuests" },
+      { id: "users", label: "Users", iconName: "users", action: "users" },
+    ];
+  }
+  return [
+    { id: "history", label: "History", iconName: "profile", tab: "history" },
+    { id: "referral", label: "Refer", iconName: "gift", tab: "referral" },
+    { id: "quest", label: "Quest", iconName: "star", tab: "quest" },
+    { id: "settings", label: "Settings", iconName: "settings", tab: "settings" },
+    { id: "deposit", label: "Deposit", iconName: "bank", action: "deposit" },
+    { id: "withdraw", label: "Withdraw", iconName: "send", action: "withdraw" },
+    { id: "transfer", label: "Transfer", iconName: "send", action: "transfer" },
+    { id: "airtime", label: "Airtime", iconName: "phone", action: "airtime" },
+    { id: "data", label: "Data", iconName: "wifi", action: "data" },
+    { id: "gift-card", label: "Gift Card", iconName: "gift", action: "gift-card" },
   ];
+}
 
+function renderMenuSheet() {
+  if (!state.menuSheetOpen) {
+    return "";
+  }
   return `
-    <nav class="bottom-nav">
-      ${tabs
-        .map(
-          (tab) => `
-            <button class="nav-button ${state.activeTab === tab.id ? "active" : ""}" data-tab="${tab.id}" type="button">
-              ${icon(tab.iconName)}
-              <span>${tab.label}</span>
+    <div class="quick-menu-layer" role="presentation">
+      <button class="quick-menu-backdrop" data-menu-close type="button" aria-label="Close menu"></button>
+      <section class="quick-menu-sheet" role="dialog" aria-modal="true" aria-label="Menu">
+        <span class="quick-menu-handle" aria-hidden="true"></span>
+        <div class="quick-menu-grid">
+          ${getMenuSheetItems().map((item) => `
+            <button class="quick-menu-item" ${item.tab ? `data-menu-tab="${escapeHtml(item.tab)}"` : `data-menu-action="${escapeHtml(item.action)}"`} type="button">
+              <span>${icon(item.iconName)}</span>
+              <strong>${escapeHtml(item.label)}</strong>
             </button>
-          `
-        )
-        .join("")}
+          `).join("")}
+        </div>
+        <button class="quick-menu-close" data-menu-close type="button" aria-label="Close menu">
+          ${icon("x")}
+          <span>Close</span>
+        </button>
+      </section>
+    </div>
+  `;
+}
+
+function renderBottomNav() {
+  return `
+    <nav class="bottom-nav" aria-label="Primary">
+      <button class="nav-button nav-side ${state.activeTab === "signals" ? "active" : ""}" data-tab="signals" type="button">
+        ${icon("signals")}
+        <span>Signals</span>
+      </button>
+      <button class="nav-home-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button" aria-label="Home">
+        <span class="nav-home-orb">${icon("home")}</span>
+      </button>
+      <button class="nav-button nav-side ${state.menuSheetOpen ? "active" : ""}" data-menu-toggle type="button" aria-expanded="${state.menuSheetOpen ? "true" : "false"}">
+        ${icon("menu")}
+        <span>Menu</span>
+      </button>
     </nav>
   `;
 }
@@ -10369,6 +10428,35 @@ function renderReferralBanner() {
   `;
 }
 
+function renderHomePromoSlider() {
+  if (state.user?.role !== "user") {
+    return "";
+  }
+  const slides = [
+    { id: "quest", content: renderQuestPromoBanner() },
+    { id: "referral", content: renderReferralBanner() },
+  ].filter((slide) => slide.content);
+  if (!slides.length) {
+    return "";
+  }
+  const activeSlide = Math.min(Math.max(Number(state.homePromoSlide || 0), 0), slides.length - 1);
+  state.homePromoSlide = activeSlide;
+  return `
+    <section class="home-promo-slider" aria-label="Promotions">
+      <div class="home-promo-viewport">
+        <div class="home-promo-track" style="transform: translateX(-${activeSlide * 100}%);">
+          ${slides.map((slide) => `<div class="home-promo-slide">${slide.content}</div>`).join("")}
+        </div>
+      </div>
+      <div class="home-promo-dots" aria-label="Promotion slider">
+        ${slides.map((slide, index) => `
+          <button class="${index === activeSlide ? "active" : ""}" data-home-promo-slide="${index}" type="button" aria-label="Show ${escapeHtml(slide.id)} banner"></button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
 function renderReferralProgressLine(referral) {
   const spend = referral.spendProgress || {};
   const trades = referral.tradeProgress || {};
@@ -10456,7 +10544,7 @@ function renderReferralPane() {
 
 function renderHomePane() {
     const userHomeContent = `
-      ${renderReferralBanner()}
+      ${renderHomePromoSlider()}
       ${renderVtuQuickActions()}
       ${renderWalletHistorySection({
         limit: 3,
@@ -10473,12 +10561,46 @@ function renderHomePane() {
       ${renderSummaryCard()}
       ${
         state.user.role === "user"
-          ? `${renderQuestPromoBanner()}${userHomeContent}`
+          ? userHomeContent
           : isFuturesMode()
           ? renderFuturesDashboard()
           : renderAdminHomeDashboard()
       }
     `;
+}
+
+async function navigateToTab(nextTab) {
+  if (!nextTab) {
+    return;
+  }
+  state.menuSheetOpen = false;
+  if (window.history?.pushState) {
+    window.history.pushState({}, "", getTabRoute(nextTab));
+  }
+  if (nextTab === "home") {
+    state.activeTab = "home";
+    disconnectSettingsUsersSocket();
+    render();
+    await withLoading(loadDashboardData);
+    showNotice("Home refreshed");
+    return;
+  }
+  state.activeTab = nextTab;
+  render();
+  if (nextTab === "settings") {
+    connectSettingsUsersSocket();
+  } else {
+    disconnectSettingsUsersSocket();
+  }
+  if (nextTab === "quest") {
+    await withLoading(loadQuestData).catch((error) => showError(error.message));
+  }
+  if (nextTab === "referral") {
+    await withLoading(loadReferralProfile).catch((error) => showError(error.message));
+  }
+  if (nextTab === "adminQuests") {
+    await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
+  }
 }
 
 function renderDashboardShell() {
@@ -10517,6 +10639,7 @@ function renderDashboardShell() {
       </section>
       ${renderBottomNav()}
     </section>
+    ${renderMenuSheet()}
     ${renderNotice()}
     ${renderMessageNotificationPopup()}
     ${renderErrorModal()}
@@ -10550,34 +10673,7 @@ function renderDashboardShell() {
   scrollToRouteSection();
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const nextTab = button.dataset.tab;
-      if (window.history?.pushState) {
-        window.history.pushState({}, "", getTabRoute(nextTab));
-      }
-      if (nextTab === "home") {
-        state.activeTab = "home";
-        disconnectSettingsUsersSocket();
-        render();
-        await withLoading(loadDashboardData);
-        showNotice("Home refreshed");
-        return;
-      }
-      state.activeTab = nextTab;
-      render();
-      if (nextTab === "settings") {
-        connectSettingsUsersSocket();
-      } else {
-        disconnectSettingsUsersSocket();
-      }
-      if (nextTab === "quest") {
-        await withLoading(loadQuestData).catch((error) => showError(error.message));
-      }
-      if (nextTab === "referral") {
-        await withLoading(loadReferralProfile).catch((error) => showError(error.message));
-      }
-      if (nextTab === "adminQuests") {
-        await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
-      }
+      await navigateToTab(button.dataset.tab);
     });
   });
 }
@@ -10631,6 +10727,55 @@ function bindDashboardActions() {
           render();
         });
       }
+
+  document.querySelectorAll("[data-menu-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.menuSheetOpen = !state.menuSheetOpen;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-menu-close]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.menuSheetOpen = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-menu-tab]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await navigateToTab(button.dataset.menuTab);
+    });
+  });
+
+  document.querySelectorAll("[data-menu-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.menuAction || "";
+      state.menuSheetOpen = false;
+      render();
+      if (action === "deposit") {
+        await openWalletActionModal("deposit");
+      }
+      if (action === "withdraw") {
+        await openWalletActionModal("withdraw");
+      }
+      if (action === "transfer") {
+        openTransferModal();
+      }
+      if (action === "airtime") {
+        openVtuModal("airtime");
+      }
+      if (action === "data") {
+        openVtuModal("data");
+      }
+      if (action === "gift-card") {
+        await openGiftCardRedeemModal();
+      }
+      if (action === "users") {
+        showActionModal({ type: "admin-users" });
+      }
+    });
+  });
 
   document.querySelectorAll("[data-balance-privacy-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -10787,6 +10932,13 @@ function bindDashboardActions() {
       state.expandedListKeys = isListExpanded(key)
         ? state.expandedListKeys.filter((item) => item !== key)
         : [...new Set([...state.expandedListKeys, key])];
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-home-promo-slide]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.homePromoSlide = Number(button.dataset.homePromoSlide || 0);
       render();
     });
   });
