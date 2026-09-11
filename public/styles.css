@@ -2373,6 +2373,35 @@ body[data-theme="dark"] .section-loading-card {
   overflow-wrap: anywhere;
 }
 
+.digital-delivery-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft-surface);
+}
+
+.digital-delivery-link {
+  display: block;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--accent);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.digital-delivery-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text);
+  font-size: 0.86rem;
+}
+
 .admin-digital-panel {
   display: grid;
   gap: 12px;

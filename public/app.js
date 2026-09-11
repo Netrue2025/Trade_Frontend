@@ -7968,6 +7968,7 @@ function renderDigitalServiceBrowserModal() {
 
 function renderDigitalServiceOrderRow(order = {}) {
   const status = String(order.status || "processing").toUpperCase();
+  const deliveryLink = getDigitalDeliveryLink(order.delivery);
   return `
     <div class="asset-card digital-order-row">
       <div>
@@ -7976,13 +7977,113 @@ function renderDigitalServiceOrderRow(order = {}) {
           <span class="wallet-status-badge ${walletStatusClass(status)}">${escapeHtml(formatWalletRequestStatus(status))}</span>
           ${order.createdAt ? `<span>${new Date(order.createdAt).toLocaleString()}</span>` : ""}
         </p>
-        ${order.delivery ? `<p class="muted-copy">Delivery available in receipt.</p>` : ""}
+        ${deliveryLink ? `<p class="muted-copy">Activation link ready.</p>` : order.delivery ? `<p class="muted-copy">Delivery available in receipt.</p>` : ""}
       </div>
       <div class="asset-values">
         <strong>${formatNaira(order.amountCharged || 0)}</strong>
         <p class="muted-copy">${escapeHtml(order.requestId || "")}</p>
+        <button class="text-link compact-link" data-digital-service-order-receipt="${escapeHtml(order.id || order.requestId || "")}" type="button">View</button>
       </div>
     </div>
+  `;
+}
+
+function getDigitalServiceOrderById(orderId) {
+  const id = String(orderId || "");
+  return (state.digitalServices.orders || []).find((order) => String(order.id || order.requestId || "") === id || String(order.requestId || "") === id) || null;
+}
+
+function getDigitalDeliveryLink(delivery) {
+  if (!delivery) {
+    return "";
+  }
+  if (typeof delivery === "string") {
+    return extractFirstUrl(delivery);
+  }
+  const keys = [
+    "activationLink",
+    "activation_link",
+    "activationUrl",
+    "activation_url",
+    "inviteLink",
+    "invite_link",
+    "inviteUrl",
+    "invite_url",
+    "planLink",
+    "plan_link",
+    "redeemLink",
+    "redeem_link",
+    "accessLink",
+    "access_link",
+    "orderLink",
+    "order_link",
+    "downloadLink",
+    "download_link",
+    "geminiLink",
+    "gemini_link",
+    "link",
+    "url",
+  ];
+  for (const key of keys) {
+    const link = extractFirstUrl(delivery[key]);
+    if (link) {
+      return link;
+    }
+  }
+  return extractFirstUrl(delivery);
+}
+
+function extractFirstUrl(value) {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (/^https?:\/\//i.test(text)) {
+      return text;
+    }
+    const match = text.match(/https?:\/\/[^\s"'<>]+/i);
+    return match ? match[0] : "";
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const link = extractFirstUrl(item);
+      if (link) {
+        return link;
+      }
+    }
+    return "";
+  }
+  if (value && typeof value === "object") {
+    for (const item of Object.values(value)) {
+      const link = extractFirstUrl(item);
+      if (link) {
+        return link;
+      }
+    }
+  }
+  return "";
+}
+
+function renderDigitalServiceDelivery(delivery) {
+  const link = getDigitalDeliveryLink(delivery);
+  if (!delivery) {
+    return `<p class="muted-copy">Delivery is processing. You will get a notification when it is ready.</p>`;
+  }
+  if (!link) {
+    return `<pre class="digital-delivery-box">${escapeHtml(JSON.stringify(delivery, null, 2))}</pre>`;
+  }
+  return `
+    <section class="digital-delivery-card">
+      <p class="modal-eyebrow neutral">Activation link</p>
+      <a class="digital-delivery-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a>
+      <div class="modal-actions inline-modal-actions">
+        <a class="button-primary shimmer-button" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${icon("send")} Open link</a>
+        <button class="button-secondary" data-copy-text="${escapeHtml(link)}" type="button">${icon("copy")} Copy link</button>
+      </div>
+      <ol class="digital-delivery-steps">
+        <li>Click or copy this link to your browser.</li>
+        <li>Click on activate after the next page opens.</li>
+        <li>Enjoy.</li>
+      </ol>
+    </section>
   `;
 }
 
@@ -8058,7 +8159,7 @@ function renderDigitalServiceReceiptModal() {
           <div class="action-metric"><span>Amount</span><strong>${formatNaira(order.amountCharged || 0)}</strong></div>
           <div class="action-metric"><span>Ref</span><strong>${escapeHtml(order.requestId || "")}</strong></div>
         </div>
-        ${delivery ? `<pre class="digital-delivery-box">${escapeHtml(JSON.stringify(delivery, null, 2))}</pre>` : `<p class="muted-copy">Delivery is processing. You will get a notification when it is ready.</p>`}
+        ${renderDigitalServiceDelivery(delivery)}
         <div class="modal-actions single">
           <button class="button-primary shimmer-button" id="action-modal-cancel-btn" type="button">Done</button>
         </div>
@@ -12258,6 +12359,21 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-digital-services-page-refresh]").forEach((button) => {
     button.addEventListener("click", () => {
       void loadDigitalServiceProducts({ force: true }).then(() => render()).catch((error) => showError(error.message));
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-digital-service-order-receipt]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const order = getDigitalServiceOrderById(button.dataset.digitalServiceOrderReceipt);
+      if (!order) {
+        showError("Purchase receipt is not available yet.");
+        return;
+      }
+      state.actionModal = {
+        type: "digital-service-receipt",
+        order,
+      };
       render();
     });
   });
