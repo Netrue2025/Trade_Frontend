@@ -6984,6 +6984,24 @@ async function requeryAdminDigitalOrder(orderId) {
   }).catch((error) => showError(error.message));
 }
 
+async function recoverAdminDigitalOrders() {
+  await withLoading(async () => {
+    const payload = await api("/api/admin/integrations/digital-services/recover-orders", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.digitalServices.orders = payload.orders || state.digitalServices.orders || [];
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      orders: payload.orders || state.digitalServices.admin?.orders || [],
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    await loadFinancialDashboard();
+    render();
+    showNotice(payload.recovery?.count ? `${payload.recovery.count} Store order histories recovered` : "Store histories are already up to date");
+  }).catch((error) => showError(error.message));
+}
+
 async function requeryAdminVtuTransaction(transactionId) {
   if (!transactionId) {
     return;
@@ -7618,7 +7636,7 @@ async function loadDigitalServicesSnapshot({ force = false } = {}) {
   }
   const [statusPayload, ordersPayload] = await Promise.all([
     api("/api/digital-services/status").catch(() => ({ settings: null })),
-    api("/api/digital-services/orders?limit=20").catch(() => ({ orders: [] })),
+    api("/api/digital-services/orders?limit=300").catch(() => ({ orders: [] })),
   ]);
   state.digitalServices.settings = statusPayload.settings || null;
   state.digitalServices.orders = ordersPayload.orders || [];
@@ -9678,6 +9696,7 @@ function renderAdminDigitalServicesPanel() {
         <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop"]).join(", "))}" placeholder="akunding.shop" /></label>
         <div class="modal-actions inline-modal-actions">
           <button class="button-secondary" id="admin-digital-services-sync-btn" type="button">${icon("refresh")} Sync products</button>
+          <button class="button-secondary" data-admin-digital-orders-recover type="button">${icon("refresh")} Recover histories</button>
           <button class="button-primary shimmer-button" type="submit">${icon("settings")} Save</button>
         </div>
       </form>
@@ -11641,6 +11660,7 @@ function renderAdminStorePane() {
             <h3>Store Histories</h3>
             <p class="muted-copy">Completed and processing customer orders.</p>
           </div>
+          <button class="micro-btn" data-admin-digital-orders-recover type="button">${icon("refresh")} Recover</button>
         </div>
         <div class="compact-list admin-store-order-list">
           ${orders.map(renderAdminDigitalOrderRow).join("") || `<p class="muted-copy">No Store order yet.</p>`}
@@ -12310,6 +12330,10 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-admin-digital-order-requery]").forEach((button) => {
     button.addEventListener("click", () => requeryAdminDigitalOrder(button.dataset.adminDigitalOrderRequery));
+  });
+
+  document.querySelectorAll("[data-admin-digital-orders-recover]").forEach((button) => {
+    button.addEventListener("click", recoverAdminDigitalOrders);
   });
 
   document.querySelectorAll("[data-admin-bonus-form]").forEach((form) => {
