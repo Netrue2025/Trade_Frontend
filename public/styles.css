@@ -184,6 +184,10 @@ body[data-active-tab="quest"] .app-shell {
   color: var(--warning);
 }
 
+.success-copy {
+  color: var(--success);
+}
+
 .signal-page-shell {
   display: grid;
   gap: 14px;
@@ -2424,6 +2428,40 @@ body[data-theme="dark"] .section-loading-card {
   min-width: 0;
 }
 
+.admin-digital-price-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-digital-price-row span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft-surface);
+}
+
+.admin-digital-price-row small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.admin-digital-price-row b {
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+}
+
+.admin-digital-price-row em {
+  font-size: 0.72rem;
+  font-style: normal;
+  text-align: right;
+}
+
 .admin-digital-product-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2441,6 +2479,10 @@ body[data-theme="dark"] .section-loading-card {
 .admin-digital-product-grid input,
 .admin-digital-product-grid select {
   min-width: 0;
+}
+
+.admin-digital-product-actions {
+  justify-content: space-between;
 }
 
 .vtu-action-modal {
@@ -5661,6 +5703,14 @@ body[data-theme="dark"] .mirror-guide-pill {
 
   .admin-digital-product-card .digital-service-img {
     height: 132px;
+  }
+
+  .admin-digital-price-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-digital-price-row em {
+    text-align: left;
   }
 
   .vtu-phone-screen {

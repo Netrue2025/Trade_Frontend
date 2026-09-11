@@ -6936,6 +6936,30 @@ async function submitAdminDigitalProductOverride(form) {
   }).catch((error) => showError(error.message));
 }
 
+async function refreshAdminDigitalProductPrice(productId) {
+  if (!productId) {
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/products/${encodeURIComponent(productId)}/refresh`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.digitalServices.products = (state.digitalServices.products || []).map((product) =>
+      product.id === productId ? payload.product : product
+    );
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      products: (state.digitalServices.admin?.products || state.digitalServices.products || []).map((product) =>
+        product.id === productId ? payload.product : product
+      ),
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    render();
+    showNotice(`API price updated: ${formatNaira(payload.product?.providerCostNgn || 0)}`);
+  }).catch((error) => showError(error.message));
+}
+
 async function requeryAdminDigitalOrder(orderId) {
   if (!orderId) {
     return;
@@ -9508,12 +9532,21 @@ function renderAdminDigitalServicesPanel() {
 
 function renderAdminDigitalProductForm(product = {}) {
   const override = product.override || {};
+  const supplierCurrency = String(product.supplierCurrency || product.currency || "NGN").toUpperCase();
+  const sourcePrice = product.providerCost && supplierCurrency !== "NGN"
+    ? ` (${escapeHtml(product.providerCost)} ${escapeHtml(supplierCurrency)})`
+    : "";
+  const supplierStatus = product.supplierAvailable === false ? "Supplier unavailable" : "Supplier available";
   return `
     <form class="admin-digital-product-card" data-admin-digital-product-form="${escapeHtml(product.id || "")}">
       ${renderDigitalServiceImage(product)}
       <div class="admin-digital-product-main">
         <strong>${escapeHtml(product.name || "Digital Service")}</strong>
-        <p class="muted-copy">${escapeHtml(product.category || "Digital")} | Cost ${formatNaira(product.providerCostNgn || 0)} | Sell ${formatNaira(product.sellingPrice || product.price || 0)}</p>
+        <div class="admin-digital-price-row">
+          <span><small>API cost</small><b>${formatNaira(product.providerCostNgn || 0)}${sourcePrice}</b></span>
+          <span><small>Store price</small><b>${formatNaira(product.sellingPrice || product.price || 0)}</b></span>
+          <em class="${product.supplierAvailable === false ? "warning-copy" : "success-copy"}">${supplierStatus}</em>
+        </div>
         <div class="admin-digital-product-grid">
           <label>Name <input name="displayName" value="${escapeHtml(override.displayName || "")}" placeholder="${escapeHtml(product.name || "")}" /></label>
           <label>Image <input name="customImageUrl" value="${escapeHtml(override.customImageUrl || "")}" placeholder="https://..." /></label>
@@ -9538,7 +9571,10 @@ function renderAdminDigitalProductForm(product = {}) {
           <label>Custom price <input name="customPriceNgn" type="number" min="0" step="1" value="${escapeHtml(override.customPriceNgn || "0")}" /></label>
           <label>Order <input name="order" type="number" min="0" step="1" value="${escapeHtml(override.order || "0")}" /></label>
         </div>
-        <button class="micro-btn primary" type="submit">${icon("check")} Save product</button>
+        <div class="modal-actions inline-modal-actions admin-digital-product-actions">
+          <button class="button-secondary" data-admin-digital-product-refresh="${escapeHtml(product.id || "")}" type="button">${icon("refresh")} Fetch API price</button>
+          <button class="micro-btn primary" type="submit">${icon("check")} Save product</button>
+        </div>
       </div>
     </form>
   `;
@@ -12032,6 +12068,10 @@ function bindDashboardActions() {
       event.preventDefault();
       submitAdminDigitalProductOverride(form);
     });
+  });
+
+  document.querySelectorAll("[data-admin-digital-product-refresh]").forEach((button) => {
+    button.addEventListener("click", () => refreshAdminDigitalProductPrice(button.dataset.adminDigitalProductRefresh));
   });
 
   document.querySelectorAll("[data-admin-digital-order-requery]").forEach((button) => {
