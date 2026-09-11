@@ -11069,7 +11069,7 @@ function renderWalletHistoryRow(item) {
 
 function walletStatusClass(status) {
   const value = String(status || "").toUpperCase();
-  if (["APPROVED", "COMPLETED", "SUCCESSFUL", "SUCCESS"].includes(value)) {
+  if (["APPROVED", "COMPLETED", "SUCCESSFUL", "SUCCESS", "DELIVERED", "FULFILLED"].includes(value)) {
     return "wallet-status-success";
   }
   if (value === "PROCESSING") {
@@ -11086,7 +11086,7 @@ function walletStatusClass(status) {
 
 function formatWalletRequestStatus(status) {
   const value = String(status || "").toUpperCase();
-  if (["APPROVED", "COMPLETED", "SUCCESSFUL", "SUCCESS"].includes(value)) {
+  if (["APPROVED", "COMPLETED", "SUCCESSFUL", "SUCCESS", "DELIVERED", "FULFILLED"].includes(value)) {
     return "Successful";
   }
   if (value === "PROCESSING") {
