@@ -340,9 +340,9 @@ function shouldRefreshTradeLive() {
     return false;
   }
   if (state.user.role === "admin") {
-    return ["home", "history", "settings", "signals", "services", "referral", "adminQuests"].includes(state.activeTab);
+    return ["home", "history", "settings", "signals", "store", "referral", "adminQuests"].includes(state.activeTab);
   }
-  return ["home", "history", "signals", "services", "referral", "quest"].includes(state.activeTab);
+  return ["home", "history", "signals", "store", "referral", "quest"].includes(state.activeTab);
 }
 
 function getExchangeLabel(exchange) {
@@ -6118,6 +6118,9 @@ async function loadDashboardData() {
   const referralPromise = state.user.role === "user"
     ? loadReferralProfile().then(() => render()).catch(() => render())
     : loadAdminReferralData().then(() => render()).catch(() => render());
+  const digitalProductsPromise = state.activeTab === "store" && state.user.role === "user"
+    ? loadDigitalServiceProducts({ force: true }).then(() => render()).catch(() => render())
+    : Promise.resolve();
   const settingsPromise = loadSavedExchangeSettings(getActiveExchange()).then(() => {
     render();
   });
@@ -6233,6 +6236,7 @@ async function loadDashboardData() {
   void adminFinancePromise;
   void questPromise;
   void referralPromise;
+  void digitalProductsPromise;
 }
 
 function bindHistoryActions() {
@@ -6853,7 +6857,7 @@ async function submitAdminDigitalServicesSettings(form) {
       method: "PUT",
       body: JSON.stringify({
         enabled: data.enabled === "true",
-        globalMarkupPercent: data.globalMarkupPercent || "20",
+        globalMarkupPercent: data.globalMarkupPercent || "0",
         allowedImageDomains: String(data.allowedImageDomains || "akunding.shop")
           .split(",")
           .map((item) => item.trim())
@@ -7365,7 +7369,7 @@ function getTabRoute(tab) {
   if (tab === "adminQuests") {
     return "/?tab=adminQuests";
   }
-  if (["home", "settings", "signals", "services", "history"].includes(tab)) {
+  if (["home", "settings", "signals", "store", "history"].includes(tab)) {
     return `/?tab=${encodeURIComponent(tab)}`;
   }
   return "/?tab=home";
@@ -7382,8 +7386,8 @@ function getNotificationTarget(notification) {
   if (route.includes("tab=referral")) {
     return { tab: "referral", section: "referral" };
   }
-  if (route.includes("tab=services")) {
-    return { tab: "services", section: "services" };
+  if (route.includes("tab=store") || route.includes("tab=services")) {
+    return { tab: "store", section: "store" };
   }
   if (route.includes("tab=history")) {
     return { tab: "history", section: "finance" };
@@ -7780,7 +7784,8 @@ function getMenuSheetItems() {
     ];
   }
   return [
-    { id: "services", label: "Services", iconName: "gift", action: "digital-services" },
+    { id: "store", label: "Store", iconName: "gift", tab: "store" },
+    { id: "signals", label: "Signals", iconName: "signals", tab: "signals" },
     { id: "history", label: "History", iconName: "profile", tab: "history" },
     { id: "referral", label: "Refer", iconName: "gift", tab: "referral" },
     { id: "quest", label: "Quest", iconName: "star", tab: "quest" },
@@ -7806,6 +7811,7 @@ function reviewDigitalServicePurchase() {
     productId: product.id,
     product,
     quantity,
+    returnTo: state.actionModal?.returnTo || (state.activeTab === "store" ? "store" : "modal"),
   };
   render();
 }
@@ -8040,9 +8046,9 @@ function renderDigitalServiceReceiptModal() {
 function renderBottomNav() {
   return `
     <nav class="bottom-nav" aria-label="Primary">
-      <button class="nav-button nav-side ${state.activeTab === "signals" ? "active" : ""}" data-tab="signals" type="button">
-        ${icon("signals")}
-        <span>Signals</span>
+      <button class="nav-button nav-side ${state.activeTab === "store" ? "active" : ""}" data-tab="store" type="button">
+        ${icon("gift")}
+        <span>Store</span>
       </button>
       <button class="nav-home-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button" aria-label="Home">
         <span class="nav-home-orb">${icon("home")}</span>
@@ -9214,9 +9220,9 @@ function renderVtuQuickActions() {
         </div>
       </div>
       <div class="vtu-action-grid">
-        <button class="service-action-btn digital-service-entry" data-digital-services-open type="button" ${digitalSettings.enabled === false ? "disabled" : ""}>
+        <button class="service-action-btn digital-service-entry" data-tab="store" type="button" ${digitalSettings.enabled === false ? "disabled" : ""}>
           <span>${icon("gift")}</span>
-          <strong>Digital</strong>
+          <strong>Store</strong>
         </button>
         <button class="service-action-btn" data-transfer-open type="button">
           <span>${icon("bank")}</span>
@@ -9472,7 +9478,7 @@ function renderAdminDigitalServicesPanel() {
             <option value="false" ${!settings.enabled ? "selected" : ""}>Disabled</option>
           </select>
         </label>
-        <label>Global markup % <input name="globalMarkupPercent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(settings.globalMarkupPercent || "20")}" /></label>
+        <label>Global markup % <input name="globalMarkupPercent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(settings.globalMarkupPercent || "0")}" /></label>
         <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop"]).join(", "))}" placeholder="akunding.shop" /></label>
         <div class="modal-actions inline-modal-actions">
           <button class="button-secondary" id="admin-digital-services-sync-btn" type="button">${icon("refresh")} Sync products</button>
@@ -10932,7 +10938,11 @@ function applyRouteTarget() {
     state.routeScrollSection = String(params.get("section") || "finance").trim() || "finance";
     return;
   }
-  if (["home", "settings", "history", "signals", "services"].includes(params.get("tab"))) {
+  if (params.get("tab") === "services") {
+    state.activeTab = "store";
+    return;
+  }
+  if (["home", "settings", "history", "signals", "store"].includes(params.get("tab"))) {
     state.activeTab = params.get("tab");
   }
 }
@@ -11309,15 +11319,19 @@ function renderHomePane() {
 function renderDigitalServicesPane() {
   const settings = state.digitalServices.settings || {};
   const orders = state.digitalServices.orders || [];
+  const products = state.digitalServices.products || [];
+  const categories = state.digitalServices.categories || [];
+  const query = state.digitalServices.query || "";
+  const activeCategory = state.digitalServices.category || "";
   const balance = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   return `
-    <section class="mobile-card digital-services-page">
+    <section class="mobile-card digital-services-page" data-section="store">
       <div class="section-head">
         <div>
-          <h3>Digital Services</h3>
+          <h3>Store</h3>
           <p class="muted-copy">Premium digital tools at affordable prices.</p>
         </div>
-        <button class="text-link" data-digital-services-open type="button">Browse</button>
+        <button class="text-link" data-digital-services-page-refresh type="button">Refresh</button>
       </div>
       <div class="digital-services-hero inline-hero">
         <div>
@@ -11327,6 +11341,33 @@ function renderDigitalServicesPane() {
         <span>${icon("gift")}</span>
       </div>
     </section>
+    ${
+      settings.enabled === false
+        ? `<section class="mobile-card"><p class="warning-copy">Store is not available now.</p></section>`
+        : `
+          <section class="mobile-card store-catalog-card${loadingClass(state.digitalServices.loading)}">
+            ${state.digitalServices.loading ? renderSectionLoadingOverlay("Loading store", "Fetching available tools") : ""}
+            <div class="digital-search">
+              <span>${icon("signals")}</span>
+              <input id="store-search-input" type="search" value="${escapeHtml(query)}" placeholder="Search services..." autocomplete="off" />
+            </div>
+            <div class="digital-category-row">
+              <button class="${activeCategory ? "" : "active"}" data-store-category="" type="button">All</button>
+              ${categories.map((category) => `<button class="${activeCategory === category ? "active" : ""}" data-store-category="${escapeHtml(category)}" type="button">${escapeHtml(category)}</button>`).join("")}
+            </div>
+            <div class="digital-product-grid store-product-grid">
+              ${products.map((product) => `
+                <button class="digital-product-card" data-digital-service-product="${escapeHtml(product.id)}" type="button">
+                  ${renderDigitalServiceImage(product)}
+                  <strong>${escapeHtml(product.name)}</strong>
+                  <span>${escapeHtml(product.category || "Digital")}</span>
+                  <b>${formatNaira(product.price || product.sellingPrice || 0).replace(".00", "")}</b>
+                </button>
+              `).join("") || `<p class="vtu-empty-state">No digital tool found.</p>`}
+            </div>
+          </section>
+        `
+    }
     <section class="mobile-card">
       <div class="section-head">
         <div>
@@ -11370,8 +11411,11 @@ async function navigateToTab(nextTab) {
   if (nextTab === "referral") {
     await withLoading(loadReferralProfile).catch((error) => showError(error.message));
   }
-  if (nextTab === "services") {
-    await withLoading(() => loadDigitalServicesSnapshot({ force: true })).catch((error) => showError(error.message));
+  if (nextTab === "store") {
+    await withLoading(async () => {
+      await loadDigitalServicesSnapshot({ force: true });
+      await loadDigitalServiceProducts({ force: true });
+    }).catch((error) => showError(error.message));
   }
   if (nextTab === "adminQuests") {
     await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
@@ -11398,7 +11442,7 @@ function renderDashboardShell() {
 
   const paneMap = {
     home: renderHomePane(),
-    services: renderDigitalServicesPane(),
+    store: renderDigitalServicesPane(),
     settings: renderSettingsPane(),
     signals: renderSignalsPane(),
     history: renderHistoryPane(),
@@ -12144,10 +12188,36 @@ function bindDashboardActions() {
     });
   }
 
+  const storeSearchInput = document.getElementById("store-search-input");
+  if (storeSearchInput) {
+    storeSearchInput.addEventListener("input", () => {
+      state.digitalServices.query = storeSearchInput.value;
+      window.clearTimeout(state.digitalServices.searchTimer);
+      state.digitalServices.searchTimer = window.setTimeout(() => {
+        void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      }, 250);
+    });
+  }
+
   document.querySelectorAll("[data-digital-service-category]").forEach((button) => {
     button.addEventListener("click", () => {
       state.digitalServices.category = button.dataset.digitalServiceCategory || "";
       void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-store-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.digitalServices.category = button.dataset.storeCategory || "";
+      void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-digital-services-page-refresh]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void loadDigitalServiceProducts({ force: true }).then(() => render()).catch((error) => showError(error.message));
       render();
     });
   });
@@ -12163,13 +12233,21 @@ function bindDashboardActions() {
         productId: product.id,
         product,
         quantity: 1,
+        returnTo: state.activeTab === "store" ? "store" : "modal",
       };
       render();
     });
   });
 
   document.querySelectorAll("[data-digital-services-back]").forEach((button) => {
-    button.addEventListener("click", () => openDigitalServicesModal());
+    button.addEventListener("click", () => {
+      if (state.actionModal?.returnTo === "store") {
+        state.actionModal = null;
+        render();
+        return;
+      }
+      openDigitalServicesModal();
+    });
   });
 
   document.querySelectorAll("[data-digital-services-back-detail]").forEach((button) => {
@@ -12179,6 +12257,7 @@ function bindDashboardActions() {
         productId: state.actionModal?.productId,
         product: state.actionModal?.product,
         quantity: state.actionModal?.quantity || 1,
+        returnTo: state.actionModal?.returnTo || (state.activeTab === "store" ? "store" : "modal"),
       };
       render();
     });
