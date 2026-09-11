@@ -5153,7 +5153,8 @@ function bindModalActions() {
       if (adminUsersList) {
         adminUsersList.scrollTop = 0;
       }
-      render();
+      window.clearTimeout(state.adminUsersSearchTimer);
+      state.adminUsersSearchTimer = window.setTimeout(() => render(), 250);
     });
   }
 
@@ -6118,8 +6119,10 @@ async function loadDashboardData() {
   const referralPromise = state.user.role === "user"
     ? loadReferralProfile().then(() => render()).catch(() => render())
     : loadAdminReferralData().then(() => render()).catch(() => render());
-  const digitalProductsPromise = state.activeTab === "store" && state.user.role === "user"
-    ? loadDigitalServiceProducts({ force: true }).then(() => render()).catch(() => render())
+  const digitalStorePromise = state.activeTab === "store"
+    ? (state.user.role === "user"
+      ? loadDigitalServiceProducts({ force: true }).then(() => render()).catch(() => render())
+      : loadDigitalServicesSnapshot({ force: true }).then(() => render()).catch(() => render()))
     : Promise.resolve();
   const settingsPromise = loadSavedExchangeSettings(getActiveExchange()).then(() => {
     render();
@@ -6236,7 +6239,7 @@ async function loadDashboardData() {
   void adminFinancePromise;
   void questPromise;
   void referralPromise;
-  void digitalProductsPromise;
+  void digitalStorePromise;
 }
 
 function bindHistoryActions() {
@@ -7732,6 +7735,32 @@ function updateVtuReviewButtonState() {
   button.disabled = !ready;
 }
 
+function updateDigitalServiceReviewState() {
+  const input = document.getElementById("digital-service-quantity-input");
+  const button = document.getElementById("digital-service-review-btn");
+  const totalNode = document.getElementById("digital-service-total-preview");
+  const balanceNode = document.getElementById("digital-service-balance-preview");
+  if (!input || !button || !state.actionModal) {
+    return;
+  }
+  const product = getDigitalServiceProductById(state.actionModal.productId) || state.actionModal.product || {};
+  const quantity = Math.max(1, Math.min(Number(input.value || 1), 1000));
+  const unitPrice = Number(product.price || product.sellingPrice || 0);
+  const total = unitPrice * quantity;
+  const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  state.actionModal = {
+    ...state.actionModal,
+    quantity,
+  };
+  button.disabled = !(total > 0 && available >= total);
+  if (totalNode) {
+    totalNode.textContent = formatNaira(total);
+  }
+  if (balanceNode) {
+    balanceNode.textContent = `Wallet balance ${formatNaira(available)}`;
+  }
+}
+
 function updateTransferButtonState() {
   const button = document.getElementById("transfer-submit-btn");
   if (!button) {
@@ -7801,6 +7830,7 @@ function getMenuSheetItems() {
   const isAdmin = state.user?.role === "admin";
   if (isAdmin) {
     return [
+      { id: "store", label: "Store", iconName: "gift", tab: "store" },
       { id: "history", label: "History", iconName: "profile", tab: "history" },
       { id: "settings", label: "Settings", iconName: "settings", tab: "settings" },
       { id: "adminQuests", label: "Quest", iconName: "star", tab: "adminQuests" },
@@ -7863,6 +7893,30 @@ async function submitDigitalServicePurchase() {
     await Promise.all([loadFinancialDashboard(), loadDigitalServicesSnapshot()]);
     render();
     showNotice("Digital service order submitted.");
+  }).catch((error) => showError(error.message));
+}
+
+async function requeryDigitalServiceOrder(orderId) {
+  if (!orderId) {
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/digital-services/orders/${encodeURIComponent(orderId)}/requery`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.digitalServices.orders = (state.digitalServices.orders || []).map((order) =>
+      String(order.id || order.requestId || "") === String(orderId) || String(order.requestId || "") === String(orderId)
+        ? payload.order
+        : order
+    );
+    state.actionModal = {
+      type: "digital-service-receipt",
+      order: payload.order,
+    };
+    await loadFinancialDashboard();
+    render();
+    showNotice(payload.order?.status === "delivered" ? "Order delivery is ready." : "Order is still processing.");
   }).catch((error) => showError(error.message));
 }
 
@@ -7967,8 +8021,13 @@ function renderDigitalServiceBrowserModal() {
 }
 
 function renderDigitalServiceOrderRow(order = {}) {
-  const status = String(order.status || "processing").toUpperCase();
   const deliveryLink = getDigitalDeliveryLink(order.delivery);
+  const rawStatus = String(order.status || "processing").toUpperCase();
+  const status = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING"].includes(rawStatus)
+    ? "DELIVERED"
+    : rawStatus;
+  const canCheckDelivery = !deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING"].includes(rawStatus);
+  const orderId = order.id || order.requestId || "";
   return `
     <div class="asset-card digital-order-row">
       <div>
@@ -7982,7 +8041,8 @@ function renderDigitalServiceOrderRow(order = {}) {
       <div class="asset-values">
         <strong>${formatNaira(order.amountCharged || 0)}</strong>
         <p class="muted-copy">${escapeHtml(order.requestId || "")}</p>
-        <button class="text-link compact-link" data-digital-service-order-receipt="${escapeHtml(order.id || order.requestId || "")}" type="button">View</button>
+        <button class="text-link compact-link" data-digital-service-order-receipt="${escapeHtml(orderId)}" type="button">View</button>
+        ${canCheckDelivery ? `<button class="micro-btn" data-digital-service-order-requery="${escapeHtml(orderId)}" type="button">${icon("refresh")} Check</button>` : ""}
       </div>
     </div>
   `;
@@ -8105,13 +8165,13 @@ function renderDigitalServiceDetailModal() {
           ${product.planLabel ? `<div class="action-metric"><span>Plan</span><strong>${escapeHtml(product.planLabel)}</strong></div>` : ""}
           <div class="action-metric"><span>Delivery</span><strong>${escapeHtml(product.deliveryLabel || "After purchase")}</strong></div>
           <div class="action-metric"><span>Stock</span><strong>${Number(product.stock || 0).toLocaleString()}</strong></div>
-          <div class="action-metric"><span>Total</span><strong>${formatNaira(total)}</strong></div>
+          <div class="action-metric"><span>Total</span><strong id="digital-service-total-preview">${formatNaira(total)}</strong></div>
         </div>
         <label class="stack-label">
           <span>Quantity</span>
           <input id="digital-service-quantity-input" type="number" min="1" max="1000" step="1" value="${escapeHtml(quantity)}" />
         </label>
-        <p class="muted-copy">Wallet balance ${formatNaira(available)}</p>
+        <p class="muted-copy" id="digital-service-balance-preview">Wallet balance ${formatNaira(available)}</p>
         <div class="modal-actions">
           <button class="button-secondary" data-digital-services-back type="button">Back</button>
           <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 && available >= total ? "" : "disabled"}>${icon("check")} Buy now</button>
@@ -8148,12 +8208,17 @@ function renderDigitalServiceConfirmModal() {
 function renderDigitalServiceReceiptModal() {
   const order = state.actionModal.order || {};
   const delivery = order.delivery || null;
+  const deliveryLink = getDigitalDeliveryLink(delivery);
+  const rawStatus = String(order.status || "processing").toUpperCase();
+  const displayStatus = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING"].includes(rawStatus)
+    ? "delivered"
+    : order.status || "processing";
   return `
     <div class="modal-backdrop">
       <div class="modal-card action-modal-card digital-service-receipt-modal">
         <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
         <p class="modal-eyebrow neutral">Receipt</p>
-        <h3>${escapeHtml(formatWalletRequestStatus(order.status || "processing"))}</h3>
+        <h3>${escapeHtml(formatWalletRequestStatus(displayStatus))}</h3>
         <div class="action-metric-stack">
           <div class="action-metric"><span>Service</span><strong>${escapeHtml(order.productName || "")}</strong></div>
           <div class="action-metric"><span>Amount</span><strong>${formatNaira(order.amountCharged || 0)}</strong></div>
@@ -8311,6 +8376,7 @@ function renderAdminHomeDashboard() {
   const pendingWithdrawals = Number(stats.pendingWithdrawals || 0);
   const openTrades = (state.trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase())).length;
   const exchangeLabel = getExchangeLabel(getAdminDashboardExchange());
+  const storeOrdersToday = Number(stats.digitalServices?.ordersToday || 0);
   return `
     <section class="admin-dashboard-rail" aria-label="Admin overview">
       <button class="admin-stat-tile" data-admin-users-open type="button">
@@ -8327,6 +8393,11 @@ function renderAdminHomeDashboard() {
         <span class="card-icon">${icon("download")}</span>
         <strong>${pendingWithdrawals.toLocaleString()}</strong>
         <small>Withdrawals</small>
+      </button>
+      <button class="admin-stat-tile" data-tab="store" type="button">
+        <span class="card-icon">${icon("gift")}</span>
+        <strong>${storeOrdersToday.toLocaleString()}</strong>
+        <small>Store today</small>
       </button>
       <div class="admin-stat-tile passive">
         <span class="card-icon">${icon("signals")}</span>
@@ -9684,16 +9755,19 @@ function renderAdminDigitalProductForm(product = {}) {
 function renderAdminDigitalOrderRow(order = {}) {
   const status = String(order.status || "processing").toUpperCase();
   const canRequery = ["PAYMENT_RESERVED", "SUBMITTED", "PROCESSING"].includes(status) && order.supplierOrderId;
+  const deliveryLink = getDigitalDeliveryLink(order.delivery);
   return `
-    <div class="asset-card admin-finance-card">
+    <div class="asset-card admin-finance-card admin-store-order-row">
       <div>
         <strong>${escapeHtml(order.productName || "Digital service")}</strong>
         <p class="muted-copy">${escapeHtml(order.user?.name || "User")} | ${escapeHtml(order.user?.email || "")}</p>
         <p class="muted-copy">Ref: ${escapeHtml(order.requestId || "")}</p>
+        ${deliveryLink ? `<a class="text-link compact-link" href="${escapeHtml(deliveryLink)}" target="_blank" rel="noopener noreferrer">Delivery link</a>` : ""}
       </div>
       <div class="asset-values">
         <span class="wallet-status-badge ${walletStatusClass(status)}">${escapeHtml(formatWalletRequestStatus(status))}</span>
         <strong>${formatNaira(order.amountCharged || 0)}</strong>
+        ${deliveryLink ? `<button class="micro-btn" data-copy-text="${escapeHtml(deliveryLink)}" type="button">${icon("copy")} Copy</button>` : ""}
         ${canRequery ? `<button class="micro-btn" data-admin-digital-order-requery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Requery</button>` : ""}
       </div>
     </div>
@@ -11454,6 +11528,9 @@ function renderHomePane() {
 }
 
 function renderDigitalServicesPane() {
+  if (state.user?.role === "admin") {
+    return renderAdminStorePane();
+  }
   const settings = state.digitalServices.settings || {};
   const orders = state.digitalServices.orders || [];
   const products = state.digitalServices.products || [];
@@ -11461,51 +11538,49 @@ function renderDigitalServicesPane() {
   const query = state.digitalServices.query || "";
   const activeCategory = state.digitalServices.category || "";
   const balance = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  const readyOrders = orders.filter((order) => String(order.status || "").toLowerCase() === "delivered" || getDigitalDeliveryLink(order.delivery)).length;
+  const featuredProducts = products.filter((product) => product.featured).slice(0, 4);
   return `
-    <section class="mobile-card digital-services-page" data-section="store">
-      <div class="section-head">
+    <section class="store-page" data-section="store">
+      <section class="store-hero">
         <div>
-          <h3>Store</h3>
-          <p class="muted-copy">Premium digital tools at affordable prices.</p>
+          <p class="eyebrow">Netrue Store</p>
+          <h3>${settings.enabled === false ? "Store paused" : "Digital tools, ready fast"}</h3>
+          <p>Balance ${formatNaira(balance)}</p>
         </div>
-        <button class="text-link" data-digital-services-page-refresh type="button">Refresh</button>
-      </div>
-      <div class="digital-services-hero inline-hero">
-        <div>
-          <h3>${settings.enabled === false ? "Currently unavailable" : "Ready to shop"}</h3>
-          <p>Wallet balance ${formatNaira(balance)}</p>
-        </div>
-        <span>${icon("gift")}</span>
-      </div>
-    </section>
+        <button class="store-refresh-btn" data-digital-services-page-refresh type="button" aria-label="Refresh store">${icon("refresh")}</button>
+      </section>
+      <section class="store-stat-strip">
+        <div><span>Products</span><strong>${Number(products.length || 0).toLocaleString()}</strong></div>
+        <div><span>Orders</span><strong>${Number(orders.length || 0).toLocaleString()}</strong></div>
+        <div><span>Ready</span><strong>${Number(readyOrders || 0).toLocaleString()}</strong></div>
+      </section>
     ${
       settings.enabled === false
         ? `<section class="mobile-card"><p class="warning-copy">Store is not available now.</p></section>`
         : `
-          <section class="mobile-card store-catalog-card${loadingClass(state.digitalServices.loading)}">
+          <section class="store-catalog-card${loadingClass(state.digitalServices.loading)}">
             ${state.digitalServices.loading ? renderSectionLoadingOverlay("Loading store", "Fetching available tools") : ""}
             <div class="digital-search">
-              <span>${icon("signals")}</span>
-              <input id="store-search-input" type="search" value="${escapeHtml(query)}" placeholder="Search services..." autocomplete="off" />
+              <span>${icon("gift")}</span>
+              <input id="store-search-input" type="search" value="${escapeHtml(query)}" placeholder="Search store" autocomplete="off" />
             </div>
             <div class="digital-category-row">
               <button class="${activeCategory ? "" : "active"}" data-store-category="" type="button">All</button>
               ${categories.map((category) => `<button class="${activeCategory === category ? "active" : ""}" data-store-category="${escapeHtml(category)}" type="button">${escapeHtml(category)}</button>`).join("")}
             </div>
+            ${featuredProducts.length ? `
+              <div class="store-featured-row">
+                ${featuredProducts.map((product) => renderStoreProductCard(product, true)).join("")}
+              </div>
+            ` : ""}
             <div class="digital-product-grid store-product-grid">
-              ${products.map((product) => `
-                <button class="digital-product-card" data-digital-service-product="${escapeHtml(product.id)}" type="button">
-                  ${renderDigitalServiceImage(product)}
-                  <strong>${escapeHtml(product.name)}</strong>
-                  <span>${escapeHtml(product.category || "Digital")}</span>
-                  <b>${formatNaira(product.price || product.sellingPrice || 0).replace(".00", "")}</b>
-                </button>
-              `).join("") || `<p class="vtu-empty-state">No digital tool found.</p>`}
+              ${products.map((product) => renderStoreProductCard(product)).join("") || `<p class="vtu-empty-state">No digital tool found.</p>`}
             </div>
           </section>
         `
     }
-    <section class="mobile-card">
+    <section class="mobile-card store-history-card">
       <div class="section-head">
         <div>
           <h3>My Purchases</h3>
@@ -11515,6 +11590,62 @@ function renderDigitalServicesPane() {
       <div class="compact-list">
         ${orders.map(renderDigitalServiceOrderRow).join("") || `<p class="muted-copy">No digital service purchase yet.</p>`}
       </div>
+    </section>
+    </section>
+  `;
+}
+
+function renderStoreProductCard(product = {}, featured = false) {
+  return `
+    <button class="digital-product-card store-product-card ${featured ? "featured" : ""}" data-digital-service-product="${escapeHtml(product.id)}" type="button">
+      <span class="store-product-media">${renderDigitalServiceImage(product)}</span>
+      <span class="store-product-body">
+        <small>${escapeHtml(product.category || "Digital")}</small>
+        <strong>${escapeHtml(product.name || "Digital service")}</strong>
+        <span>${escapeHtml(product.planLabel || product.deliveryLabel || "Instant delivery")}</span>
+      </span>
+      <span class="store-product-footer">
+        <b>${formatNaira(product.price || product.sellingPrice || 0).replace(".00", "")}</b>
+        <em>Buy</em>
+      </span>
+    </button>
+  `;
+}
+
+function renderAdminStorePane() {
+  const adminPayload = state.digitalServices.admin || {};
+  const summary = adminPayload.summary || {};
+  const settings = adminPayload.settings || state.digitalServices.settings || {};
+  const products = adminPayload.products || state.digitalServices.products || [];
+  const orders = adminPayload.orders || state.digitalServices.orders || [];
+  const delivered = orders.filter((order) => String(order.status || "").toLowerCase() === "delivered").length;
+  return `
+    <section class="admin-store-page" data-section="store">
+      <section class="store-hero admin-store-hero">
+        <div>
+          <p class="eyebrow">Store History</p>
+          <h3>Orders and product health</h3>
+          <p>${settings.enabled ? "Store live" : "Store paused"} | ${Number(products.length || 0).toLocaleString()} products</p>
+        </div>
+        <button class="store-refresh-btn" data-digital-services-page-refresh type="button" aria-label="Refresh store">${icon("refresh")}</button>
+      </section>
+      <section class="store-stat-strip admin-store-stats">
+        <div><span>Today</span><strong>${Number(summary.ordersToday || 0).toLocaleString()}</strong></div>
+        <div><span>Delivered</span><strong>${Number(delivered || 0).toLocaleString()}</strong></div>
+        <div><span>Revenue</span><strong>${formatNaira(summary.revenue || 0)}</strong></div>
+        <div><span>Profit</span><strong>${formatNaira(summary.profit || 0)}</strong></div>
+      </section>
+      <section class="mobile-card admin-store-history-card">
+        <div class="section-head">
+          <div>
+            <h3>Store Histories</h3>
+            <p class="muted-copy">Completed and processing customer orders.</p>
+          </div>
+        </div>
+        <div class="compact-list admin-store-order-list">
+          ${orders.map(renderAdminDigitalOrderRow).join("") || `<p class="muted-copy">No Store order yet.</p>`}
+        </div>
+      </section>
     </section>
   `;
 }
@@ -11551,7 +11682,9 @@ async function navigateToTab(nextTab) {
   if (nextTab === "store") {
     await withLoading(async () => {
       await loadDigitalServicesSnapshot({ force: true });
-      await loadDigitalServiceProducts({ force: true });
+      if (state.user?.role === "user") {
+        await loadDigitalServiceProducts({ force: true });
+      }
     }).catch((error) => showError(error.message));
   }
   if (nextTab === "adminQuests") {
@@ -12358,7 +12491,10 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-digital-services-page-refresh]").forEach((button) => {
     button.addEventListener("click", () => {
-      void loadDigitalServiceProducts({ force: true }).then(() => render()).catch((error) => showError(error.message));
+      const refresh = state.user?.role === "admin"
+        ? loadDigitalServicesSnapshot({ force: true })
+        : loadDigitalServiceProducts({ force: true });
+      void refresh.then(() => render()).catch((error) => showError(error.message));
       render();
     });
   });
@@ -12376,6 +12512,10 @@ function bindDashboardActions() {
       };
       render();
     });
+  });
+
+  document.querySelectorAll("[data-digital-service-order-requery]").forEach((button) => {
+    button.addEventListener("click", () => requeryDigitalServiceOrder(button.dataset.digitalServiceOrderRequery));
   });
 
   document.querySelectorAll("[data-digital-service-product]").forEach((button) => {
@@ -12422,10 +12562,10 @@ function bindDashboardActions() {
   const digitalQuantityInput = document.getElementById("digital-service-quantity-input");
   if (digitalQuantityInput) {
     digitalQuantityInput.addEventListener("input", () => {
-      state.actionModal = {
-        ...state.actionModal,
-        quantity: Math.max(1, Math.min(Number(digitalQuantityInput.value || 1), 1000)),
-      };
+      updateDigitalServiceReviewState();
+    });
+    digitalQuantityInput.addEventListener("change", () => {
+      updateDigitalServiceReviewState();
       render();
     });
   }
