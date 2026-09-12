@@ -4769,7 +4769,7 @@ function renderActionModal() {
       `
       : "";
     const bankDetails = `
-      <div class="wallet-instructions">
+      <div class="wallet-instructions deposit-account-card">
         <span>Bank</span>
         <strong>${escapeHtml(depositSettings.bankName || "Bank not configured")}</strong>
         <span>Account</span>
@@ -4906,20 +4906,20 @@ function renderActionModal() {
     const submitTitle = submitDisabled ? "Resolve a matching bank account first" : buttonLabel;
     return `
       <div class="modal-backdrop">
-        <div class="modal-card action-modal-card">
+        <div class="modal-card action-modal-card ${isDeposit ? "deposit-action-card" : ""}">
           <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
           <p class="modal-eyebrow neutral">${eyebrow}</p>
           <h3>${currencyLabel ? `${title} ${currencyLabel}` : title}</h3>
           <p class="modal-text">${note}</p>
           ${depositModeSwitch}
           ${isGiftRedeem ? "" : currencyChoices}
-          <div class="stack-form wallet-action-fields">
+          <div class="stack-form wallet-action-fields ${isDeposit ? "deposit-action-fields" : ""}">
             ${actionFields}
           </div>
           ${
             canSubmit
               ? `
-                <div class="modal-actions">
+                <div class="modal-actions wallet-action-buttons">
                   <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
                   <button class="button-primary shimmer-button" id="wallet-submit-btn" data-wallet-mode="${isGiftRedeem ? "gift-card" : state.actionModal.type}" data-wallet-currency-selected="${currency}" type="button" title="${escapeHtml(submitTitle)}" ${submitDisabled ? "disabled" : ""}>${buttonLabel}</button>
                 </div>
@@ -10047,7 +10047,7 @@ function renderAdminDigitalProductForm(product = {}) {
             </select>
           </label>
           <label>Markup value / % <input name="markupValue" type="number" min="0" step="0.01" value="${escapeHtml(override.markupValue || "0")}" /></label>
-          <label>Custom NGN price <input name="customPriceNgn" type="number" min="0" step="1" value="${escapeHtml(override.customPriceNgn || "0")}" /></label>
+          <label>Fixed NGN selling price <input name="customPriceNgn" type="number" min="0" step="1" value="${escapeHtml(override.customPriceNgn || "0")}" placeholder="Overrides markup when set" /></label>
           <label>Order <input name="order" type="number" min="0" step="1" value="${escapeHtml(override.order || "0")}" /></label>
         </div>
         <div class="modal-actions inline-modal-actions admin-digital-product-actions">
