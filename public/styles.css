@@ -131,7 +131,7 @@ button {
 body[data-active-tab="quest"] .shell {
   height: 100dvh;
   overflow: hidden;
-  padding-bottom: max(70px, env(safe-area-inset-bottom));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 
 body[data-active-tab="quest"] .app-shell {
@@ -3248,6 +3248,7 @@ body[data-theme="dark"] .vtu-amount-field input {
   font-size: clamp(1.1rem, 2vw, 1.55rem);
   line-height: 1;
   letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .admin-stat-tile small,
@@ -3256,6 +3257,21 @@ body[data-theme="dark"] .vtu-amount-field input {
   font-size: 0.78rem;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.admin-balance-tile {
+  background:
+    radial-gradient(circle at top right, rgba(22, 196, 127, 0.18), transparent 8rem),
+    linear-gradient(145deg, rgba(47, 125, 246, 0.08), rgba(22, 196, 127, 0.08)),
+    var(--panel);
+}
+
+.admin-stat-detail {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .exchange-pill-row {
@@ -3764,6 +3780,10 @@ body[data-theme="dark"] .mirror-guide-pill {
     scroll-snap-align: start;
   }
 
+  .admin-balance-tile {
+    flex-basis: min(270px, calc(100vw - 44px));
+  }
+
   .admin-dashboard-columns {
     grid-template-columns: 1fr;
   }
@@ -4211,6 +4231,14 @@ body[data-theme="dark"] .mirror-guide-pill {
   padding: 20px;
   position: relative;
   color: var(--text);
+  box-sizing: border-box;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.modal-card *,
+.loader-card * {
+  min-width: 0;
 }
 
 .pwa-status-banner {
@@ -4457,14 +4485,14 @@ body[data-theme="dark"] .mirror-guide-pill {
 
 .modal-actions {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
   gap: 10px;
   margin-top: 16px;
 }
 
 .action-modal-card {
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  grid-auto-rows: auto;
   gap: 10px;
   width: min(420px, 100%);
   max-width: calc(100vw - 24px);
@@ -5468,7 +5496,7 @@ body[data-theme="dark"] .mirror-guide-pill {
 }
 
 .app-screen-quest {
-  height: auto;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -5508,11 +5536,34 @@ body[data-theme="dark"] .mirror-guide-pill {
   z-index: 1;
 }
 
+.quest-exit-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 14, 24, 0.72);
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(12px);
+}
+
+.quest-exit-button .nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
 .quest-playfield .quest-hero {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 10px;
+  padding-right: 46px;
 }
 
 .quest-playfield .quest-hero h2 {
@@ -5890,6 +5941,7 @@ body[data-theme="dark"] .mirror-guide-pill {
   .quest-playfield .quest-hero {
     align-items: stretch;
     flex-direction: column;
+    padding-right: 44px;
   }
 
   .quest-playfield .quest-pill-nav {

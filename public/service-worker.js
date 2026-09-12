@@ -1,4 +1,4 @@
-const CACHE_VERSION = "netruefi-pwa-v13";
+const CACHE_VERSION = "netruefi-pwa-v14";
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [

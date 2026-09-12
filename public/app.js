@@ -8395,6 +8395,11 @@ function renderAdminHomeDashboard() {
   const openTrades = (state.trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase())).length;
   const exchangeLabel = getExchangeLabel(getAdminDashboardExchange());
   const storeOrdersToday = Number(stats.digitalServices?.ordersToday || 0);
+  const userBalanceTotals = stats.totalUserBalance || {};
+  const totalUserBalanceNgn = Number(userBalanceTotals.NGN || 0);
+  const totalUserBalanceUsdt = Number(userBalanceTotals.USDT || 0);
+  const userBalanceRate = getUsdtToNgnRate();
+  const totalUserBalanceEquivalent = totalUserBalanceNgn + (userBalanceRate > 0 ? totalUserBalanceUsdt * userBalanceRate : 0);
   return `
     <section class="admin-dashboard-rail" aria-label="Admin overview">
       <button class="admin-stat-tile" data-admin-users-open type="button">
@@ -8402,6 +8407,12 @@ function renderAdminHomeDashboard() {
         <strong>${Number(stats.totalUsers || state.users?.length || 0).toLocaleString()}</strong>
         <small>Users</small>
       </button>
+      <div class="admin-stat-tile admin-balance-tile passive">
+        <span class="card-icon">${icon("bank")}</span>
+        <strong>${formatNaira(totalUserBalanceEquivalent)}</strong>
+        <small>All user balances</small>
+        <span class="admin-stat-detail">${formatNaira(totalUserBalanceNgn)} + ${formatUsdtUnit(totalUserBalanceUsdt)}</span>
+      </div>
       <button class="admin-stat-tile" data-tab="history" type="button">
         <span class="card-icon">${icon("bank")}</span>
         <strong>${pendingDeposits.toLocaleString()}</strong>
@@ -10115,6 +10126,11 @@ function renderQuestHistoryList(view = "all") {
 function renderQuestPane() {
   const status = state.quest.status;
   const view = state.quest.view || "play";
+  const renderQuestExit = () => `
+    <button class="quest-exit-button" data-tab="home" type="button" aria-label="Exit Quest">
+      ${icon("x")}
+    </button>
+  `;
   const renderQuestNav = () => `
     <div class="quest-pill-nav">
       <button class="${view === "play" ? "active" : ""}" data-quest-view="play" type="button">Play</button>
@@ -10126,6 +10142,7 @@ function renderQuestPane() {
     return `
       <section class="quest-playfield quest-view-${escapeHtml(view)}">
         <div class="quest-playfield-bg" aria-hidden="true"></div>
+        ${renderQuestExit()}
         <div class="quest-hero">
           <div>
             <p class="eyebrow">Netrue Quest</p>
@@ -10143,6 +10160,7 @@ function renderQuestPane() {
     return `
       <section class="quest-playfield">
         <div class="quest-playfield-bg" aria-hidden="true"></div>
+        ${renderQuestExit()}
         <div class="quest-loading-card">
           <span>${icon("star")}</span>
           <h2>Netrue Quest</h2>
@@ -10179,6 +10197,7 @@ function renderQuestPane() {
   return `
     <section class="quest-playfield quest-view-play">
       <div class="quest-playfield-bg" aria-hidden="true"></div>
+      ${renderQuestExit()}
       <div class="quest-hero">
         <div>
           <p class="eyebrow">Netrue Quest</p>
@@ -11747,7 +11766,7 @@ function renderDashboardShell() {
       <section class="app-screen app-screen-${escapeHtml(state.activeTab || "home")}">
         ${paneMap[state.activeTab] || paneMap.home}
       </section>
-      ${renderBottomNav()}
+      ${state.activeTab === "quest" ? "" : renderBottomNav()}
     </section>
     ${renderMenuSheet()}
     ${renderNotice()}
