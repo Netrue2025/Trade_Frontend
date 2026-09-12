@@ -45,6 +45,7 @@
     getTradeCurrentMarket,
     renderExchangeBadge,
     renderTradeJoinedUsersButton,
+    isTradeVisible,
     minTradeJoinUsdt = 1,
     tradeJoinBalanceUsdt = 0,
     title = "Open Trades",
@@ -53,7 +54,11 @@
     limit = 0,
     showMore = false,
   }) {
-    const openTrades = (trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()));
+    const openTrades = (trades || []).filter((trade) =>
+      typeof isTradeVisible === "function"
+        ? isTradeVisible(trade)
+        : ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase())
+    );
     const visibleTrades = limit > 0 ? openTrades.slice(0, limit) : openTrades;
     const isCarousel = layout === "carousel";
 
@@ -147,11 +152,16 @@
     getTradeCurrentMarket,
     renderExchangeBadge,
     renderTradeJoinedUsersButton,
+    isTradeVisible,
     minTradeJoinUsdt = 1,
     tradeJoinBalanceUsdt = 0,
   }) {
     const signals = signalFeed?.signals || [];
-    const openTrades = (trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()));
+    const openTrades = (trades || []).filter((trade) =>
+      typeof isTradeVisible === "function"
+        ? isTradeVisible(trade)
+        : ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase())
+    );
     const joinedTrades = openTrades.filter((trade) => trade.userInvestment?.status === "ACTIVE");
     const streamLabel = signalFeed?.streamConnected ? "Live" : "Reconnecting";
     const statusTone = signalFeed?.streamConnected ? "live" : "lagging";
@@ -223,6 +233,7 @@
           getTradeCurrentMarket,
           renderExchangeBadge,
           renderTradeJoinedUsersButton,
+          isTradeVisible,
           minTradeJoinUsdt,
           tradeJoinBalanceUsdt,
         })}

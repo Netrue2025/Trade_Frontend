@@ -1498,6 +1498,13 @@ function formatNaira(value) {
   })}`;
 }
 
+function formatDollarPrice(value) {
+  return `$${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 function formatSignedNaira(value, { positiveSign = false } = {}) {
   const amount = Number(value || 0);
   if (amount < 0) {
@@ -1515,6 +1522,44 @@ function formatUsdtUnit(value) {
 
 function formatCurrencyAmount(value, currency = "USDT") {
   return String(currency || "USDT").toUpperCase() === "NGN" ? formatNaira(value) : formatUsdtUnit(value);
+}
+
+function isDollarDisplayCurrency(currency = "") {
+  return ["USD", "USDT"].includes(String(currency || "").toUpperCase());
+}
+
+function getDigitalProductNgnPrice(product = {}) {
+  return Number(product.ngnEquivalent || product.sellingPrice || product.price || 0);
+}
+
+function getDigitalProductDisplayPrice(product = {}, quantity = 1) {
+  const qty = Math.max(1, Number(quantity || 1));
+  const priceCurrency = String(product.priceCurrency || product.displayCurrency || product.currency || "NGN").toUpperCase();
+  const ngnPrice = getDigitalProductNgnPrice(product) * qty;
+  if (isDollarDisplayCurrency(priceCurrency)) {
+    const dollarUnit = Number(product.displayPrice || 0);
+    const dollarPrice = dollarUnit > 0 ? dollarUnit * qty : Number(product.providerCost || 0) * qty;
+    return {
+      currency: priceCurrency,
+      primary: formatDollarPrice(dollarPrice),
+      equivalent: formatNaira(ngnPrice),
+      ngnPrice,
+    };
+  }
+  return {
+    currency: "NGN",
+    primary: formatNaira(ngnPrice),
+    equivalent: "",
+    ngnPrice,
+  };
+}
+
+function renderDigitalProductPrice(product = {}, quantity = 1, { compact = false } = {}) {
+  const price = getDigitalProductDisplayPrice(product, quantity);
+  const equivalent = price.equivalent && price.equivalent !== price.primary
+    ? `<small class="store-price-equivalent">${compact ? "~" : "NGN equivalent "}${escapeHtml(price.equivalent)}</small>`
+    : "";
+  return `<span class="store-price-stack"><b>${escapeHtml(price.primary)}</b>${equivalent}</span>`;
 }
 
 function getUsdtToNgnRate() {
@@ -2299,7 +2344,7 @@ function hasExchangeBalanceForTrade(trade) {
 }
 
 function isTradeStrictlyOpen(trade) {
-  if (trade.lifecycleStatus !== "OPEN" || getTradeRemainingQuantity(trade) <= 0) {
+  if (String(trade.lifecycleStatus || "").toUpperCase() !== "OPEN" || getTradeRemainingQuantity(trade) <= 0) {
     return false;
   }
 
@@ -2316,12 +2361,22 @@ function isTradeStrictlyOpen(trade) {
   return hasActiveOpenOrderForSymbol(trade.symbol) || hasExchangeBalanceForTrade(trade);
 }
 
-function isTradeVisibleOnHome(trade) {
+function isTradeLiveForBoard(trade) {
   const status = String(trade.lifecycleStatus || "").toUpperCase();
-  if (state.user?.role === "user") {
-    return ["OPEN", "PENDING"].includes(status) && trade.userInvestment?.status === "ACTIVE";
+  if (status === "OPEN") {
+    return isTradeStrictlyOpen(trade);
   }
-  return status === "OPEN" || isTradeStrictlyOpen(trade);
+  if (status === "PENDING") {
+    return !state.user?.exchangeConnected || hasActiveOpenOrderForSymbol(trade.symbol);
+  }
+  return false;
+}
+
+function isTradeVisibleOnHome(trade) {
+  if (state.user?.role === "user") {
+    return trade.userInvestment?.status === "ACTIVE" && isTradeLiveForBoard(trade);
+  }
+  return isTradeLiveForBoard(trade);
 }
 
 function isTradeClearableFromHistory(trade) {
@@ -7816,8 +7871,8 @@ function updateDigitalServiceReviewState() {
   }
   const product = getDigitalServiceProductById(state.actionModal.productId) || state.actionModal.product || {};
   const quantity = Math.max(1, Math.min(Number(input.value || 1), 1000));
-  const unitPrice = Number(product.price || product.sellingPrice || 0);
-  const total = unitPrice * quantity;
+  const total = getDigitalProductNgnPrice(product) * quantity;
+  const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   state.actionModal = {
     ...state.actionModal,
@@ -7825,7 +7880,7 @@ function updateDigitalServiceReviewState() {
   };
   button.disabled = !(total > 0 && available >= total);
   if (totalNode) {
-    totalNode.textContent = formatNaira(total);
+    totalNode.textContent = displayPrice.equivalent ? `${displayPrice.primary} (${displayPrice.equivalent})` : displayPrice.primary;
   }
   if (balanceNode) {
     balanceNode.textContent = `Wallet balance ${formatNaira(available)}`;
@@ -8108,7 +8163,7 @@ function renderDigitalServiceBrowserModal() {
                     ${renderDigitalServiceImage(product)}
                     <strong>${escapeHtml(product.name)}</strong>
                     <span>${escapeHtml(product.category || "Digital")}</span>
-                    <b>${formatNaira(product.price || product.sellingPrice || 0).replace(".00", "")}</b>
+                    ${renderDigitalProductPrice(product, 1, { compact: true })}
                   </button>
                 `).join("") || `<p class="vtu-empty-state">No digital service found.</p>`}
               </div>
@@ -8260,8 +8315,8 @@ function renderDigitalServiceDelivery(delivery) {
 function renderDigitalServiceDetailModal() {
   const product = getDigitalServiceProductById(state.actionModal.productId) || state.actionModal.product || {};
   const quantity = Math.max(1, Number(state.actionModal.quantity || 1));
-  const unitPrice = Number(product.price || product.sellingPrice || 0);
-  const total = unitPrice * quantity;
+  const total = getDigitalProductNgnPrice(product) * quantity;
+  const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   return `
     <div class="modal-backdrop">
@@ -8275,7 +8330,8 @@ function renderDigitalServiceDetailModal() {
           ${product.planLabel ? `<div class="action-metric"><span>Plan</span><strong>${escapeHtml(product.planLabel)}</strong></div>` : ""}
           <div class="action-metric"><span>Delivery</span><strong>${escapeHtml(product.deliveryLabel || "After purchase")}</strong></div>
           <div class="action-metric"><span>Stock</span><strong>${Number(product.stock || 0).toLocaleString()}</strong></div>
-          <div class="action-metric"><span>Total</span><strong id="digital-service-total-preview">${formatNaira(total)}</strong></div>
+          <div class="action-metric"><span>Total</span><strong id="digital-service-total-preview">${escapeHtml(displayPrice.equivalent ? `${displayPrice.primary} (${displayPrice.equivalent})` : displayPrice.primary)}</strong></div>
+          ${displayPrice.equivalent ? `<div class="action-metric"><span>Wallet debit</span><strong>${formatNaira(total)}</strong></div>` : ""}
         </div>
         <label class="stack-label">
           <span>Quantity</span>
@@ -8294,7 +8350,8 @@ function renderDigitalServiceDetailModal() {
 function renderDigitalServiceConfirmModal() {
   const product = getDigitalServiceProductById(state.actionModal.productId) || state.actionModal.product || {};
   const quantity = Math.max(1, Number(state.actionModal.quantity || 1));
-  const total = Number(product.price || product.sellingPrice || 0) * quantity;
+  const total = getDigitalProductNgnPrice(product) * quantity;
+  const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   return `
     <div class="modal-backdrop">
       <div class="modal-card action-modal-card">
@@ -8304,6 +8361,7 @@ function renderDigitalServiceConfirmModal() {
         <div class="action-metric-stack">
           <div class="action-metric"><span>Service</span><strong>${escapeHtml(product.name || "")}</strong></div>
           <div class="action-metric"><span>Quantity</span><strong>${quantity.toLocaleString()}</strong></div>
+          <div class="action-metric"><span>Price</span><strong>${escapeHtml(displayPrice.primary)}</strong></div>
           <div class="action-metric"><span>Wallet debit</span><strong>${formatNaira(total)}</strong></div>
         </div>
         <div class="modal-actions">
@@ -9827,9 +9885,10 @@ function renderAdminDigitalServicesPanel() {
 function renderAdminDigitalProductForm(product = {}) {
   const override = product.override || {};
   const supplierCurrency = String(product.supplierCurrency || product.currency || "NGN").toUpperCase();
-  const sourcePrice = product.providerCost && supplierCurrency !== "NGN"
-    ? ` (${escapeHtml(product.providerCost)} ${escapeHtml(supplierCurrency)})`
-    : "";
+  const sourcePrice = isDollarDisplayCurrency(supplierCurrency)
+    ? `${formatDollarPrice(product.supplierDisplayPrice || product.providerCost || 0)} / ${formatNaira(product.providerCostNgn || 0)}`
+    : formatNaira(product.providerCostNgn || product.providerCost || 0);
+  const storeDisplayPrice = getDigitalProductDisplayPrice(product);
   const supplierStatus = product.supplierAvailable === false ? "Supplier unavailable" : "Supplier available";
   return `
     <form class="admin-digital-product-card" data-admin-digital-product-form="${escapeHtml(product.id || "")}">
@@ -9838,8 +9897,8 @@ function renderAdminDigitalProductForm(product = {}) {
         <strong>${escapeHtml(product.name || "Digital Service")}</strong>
         <p class="muted-copy">${escapeHtml(product.storeName || (product.provider === "emma" ? "Emma Store" : "Alaba Store"))}</p>
         <div class="admin-digital-price-row">
-          <span><small>API cost</small><b>${formatNaira(product.providerCostNgn || 0)}${sourcePrice}</b></span>
-          <span><small>Store price</small><b>${formatNaira(product.sellingPrice || product.price || 0)}</b></span>
+          <span><small>API cost</small><b>${escapeHtml(sourcePrice)}</b></span>
+          <span><small>Store price</small><b>${escapeHtml(storeDisplayPrice.equivalent ? `${storeDisplayPrice.primary} / ${storeDisplayPrice.equivalent}` : storeDisplayPrice.primary)}</b></span>
           <em class="${product.supplierAvailable === false ? "warning-copy" : "success-copy"}">${supplierStatus}</em>
         </div>
         <div class="admin-digital-product-grid">
@@ -9863,8 +9922,8 @@ function renderAdminDigitalProductForm(product = {}) {
               ${["percentage", "fixed", "custom"].map((mode) => `<option value="${mode}" ${String(override.markupMode || "percentage") === mode ? "selected" : ""}>${mode}</option>`).join("")}
             </select>
           </label>
-          <label>Markup value <input name="markupValue" type="number" min="0" step="0.01" value="${escapeHtml(override.markupValue || "0")}" /></label>
-          <label>Custom price <input name="customPriceNgn" type="number" min="0" step="1" value="${escapeHtml(override.customPriceNgn || "0")}" /></label>
+          <label>Markup value / % <input name="markupValue" type="number" min="0" step="0.01" value="${escapeHtml(override.markupValue || "0")}" /></label>
+          <label>Custom NGN price <input name="customPriceNgn" type="number" min="0" step="1" value="${escapeHtml(override.customPriceNgn || "0")}" /></label>
           <label>Order <input name="order" type="number" min="0" step="1" value="${escapeHtml(override.order || "0")}" /></label>
         </div>
         <div class="modal-actions inline-modal-actions admin-digital-product-actions">
@@ -11075,6 +11134,7 @@ function renderSignalsPane() {
           getTradeCurrentMarket,
           renderExchangeBadge,
           renderTradeJoinedUsersButton,
+          isTradeVisible: isTradeLiveForBoard,
           minTradeJoinUsdt: getMinimumTradeJoinUsdt(),
           tradeJoinBalanceUsdt: getTradeJoinBalanceUsdt(),
         })}
@@ -11096,6 +11156,7 @@ function renderHomeOpenTradeSection() {
         getTradeCurrentMarket,
         renderExchangeBadge,
         renderTradeJoinedUsersButton,
+        isTradeVisible: isTradeLiveForBoard,
         minTradeJoinUsdt: getMinimumTradeJoinUsdt(),
         tradeJoinBalanceUsdt: getTradeJoinBalanceUsdt(),
         title: "Open Trades",
@@ -11745,7 +11806,7 @@ function renderStoreProductCard(product = {}, featured = false) {
         <span>${escapeHtml(product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
       </span>
       <span class="store-product-footer">
-        <b>${formatNaira(product.price || product.sellingPrice || 0).replace(".00", "")}</b>
+        ${renderDigitalProductPrice(product, 1, { compact: true })}
         <em>${state.user ? "Buy" : "Login"}</em>
       </span>
     </button>
