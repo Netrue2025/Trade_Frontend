@@ -7930,16 +7930,17 @@ function updateDigitalServiceReviewState() {
   const total = getDigitalProductNgnPrice(product) * quantity;
   const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  const canProceed = !state.user || available >= total;
   state.actionModal = {
     ...state.actionModal,
     quantity,
   };
-  button.disabled = !(total > 0 && available >= total);
+  button.disabled = !(total > 0 && canProceed);
   if (totalNode) {
     totalNode.textContent = displayPrice.equivalent ? `${displayPrice.primary} (${displayPrice.equivalent})` : displayPrice.primary;
   }
   if (balanceNode) {
-    balanceNode.textContent = `Wallet balance ${formatNaira(available)}`;
+    balanceNode.textContent = state.user ? `Wallet balance ${formatNaira(available)}` : "Login or signup to complete checkout.";
   }
 }
 
@@ -8378,6 +8379,7 @@ function renderDigitalServiceDetailModal() {
   const total = getDigitalProductNgnPrice(product) * quantity;
   const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  const canProceed = !state.user || available >= total;
   return `
     <div class="modal-backdrop">
       <div class="modal-card action-modal-card digital-service-detail-modal">
@@ -8397,10 +8399,10 @@ function renderDigitalServiceDetailModal() {
           <span>Quantity</span>
           <input id="digital-service-quantity-input" type="number" min="1" max="1000" step="1" value="${escapeHtml(quantity)}" />
         </label>
-        <p class="muted-copy" id="digital-service-balance-preview">Wallet balance ${formatNaira(available)}</p>
+        <p class="muted-copy" id="digital-service-balance-preview">${state.user ? `Wallet balance ${formatNaira(available)}` : "Login or signup to complete checkout."}</p>
         <div class="modal-actions">
           <button class="button-secondary" data-digital-services-back type="button">Back</button>
-          <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 && available >= total ? "" : "disabled"}>${icon("check")} Buy now</button>
+          <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 && canProceed ? "" : "disabled"}>${icon("check")} ${state.user ? "Buy now" : "Login to buy"}</button>
         </div>
       </div>
     </div>
