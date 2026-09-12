@@ -20,7 +20,7 @@ const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -30,6 +30,7 @@ const PWA_NOTIFICATION_DISMISS_MS = 1000 * 60 * 60 * 24 * 3;
 const REFERRAL_CODE_STORAGE_KEY = "netruefi-referral-code";
 const SHOP_PENDING_ORDER_STORAGE_KEY = "netruefi-pending-shop-order";
 const STORE_OPTIONS = [
+  { id: "", label: "All Products" },
   { id: "alaba", label: "Alaba Store" },
   { id: "emma", label: "Emma Store" },
 ];
@@ -164,7 +165,7 @@ const state = {
     orders: [],
     query: "",
     category: "",
-    store: "alaba",
+    store: "",
     loading: false,
     admin: null,
   },
@@ -838,6 +839,7 @@ async function registerNetrueServiceWorker() {
   try {
     const registration = await navigator.serviceWorker.register("/service-worker.js");
     state.pwa.serviceWorkerRegistration = registration;
+    registration.update?.().catch(() => undefined);
     if (registration.waiting) {
       state.pwa.updateAvailable = true;
       render();
@@ -2549,7 +2551,7 @@ function isPublicShopRoute() {
 }
 
 function getActiveStoreLabel() {
-  return STORE_OPTIONS.find((store) => store.id === state.digitalServices.store)?.label || "Alaba Store";
+  return STORE_OPTIONS.find((store) => store.id === state.digitalServices.store)?.label || "All Products";
 }
 
 function savePendingShopOrder(order = {}) {
@@ -2571,6 +2573,15 @@ function readPendingShopOrder() {
 
 function clearPendingShopOrder() {
   localStorage.removeItem(SHOP_PENDING_ORDER_STORAGE_KEY);
+}
+
+function shuffleList(items = []) {
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
 }
 
 function mergeDigitalProductList(list = [], product = null) {
@@ -4577,6 +4588,24 @@ function renderActionModal() {
     return renderDigitalServiceBrowserModal();
   }
 
+  if (state.actionModal.type === "shop-auth") {
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card shop-auth-modal">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Complete order</p>
+          <h3>${state.authTab === "register" ? "Create account" : "Login to continue"}</h3>
+          <p class="modal-text">Your selected product is saved. Login or signup to complete checkout.</p>
+          <div class="auth-tab-row compact-auth-tabs">
+            <button class="${state.authTab === "login" ? "active" : ""}" data-auth-mode="login" type="button">Login</button>
+            <button class="${state.authTab === "register" ? "active" : ""}" data-auth-mode="register" type="button">Signup</button>
+          </div>
+          ${renderAuthPane()}
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "digital-service-detail") {
     return renderDigitalServiceDetailModal();
   }
@@ -4587,6 +4616,10 @@ function renderActionModal() {
 
   if (state.actionModal.type === "digital-service-receipt") {
     return renderDigitalServiceReceiptModal();
+  }
+
+  if (state.actionModal.type === "admin-digital-product-edit") {
+    return renderAdminDigitalProductEditModal();
   }
 
   if (state.actionModal.type === "vtu-airtime" || state.actionModal.type === "vtu-data") {
@@ -5182,11 +5215,13 @@ function renderPublicShopLanding() {
     ${renderNotice()}
     ${renderErrorModal()}
     ${renderActionModal()}
+    ${renderPwaLayer()}
     ${renderLoader()}
   `;
   restoreFormDrafts();
   bindDashboardActions();
   bindModalActions();
+  bindPwaActions();
 }
 
 function renderLanding() {
@@ -5196,6 +5231,7 @@ function renderLanding() {
     ${renderNotice()}
     ${renderErrorModal()}
     ${renderActionModal()}
+    ${renderPwaLayer()}
     ${renderLoader()}
   `;
   restoreFormDrafts();
@@ -5217,6 +5253,7 @@ function renderLanding() {
 
   bindAuthForms();
   bindModalActions();
+  bindPwaActions();
 }
 
 function renderTopbarActions() {
@@ -5243,6 +5280,16 @@ function bindModalActions() {
   const actionCancelButton = document.getElementById("action-modal-cancel-btn");
   if (actionCancelButton) {
     actionCancelButton.addEventListener("click", clearActionModal);
+  }
+
+  if (state.actionModal?.type === "shop-auth") {
+    document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.authTab = button.dataset.authMode === "register" ? "register" : "login";
+        render();
+      });
+    });
+    bindAuthForms();
   }
 
   const blockedSignalButton = document.getElementById("withdraw-blocked-signal-btn");
@@ -7053,6 +7100,9 @@ async function submitAdminDigitalProductOverride(form) {
       products: mergeDigitalProductList(state.digitalServices.admin?.products || state.digitalServices.products || [], payload.product),
       summary: payload.summary || state.digitalServices.admin?.summary,
     };
+    if (state.actionModal?.type === "admin-digital-product-edit") {
+      state.actionModal = null;
+    }
     render();
     showNotice("Product override saved");
   }).catch((error) => showError(error.message));
@@ -7073,6 +7123,12 @@ async function refreshAdminDigitalProductPrice(productId) {
       products: mergeDigitalProductList(state.digitalServices.admin?.products || state.digitalServices.products || [], payload.product),
       summary: payload.summary || state.digitalServices.admin?.summary,
     };
+    if (state.actionModal?.type === "admin-digital-product-edit") {
+      state.actionModal = {
+        ...state.actionModal,
+        productId,
+      };
+    }
     render();
     showNotice(`API price updated: ${formatNaira(payload.product?.providerCostNgn || 0)}`);
   }).catch((error) => showError(error.message));
@@ -7754,7 +7810,7 @@ async function loadDigitalServiceProducts({ force = false } = {}) {
   }
   const query = String(state.digitalServices.query || "").trim();
   const category = String(state.digitalServices.category || "").trim();
-  const store = String(state.digitalServices.store || "alaba").trim();
+  const store = String(state.digitalServices.store || "").trim();
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (category) params.set("category", category);
@@ -7763,7 +7819,7 @@ async function loadDigitalServiceProducts({ force = false } = {}) {
   state.digitalServices.loading = true;
   try {
     const payload = await api(`/api/digital-services/products${params.toString() ? `?${params}` : ""}`);
-    state.digitalServices.products = payload.products || [];
+    state.digitalServices.products = shuffleList(payload.products || []);
     state.digitalServices.categories = payload.categories || [];
     state.digitalServices.settings = {
       ...(state.digitalServices.settings || {}),
@@ -7988,8 +8044,12 @@ function reviewDigitalServicePurchase() {
   const quantity = Math.max(1, Math.min(Number(document.getElementById("digital-service-quantity-input")?.value || state.actionModal.quantity || 1), 1000));
   if (!state.user) {
     savePendingShopOrder({ productId: product.id, quantity });
-    state.actionModal = null;
     state.authTab = "login";
+    state.actionModal = {
+      type: "shop-auth",
+      productId: product.id,
+      quantity,
+    };
     if (window.history?.replaceState) {
       window.history.replaceState({}, "", "/shop");
     }
@@ -8038,7 +8098,7 @@ async function resumePendingShopOrder() {
   if (!pending?.productId || !state.user || state.user.role !== "user") {
     return false;
   }
-  state.digitalServices.store = pending.store || state.digitalServices.store || "alaba";
+  state.digitalServices.store = pending.store ?? state.digitalServices.store ?? "";
   await loadDigitalServiceProducts({ force: true }).catch(() => undefined);
   await loadDigitalServicesSnapshot().catch(() => undefined);
   const product = getDigitalServiceProductById(pending.productId);
@@ -9839,6 +9899,8 @@ function renderAdminDigitalServicesPanel() {
   const products = adminPayload.products || state.digitalServices.products || [];
   const orders = adminPayload.orders || state.digitalServices.orders || [];
   const supplier = adminPayload.supplier || {};
+  const alabaProducts = products.filter((product) => String(product.storeKey || product.provider || "").toLowerCase() !== "emma");
+  const emmaProducts = products.filter((product) => String(product.storeKey || product.provider || "").toLowerCase() === "emma");
   return `
     <div class="admin-digital-panel">
       <form id="admin-digital-services-settings-form" class="stack-form subtle-form progressive-settings-form">
@@ -9867,9 +9929,10 @@ function renderAdminDigitalServicesPanel() {
         <div><span>Profit</span><strong>${formatNaira(summary.profit || 0)}</strong></div>
       </div>
       <details class="settings-disclosure nested-disclosure" open>
-        <summary><span>${icon("gift")}</span><strong>Product Overrides</strong></summary>
-        <div class="admin-digital-product-list">
-          ${products.map(renderAdminDigitalProductForm).join("") || `<p class="muted-copy">Sync products to manage Digital Services.</p>`}
+        <summary><span>${icon("gift")}</span><strong>Products</strong></summary>
+        <div class="admin-digital-store-groups">
+          ${renderAdminDigitalProductGroup("Alaba Store", alabaProducts)}
+          ${renderAdminDigitalProductGroup("Emma Store", emmaProducts)}
         </div>
       </details>
       <details class="settings-disclosure nested-disclosure">
@@ -9878,6 +9941,65 @@ function renderAdminDigitalServicesPanel() {
           ${orders.slice(0, 12).map(renderAdminDigitalOrderRow).join("") || `<p class="muted-copy">No Digital Services order yet.</p>`}
         </div>
       </details>
+    </div>
+  `;
+}
+
+function renderAdminDigitalProductGroup(title, products = []) {
+  return `
+    <section class="admin-digital-store-section">
+      <div class="admin-digital-store-head">
+        <div>
+          <strong>${escapeHtml(title)}</strong>
+          <p class="muted-copy">${Number(products.length || 0).toLocaleString()} product${products.length === 1 ? "" : "s"}</p>
+        </div>
+      </div>
+      <div class="admin-digital-product-list compact">
+        ${products.slice(0, 80).map(renderAdminDigitalProductRow).join("") || `<p class="muted-copy">No product synced for ${escapeHtml(title)}.</p>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderAdminDigitalProductRow(product = {}) {
+  const override = product.override || {};
+  const storeDisplayPrice = getDigitalProductDisplayPrice(product);
+  const productStatus = override.enabled === false ? "Hidden" : product.available ? "Visible" : "Unavailable";
+  return `
+    <article class="admin-digital-product-row">
+      ${renderDigitalServiceImage(product)}
+      <div class="admin-digital-row-main">
+        <strong>${escapeHtml(product.name || "Digital Service")}</strong>
+        <p class="muted-copy">${escapeHtml(product.category || product.storeName || "Digital")} | ${escapeHtml(product.storeName || "")}</p>
+      </div>
+      <div class="admin-digital-row-price">
+        <strong>${escapeHtml(storeDisplayPrice.equivalent ? `${storeDisplayPrice.primary} / ${storeDisplayPrice.equivalent}` : storeDisplayPrice.primary)}</strong>
+        <span class="${productStatus === "Visible" ? "success-copy" : "warning-copy"}">${productStatus}</span>
+      </div>
+      <button class="icon-action" data-admin-digital-product-edit="${escapeHtml(product.id || "")}" type="button" aria-label="Edit ${escapeHtml(product.name || "product")}" title="Edit product">${icon("edit")}</button>
+    </article>
+  `;
+}
+
+function getAdminDigitalProductById(productId) {
+  const id = String(productId || "");
+  const adminProducts = state.digitalServices.admin?.products || [];
+  return [...adminProducts, ...(state.digitalServices.products || [])].find((product) => String(product.id) === id) || null;
+}
+
+function renderAdminDigitalProductEditModal() {
+  const product = getAdminDigitalProductById(state.actionModal?.productId);
+  if (!product) {
+    return "";
+  }
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card admin-digital-edit-modal">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">${escapeHtml(product.storeName || "Store")}</p>
+        <h3>Edit product</h3>
+        ${renderAdminDigitalProductForm(product)}
+      </div>
     </div>
   `;
 }
@@ -12499,6 +12621,16 @@ function bindDashboardActions() {
     adminDigitalServicesSyncButton.addEventListener("click", syncAdminDigitalServices);
   }
 
+  document.querySelectorAll("[data-admin-digital-product-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = {
+        type: "admin-digital-product-edit",
+        productId: button.dataset.adminDigitalProductEdit,
+      };
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-admin-digital-product-form]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -12697,7 +12829,7 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-store-switch]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.digitalServices.store = button.dataset.storeSwitch || "alaba";
+      state.digitalServices.store = button.dataset.storeSwitch || "";
       state.digitalServices.category = "";
       void loadDigitalServiceProducts({ force: true }).then(() => render()).catch((error) => showError(error.message));
       render();
