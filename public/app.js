@@ -28,6 +28,11 @@ const PWA_INSTALL_DISMISS_MS = 1000 * 60 * 60 * 24 * 5;
 const PWA_NOTIFICATION_DISMISSED_UNTIL_KEY = "netruefi-pwa-notification-dismissed-until";
 const PWA_NOTIFICATION_DISMISS_MS = 1000 * 60 * 60 * 24 * 3;
 const REFERRAL_CODE_STORAGE_KEY = "netruefi-referral-code";
+const SHOP_PENDING_ORDER_STORAGE_KEY = "netruefi-pending-shop-order";
+const STORE_OPTIONS = [
+  { id: "alaba", label: "Alaba Store" },
+  { id: "emma", label: "Emma Store" },
+];
 const FORM_DRAFT_EXCLUDED_FIELD_KEYS = new Set([
   "trade-symbol",
   "trade-price",
@@ -159,6 +164,7 @@ const state = {
     orders: [],
     query: "",
     category: "",
+    store: "alaba",
     loading: false,
     admin: null,
   },
@@ -2481,6 +2487,43 @@ function getPendingReferralCode() {
 
 function clearPendingReferralCode() {
   sessionStorage.removeItem(REFERRAL_CODE_STORAGE_KEY);
+}
+
+function isPublicShopRoute() {
+  return /^\/shop\/?$/.test(String(window.location?.pathname || ""));
+}
+
+function getActiveStoreLabel() {
+  return STORE_OPTIONS.find((store) => store.id === state.digitalServices.store)?.label || "Alaba Store";
+}
+
+function savePendingShopOrder(order = {}) {
+  localStorage.setItem(SHOP_PENDING_ORDER_STORAGE_KEY, JSON.stringify({
+    productId: order.productId,
+    quantity: order.quantity || 1,
+    store: state.digitalServices.store || "alaba",
+    savedAt: new Date().toISOString(),
+  }));
+}
+
+function readPendingShopOrder() {
+  try {
+    return JSON.parse(localStorage.getItem(SHOP_PENDING_ORDER_STORAGE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingShopOrder() {
+  localStorage.removeItem(SHOP_PENDING_ORDER_STORAGE_KEY);
+}
+
+function mergeDigitalProductList(list = [], product = null) {
+  if (!product?.id) {
+    return list;
+  }
+  const exists = list.some((item) => item.id === product.id);
+  return exists ? list.map((item) => item.id === product.id ? product : item) : [product, ...list];
 }
 
 function getReferralLink(profile = state.referralProfile) {
@@ -5056,6 +5099,7 @@ function renderSplashScreen() {
 
 function renderAuthLanding() {
   const isRegister = state.authTab === "register";
+  const pendingShopOrder = readPendingShopOrder();
   return `
     <section class="auth-landing">
       <section class="auth-shell-card">
@@ -5067,10 +5111,27 @@ function renderAuthLanding() {
             <p class="muted-copy">${isRegister ? "Choose the account type you are requesting." : "Sign in with your account details."}</p>
           </div>
         </div>
+        ${pendingShopOrder ? `<div class="referral-signup-note">${icon("gift")} Your shop order is saved. Login or signup to complete checkout.</div>` : ""}
         ${renderAuthPane()}
       </section>
     </section>
   `;
+}
+
+function renderPublicShopLanding() {
+  captureFormDrafts();
+  app.innerHTML = `
+    <section class="app-shell public-shop-shell">
+      ${renderDigitalServicesPane()}
+    </section>
+    ${renderNotice()}
+    ${renderErrorModal()}
+    ${renderActionModal()}
+    ${renderLoader()}
+  `;
+  restoreFormDrafts();
+  bindDashboardActions();
+  bindModalActions();
 }
 
 function renderLanding() {
@@ -5290,8 +5351,11 @@ function bindAuthForms() {
         setAuthSessionToken(result.sessionToken);
         state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
-        state.activeTab = "home";
-        if (window.history?.replaceState) {
+        const resumedShopOrder = await resumePendingShopOrder();
+        if (!resumedShopOrder) {
+          state.activeTab = "home";
+        }
+        if (window.history?.replaceState && !resumedShopOrder) {
           window.history.replaceState({}, "", getTabRoute("home"));
         }
         await loadDashboardData();
@@ -5315,8 +5379,11 @@ function bindAuthForms() {
         setAuthSessionToken(result.sessionToken);
         state.user = normalizeUserPayload(result.user || await requireSessionUser());
         setSelectedExchange(state.user.activeExchange || "bybit");
-        state.activeTab = "home";
-        if (window.history?.replaceState) {
+        const resumedShopOrder = await resumePendingShopOrder();
+        if (!resumedShopOrder) {
+          state.activeTab = "home";
+        }
+        if (window.history?.replaceState && !resumedShopOrder) {
           window.history.replaceState({}, "", getTabRoute("home"));
         }
         await loadDashboardData();
@@ -6861,7 +6928,7 @@ async function submitAdminDigitalServicesSettings(form) {
       body: JSON.stringify({
         enabled: data.enabled === "true",
         globalMarkupPercent: data.globalMarkupPercent || "0",
-        allowedImageDomains: String(data.allowedImageDomains || "akunding.shop")
+        allowedImageDomains: String(data.allowedImageDomains || "akunding.shop, ssondigitalworks.online")
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
@@ -6917,6 +6984,7 @@ async function submitAdminDigitalProductOverride(form) {
         enabled: data.enabled === "true",
         featured: data.featured === "true",
         displayName: data.displayName || "",
+        displayCategory: data.displayCategory || "",
         customImageUrl: data.customImageUrl || "",
         markupMode: data.markupMode || "percentage",
         markupValue: data.markupValue || "0",
@@ -6924,14 +6992,10 @@ async function submitAdminDigitalProductOverride(form) {
         order: data.order || "0",
       }),
     });
-    state.digitalServices.products = (state.digitalServices.products || []).map((product) =>
-      product.id === productId ? payload.product : product
-    );
+    state.digitalServices.products = mergeDigitalProductList(state.digitalServices.products || [], payload.product);
     state.digitalServices.admin = {
       ...(state.digitalServices.admin || {}),
-      products: (state.digitalServices.admin?.products || state.digitalServices.products || []).map((product) =>
-        product.id === productId ? payload.product : product
-      ),
+      products: mergeDigitalProductList(state.digitalServices.admin?.products || state.digitalServices.products || [], payload.product),
       summary: payload.summary || state.digitalServices.admin?.summary,
     };
     render();
@@ -6948,14 +7012,10 @@ async function refreshAdminDigitalProductPrice(productId) {
       method: "POST",
       body: JSON.stringify({}),
     });
-    state.digitalServices.products = (state.digitalServices.products || []).map((product) =>
-      product.id === productId ? payload.product : product
-    );
+    state.digitalServices.products = mergeDigitalProductList(state.digitalServices.products || [], payload.product);
     state.digitalServices.admin = {
       ...(state.digitalServices.admin || {}),
-      products: (state.digitalServices.admin?.products || state.digitalServices.products || []).map((product) =>
-        product.id === productId ? payload.product : product
-      ),
+      products: mergeDigitalProductList(state.digitalServices.admin?.products || state.digitalServices.products || [], payload.product),
       summary: payload.summary || state.digitalServices.admin?.summary,
     };
     render();
@@ -7611,16 +7671,7 @@ async function openDigitalServicesModal({ force = false } = {}) {
 
 async function loadDigitalServicesSnapshot({ force = false } = {}) {
   if (!state.user) {
-    state.digitalServices = {
-      settings: null,
-      products: [],
-      categories: [],
-      orders: [],
-      query: "",
-      category: "",
-      loading: false,
-      admin: null,
-    };
+    await loadDigitalServiceProducts({ force }).catch(() => undefined);
     return;
   }
   if (state.user.role === "admin") {
@@ -7643,14 +7694,16 @@ async function loadDigitalServicesSnapshot({ force = false } = {}) {
 }
 
 async function loadDigitalServiceProducts({ force = false } = {}) {
-  if (!state.user || state.user.role !== "user") {
+  if (state.user?.role === "admin") {
     return [];
   }
   const query = String(state.digitalServices.query || "").trim();
   const category = String(state.digitalServices.category || "").trim();
+  const store = String(state.digitalServices.store || "alaba").trim();
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (category) params.set("category", category);
+  if (store) params.set("store", store);
   if (force) params.set("refresh", "1");
   state.digitalServices.loading = true;
   try {
@@ -7878,6 +7931,17 @@ function reviewDigitalServicePurchase() {
     return;
   }
   const quantity = Math.max(1, Math.min(Number(document.getElementById("digital-service-quantity-input")?.value || state.actionModal.quantity || 1), 1000));
+  if (!state.user) {
+    savePendingShopOrder({ productId: product.id, quantity });
+    state.actionModal = null;
+    state.authTab = "login";
+    if (window.history?.replaceState) {
+      window.history.replaceState({}, "", "/shop");
+    }
+    render();
+    showNotice("Order saved. Login or signup to complete checkout.");
+    return;
+  }
   state.actionModal = {
     type: "digital-service-confirm",
     productId: product.id,
@@ -7912,6 +7976,34 @@ async function submitDigitalServicePurchase() {
     render();
     showNotice("Digital service order submitted.");
   }).catch((error) => showError(error.message));
+}
+
+async function resumePendingShopOrder() {
+  const pending = readPendingShopOrder();
+  if (!pending?.productId || !state.user || state.user.role !== "user") {
+    return false;
+  }
+  state.digitalServices.store = pending.store || state.digitalServices.store || "alaba";
+  await loadDigitalServiceProducts({ force: true }).catch(() => undefined);
+  await loadDigitalServicesSnapshot().catch(() => undefined);
+  const product = getDigitalServiceProductById(pending.productId);
+  if (!product) {
+    clearPendingShopOrder();
+    return false;
+  }
+  state.activeTab = "store";
+  state.actionModal = {
+    type: "digital-service-confirm",
+    productId: product.id,
+    product,
+    quantity: Math.max(1, Math.min(Number(pending.quantity || 1), 1000)),
+    returnTo: "store",
+  };
+  clearPendingShopOrder();
+  if (window.history?.replaceState) {
+    window.history.replaceState({}, "", getTabRoute("store"));
+  }
+  return true;
 }
 
 async function requeryDigitalServiceOrder(orderId) {
@@ -9704,7 +9796,7 @@ function renderAdminDigitalServicesPanel() {
           </select>
         </label>
         <label>Global markup % <input name="globalMarkupPercent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(settings.globalMarkupPercent || "0")}" /></label>
-        <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop"]).join(", "))}" placeholder="akunding.shop" /></label>
+        <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop", "ssondigitalworks.online"]).join(", "))}" placeholder="akunding.shop, ssondigitalworks.online" /></label>
         <div class="modal-actions inline-modal-actions">
           <button class="button-secondary" id="admin-digital-services-sync-btn" type="button">${icon("refresh")} Sync products</button>
           <button class="button-secondary" data-admin-digital-orders-recover type="button">${icon("refresh")} Recover histories</button>
@@ -9719,7 +9811,7 @@ function renderAdminDigitalServicesPanel() {
       <details class="settings-disclosure nested-disclosure" open>
         <summary><span>${icon("gift")}</span><strong>Product Overrides</strong></summary>
         <div class="admin-digital-product-list">
-          ${products.slice(0, 20).map(renderAdminDigitalProductForm).join("") || `<p class="muted-copy">Sync products to manage Digital Services.</p>`}
+          ${products.map(renderAdminDigitalProductForm).join("") || `<p class="muted-copy">Sync products to manage Digital Services.</p>`}
         </div>
       </details>
       <details class="settings-disclosure nested-disclosure">
@@ -9744,6 +9836,7 @@ function renderAdminDigitalProductForm(product = {}) {
       ${renderDigitalServiceImage(product)}
       <div class="admin-digital-product-main">
         <strong>${escapeHtml(product.name || "Digital Service")}</strong>
+        <p class="muted-copy">${escapeHtml(product.storeName || (product.provider === "emma" ? "Emma Store" : "Alaba Store"))}</p>
         <div class="admin-digital-price-row">
           <span><small>API cost</small><b>${formatNaira(product.providerCostNgn || 0)}${sourcePrice}</b></span>
           <span><small>Store price</small><b>${formatNaira(product.sellingPrice || product.price || 0)}</b></span>
@@ -9751,6 +9844,7 @@ function renderAdminDigitalProductForm(product = {}) {
         </div>
         <div class="admin-digital-product-grid">
           <label>Name <input name="displayName" value="${escapeHtml(override.displayName || "")}" placeholder="${escapeHtml(product.name || "")}" /></label>
+          <label>Category <input name="displayCategory" value="${escapeHtml(override.displayCategory || "")}" placeholder="${escapeHtml(product.category || "")}" /></label>
           <label>Image <input name="customImageUrl" value="${escapeHtml(override.customImageUrl || "")}" placeholder="https://..." /></label>
           <label>Status
             <select name="enabled">
@@ -11191,6 +11285,10 @@ function applyRouteTarget() {
     state.activeTab = "store";
     return;
   }
+  if (/^\/shop\/?$/.test(pathname)) {
+    state.activeTab = "store";
+    return;
+  }
   if (["home", "settings", "history", "signals", "store"].includes(params.get("tab"))) {
     state.activeTab = params.get("tab");
   }
@@ -11575,6 +11673,7 @@ function renderDigitalServicesPane() {
   const categories = state.digitalServices.categories || [];
   const query = state.digitalServices.query || "";
   const activeCategory = state.digitalServices.category || "";
+  const activeStore = state.digitalServices.store || "alaba";
   const balance = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   const readyOrders = orders.filter((order) => String(order.status || "").toLowerCase() === "delivered" || getDigitalDeliveryLink(order.delivery)).length;
   const featuredProducts = products.filter((product) => product.featured).slice(0, 4);
@@ -11583,10 +11682,13 @@ function renderDigitalServicesPane() {
       <section class="store-hero">
         <div>
           <p class="eyebrow">Netrue Store</p>
-          <h3>${settings.enabled === false ? "Store paused" : "Digital tools, ready fast"}</h3>
-          <p>Balance ${formatNaira(balance)}</p>
+          <h3>${settings.enabled === false ? "Store paused" : getActiveStoreLabel()}</h3>
+          <p>${state.user ? `Balance ${formatNaira(balance)}` : "Browse now. Login or signup to complete checkout."}</p>
         </div>
         <button class="store-refresh-btn" data-digital-services-page-refresh type="button" aria-label="Refresh store">${icon("refresh")}</button>
+      </section>
+      <section class="store-switcher" aria-label="Store">
+        ${STORE_OPTIONS.map((store) => `<button class="${activeStore === store.id ? "active" : ""}" data-store-switch="${store.id}" type="button">${escapeHtml(store.label)}</button>`).join("")}
       </section>
       <section class="store-stat-strip">
         <div><span>Products</span><strong>${Number(products.length || 0).toLocaleString()}</strong></div>
@@ -11618,7 +11720,7 @@ function renderDigitalServicesPane() {
           </section>
         `
     }
-    <section class="mobile-card store-history-card">
+    ${state.user ? `<section class="mobile-card store-history-card">
       <div class="section-head">
         <div>
           <h3>My Purchases</h3>
@@ -11628,7 +11730,7 @@ function renderDigitalServicesPane() {
       <div class="compact-list">
         ${orders.map(renderDigitalServiceOrderRow).join("") || `<p class="muted-copy">No digital service purchase yet.</p>`}
       </div>
-    </section>
+    </section>` : ""}
     </section>
   `;
 }
@@ -11640,11 +11742,11 @@ function renderStoreProductCard(product = {}, featured = false) {
       <span class="store-product-body">
         <small>${escapeHtml(product.category || "Digital")}</small>
         <strong>${escapeHtml(product.name || "Digital service")}</strong>
-        <span>${escapeHtml(product.planLabel || product.deliveryLabel || "Instant delivery")}</span>
+        <span>${escapeHtml(product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
       </span>
       <span class="store-product-footer">
         <b>${formatNaira(product.price || product.sellingPrice || 0).replace(".00", "")}</b>
-        <em>Buy</em>
+        <em>${state.user ? "Buy" : "Login"}</em>
       </span>
     </button>
   `;
@@ -12528,6 +12630,15 @@ function bindDashboardActions() {
     button.addEventListener("click", () => {
       state.digitalServices.category = button.dataset.storeCategory || "";
       void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-store-switch]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.digitalServices.store = button.dataset.storeSwitch || "alaba";
+      state.digitalServices.category = "";
+      void loadDigitalServiceProducts({ force: true }).then(() => render()).catch((error) => showError(error.message));
       render();
     });
   });
@@ -13732,6 +13843,11 @@ function render() {
   renderTopbarActions();
   if (!state.user) {
     syncHomePromoSliderTimer();
+    if (isPublicShopRoute()) {
+      renderPublicShopLanding();
+      refreshWatchlistDom();
+      return;
+    }
     renderLanding();
     refreshWatchlistDom();
     return;
@@ -13767,6 +13883,9 @@ async function bootstrap() {
         window.SignalPage.destroyActiveChart();
       }
       stopTradeRefreshTimer();
+      if (isPublicShopRoute()) {
+        await loadDigitalServiceProducts({ force: true }).catch(() => undefined);
+      }
       render();
     }
   } catch {
