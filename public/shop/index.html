@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>NetrueFi Shop</title>
+    <meta
+      name="description"
+      content="Shop NetrueFi digital services from Alaba Store and Emma Store. Browse products publicly, then login or signup to complete checkout."
+    />
+    <meta name="theme-color" content="#00d978" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="NetrueFi" />
+    <meta name="application-name" content="NetrueFi" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://netruefi.org/shop/" />
+    <meta property="og:title" content="NetrueFi Shop" />
+    <meta
+      property="og:description"
+      content="Browse NetrueFi digital services from Alaba Store and Emma Store, then login or signup to complete checkout."
+    />
+    <meta property="og:image" content="https://netruefi.org/og-image-whatsapp.jpg" />
+    <meta property="og:image:secure_url" content="https://netruefi.org/og-image-whatsapp.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="NetrueFi shop" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NetrueFi Shop" />
+    <meta
+      property="twitter:description"
+      content="Browse NetrueFi digital services from Alaba Store and Emma Store, then login or signup to complete checkout."
+    />
+    <meta name="twitter:image" content="https://netruefi.org/og-image-whatsapp.jpg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <div id="topbar-actions" hidden></div>
+      <main id="app"></main>
+    </div>
+    <script src="/config.js"></script>
+    <script src="/vendor/lightweight-charts.js"></script>
+    <script>
+      document.write('<script src="' + (window.TRADE_API_BASE_URL || "") + '/socket.io/socket.io.js"><\/script>');
+    </script>
+    <script src="/components/signal-page.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
