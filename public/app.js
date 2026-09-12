@@ -904,7 +904,7 @@ async function requireSessionUser() {
   const payload = await api("/api/auth/me");
   if (!payload.user) {
     throw new Error(
-      "Login succeeded, but the session cookie was not stored or sent back. On Render this usually means the browser blocked the cookie or the deployment URL changed."
+      "Login succeeded, but the session cookie was not stored or sent back. This usually means the browser blocked the cookie, the API URL changed, or the frontend/backend domains are not configured together."
     );
   }
   return normalizeUserPayload(payload.user);

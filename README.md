@@ -10,10 +10,10 @@ npm start
 
 By default, the frontend calls API routes on the same origin. For a separate frontend deployment, update `window.TRADE_API_BASE_URL` in `public/config.js` or configure your host to proxy `/api`, `/ws`, and `/socket.io` to the backend deployment.
 
-## Render Static Site
+## Vercel Static Site
 
 - Build command: `npm install && npm run build`
-- Publish directory: `public`
+- Output directory: `public`
 - Environment variable: `TRADE_API_BASE_URL=https://tradebackend-production-8530.up.railway.app`
 
-Render rebuilds `public/config.js` from `TRADE_API_BASE_URL`, so redeploy the static site after changing this value.
+Vercel rebuilds `public/config.js` from `TRADE_API_BASE_URL`, so redeploy the static site after changing this value.
