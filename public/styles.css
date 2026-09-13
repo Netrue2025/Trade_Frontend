@@ -2671,6 +2671,25 @@ body[data-theme="dark"] .digital-category-row button.active {
   border-radius: 8px;
 }
 
+.maintenance-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft-surface);
+}
+
+.maintenance-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.maintenance-copy strong,
+.maintenance-copy p {
+  margin: 0;
+}
+
 .admin-digital-product-list {
   display: grid;
   gap: 10px;
@@ -5723,15 +5742,15 @@ body[data-theme="dark"] .mirror-guide-pill {
 }
 
 .app-screen-quest {
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
+  min-height: 100%;
+  overflow-y: auto;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
 }
 
 .quest-playfield {
   position: relative;
-  height: 100%;
-  min-height: 0;
+  min-height: 100%;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
@@ -5743,7 +5762,7 @@ body[data-theme="dark"] .mirror-guide-pill {
     radial-gradient(circle at 86% 10%, rgba(47, 125, 246, 0.36), transparent 30%),
     linear-gradient(150deg, #071019, #08251e 48%, #0e1b32);
   box-shadow: var(--shadow);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .quest-playfield-bg {
@@ -5827,11 +5846,12 @@ body[data-theme="dark"] .mirror-guide-pill {
   display: grid;
   align-content: center;
   gap: 12px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .quest-play-zone {
   grid-row: 3;
+  align-content: start;
 }
 
 .quest-view-panel {
@@ -5929,6 +5949,7 @@ body[data-theme="dark"] .mirror-guide-pill {
   display: grid;
   gap: 12px;
   place-items: center;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 
 .quest-confetti {

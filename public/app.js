@@ -160,6 +160,7 @@ const state = {
   loadingVtu: false,
   digitalServices: {
     settings: null,
+    allProducts: [],
     products: [],
     categories: [],
     orders: [],
@@ -2596,6 +2597,57 @@ function mergeDigitalProductList(list = [], product = null) {
   return exists ? list.map((item) => item.id === product.id ? product : item) : [product, ...list];
 }
 
+function getDigitalProductSearchText(product = {}) {
+  return [
+    product.name,
+    product.displayName,
+    product.category,
+    product.displayCategory,
+    product.description,
+    product.storeName,
+    product.planLabel,
+    product.deliveryLabel,
+  ].map((value) => String(value || "").toLowerCase()).join(" ");
+}
+
+function applyDigitalServiceProductFilters() {
+  const source = state.digitalServices.allProducts?.length
+    ? state.digitalServices.allProducts
+    : state.digitalServices.products || [];
+  const query = String(state.digitalServices.query || "").trim().toLowerCase();
+  const category = String(state.digitalServices.category || "").trim().toLowerCase();
+  state.digitalServices.products = source.filter((product) => {
+    const categoryValue = String(product.category || "").trim().toLowerCase();
+    const categoryMatches = !category || categoryValue === category;
+    const queryMatches = !query || getDigitalProductSearchText(product).includes(query);
+    return categoryMatches && queryMatches;
+  });
+  return state.digitalServices.products;
+}
+
+function refreshDigitalProductViews() {
+  const products = applyDigitalServiceProductFilters();
+  const featuredProducts = products.filter((product) => product.featured).slice(0, 4);
+  const storeCount = document.querySelector("[data-store-product-count]");
+  if (storeCount) {
+    storeCount.textContent = Number(products.length || 0).toLocaleString();
+  }
+  const storeFeatured = document.querySelector("[data-store-featured-row]");
+  if (storeFeatured) {
+    storeFeatured.innerHTML = featuredProducts.map((product) => renderStoreProductCard(product, true)).join("");
+    storeFeatured.hidden = featuredProducts.length === 0;
+  }
+  const storeGrid = document.querySelector("[data-store-product-grid]");
+  if (storeGrid) {
+    storeGrid.innerHTML = products.map((product) => renderStoreProductCard(product)).join("") || `<p class="vtu-empty-state">No digital tool found.</p>`;
+  }
+  const modalGrid = document.querySelector("[data-digital-product-grid]");
+  if (modalGrid) {
+    modalGrid.innerHTML = renderDigitalServiceProductCards(products);
+  }
+  bindDigitalProductButtons();
+}
+
 function getReferralLink(profile = state.referralProfile) {
   const path = profile?.referralCode ? `/?signup=1&ref=${encodeURIComponent(profile.referralCode)}` : (profile?.referralPath || "");
   return path ? new URL(path, window.location.origin).toString() : "";
@@ -3963,6 +4015,79 @@ function getFilteredAdminUsers() {
   );
 }
 
+function bindAdminUserListActions(root = document) {
+  root.querySelectorAll("[data-admin-balance-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showActionModal({ type: "admin-balance", userId: button.dataset.adminBalanceOpen });
+    });
+  });
+  root.querySelectorAll("[data-admin-profile-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const userId = button.dataset.adminProfileOpen;
+      showActionModal({
+        type: "admin-user-profile",
+        userId,
+        userSnapshot: state.users.find((user) => user.id === userId) || null,
+        returnModal: { type: "admin-users" },
+      });
+    });
+  });
+  root.querySelectorAll("[data-admin-review-clear]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearAdminUserReview(button.dataset.adminReviewClear);
+    });
+  });
+  root.querySelectorAll("[data-admin-user-trade-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminUserTradeJoin(form, form.dataset.adminUserTradeForm);
+    });
+  });
+  root.querySelectorAll("[data-admin-password-input]").forEach((input) => {
+    input.addEventListener("input", () => {
+      setAdminPasswordDraft(input.dataset.adminPasswordInput, input.value);
+    });
+  });
+  root.querySelectorAll("[data-admin-password-visibility]").forEach((button) => {
+    button.addEventListener("click", () => {
+      toggleAdminPasswordVisibility(button.dataset.adminPasswordVisibility);
+    });
+  });
+  root.querySelectorAll("[data-admin-password-save]").forEach((button) => {
+    button.addEventListener("click", () => {
+      submitAdminPasswordReset(button.dataset.adminPasswordSave);
+    });
+  });
+  root.querySelectorAll("[data-admin-toggle-mirror]").forEach((button) => {
+    button.addEventListener("click", () => {
+      updateAdminMirror(button.dataset.adminToggleMirror, button.dataset.adminMirrorEnabled === "true");
+    });
+  });
+  root.querySelectorAll("[data-admin-delete-user]").forEach((button) => {
+    button.addEventListener("click", () => {
+      deleteAdminUser(button.dataset.adminDeleteUser, button.dataset.adminUserName || "this user");
+    });
+  });
+}
+
+function refreshAdminUsersModalList() {
+  const list = document.querySelector(".admin-users-modal-list");
+  if (!list) {
+    return;
+  }
+  const filteredUsers = getFilteredAdminUsers();
+  list.innerHTML = filteredUsers.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No matching users.</p>`;
+  state.adminUsersModalScrollTop = 0;
+  list.scrollTop = 0;
+  bindAdminUserListActions(list);
+}
+
 function isListExpanded(key) {
   return state.expandedListKeys.includes(key);
 }
@@ -4624,6 +4749,24 @@ function renderActionModal() {
 
   if (state.actionModal.type === "admin-digital-product-edit") {
     return renderAdminDigitalProductEditModal();
+  }
+
+  if (state.actionModal.type === "admin-history-cleanup-confirm") {
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow danger">Maintenance</p>
+          <h3>Clear history older than 48 hours?</h3>
+          <p class="modal-text">This clears disposable notifications, temporary chat messages, push delivery logs, expired sessions, and strategy logs older than 48 hours.</p>
+          <p class="modal-text">Protected data remains untouched: users, balances, wallets, transactions, deposits, withdrawals, referrals, orders, signals, P&amp;L records, audit logs, webhook records, gift cards, quests, and settings.</p>
+          <div class="modal-actions">
+            <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+            <button class="micro-btn danger" id="admin-history-cleanup-confirm-btn" type="button">${icon("trash")} Clear old history</button>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   if (state.actionModal.type === "vtu-airtime" || state.actionModal.type === "vtu-data") {
@@ -5316,13 +5459,13 @@ function bindModalActions() {
   if (adminUserSearchInput) {
     adminUserSearchInput.addEventListener("input", () => {
       state.adminUserSearch = adminUserSearchInput.value;
-      state.adminUsersModalScrollTop = 0;
-      if (adminUsersList) {
-        adminUsersList.scrollTop = 0;
-      }
-      window.clearTimeout(state.adminUsersSearchTimer);
-      state.adminUsersSearchTimer = window.setTimeout(() => render(), 250);
+      refreshAdminUsersModalList();
     });
+  }
+
+  const historyCleanupConfirmButton = document.getElementById("admin-history-cleanup-confirm-btn");
+  if (historyCleanupConfirmButton) {
+    historyCleanupConfirmButton.addEventListener("click", runAdminHistoryCleanup);
   }
 
   const notificationReplyForm = document.getElementById("notification-reply-form");
@@ -7070,6 +7213,7 @@ async function syncAdminDigitalServices() {
       products: payload.products || [],
       summary: payload.summary || state.digitalServices.admin?.summary,
     };
+    state.digitalServices.allProducts = payload.products || [];
     state.digitalServices.products = payload.products || [];
     state.digitalServices.settings = payload.summary?.settings || state.digitalServices.settings;
     render();
@@ -7098,6 +7242,7 @@ async function submitAdminDigitalProductOverride(form) {
         order: data.order || "0",
       }),
     });
+    state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || state.digitalServices.products || [], payload.product);
     state.digitalServices.products = mergeDigitalProductList(state.digitalServices.products || [], payload.product);
     state.digitalServices.admin = {
       ...(state.digitalServices.admin || {}),
@@ -7121,6 +7266,7 @@ async function refreshAdminDigitalProductPrice(productId) {
       method: "POST",
       body: JSON.stringify({}),
     });
+    state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || state.digitalServices.products || [], payload.product);
     state.digitalServices.products = mergeDigitalProductList(state.digitalServices.products || [], payload.product);
     state.digitalServices.admin = {
       ...(state.digitalServices.admin || {}),
@@ -7174,6 +7320,24 @@ async function recoverAdminDigitalOrders() {
     await loadFinancialDashboard();
     render();
     showNotice(payload.recovery?.count ? `${payload.recovery.count} Store order histories recovered` : "Store histories are already up to date");
+  }).catch((error) => showError(error.message));
+}
+
+function openAdminHistoryCleanupConfirm() {
+  state.actionModal = { type: "admin-history-cleanup-confirm" };
+  render();
+}
+
+async function runAdminHistoryCleanup() {
+  await withLoading(async () => {
+    const result = await api("/api/admin/maintenance/cleanup-history", {
+      method: "POST",
+      body: JSON.stringify({ confirm: true }),
+    });
+    state.actionModal = null;
+    await loadFinancialDashboard().catch(() => undefined);
+    render();
+    showNotice(`Cleared ${Number(result.deletedCount || 0).toLocaleString()} old history item${Number(result.deletedCount || 0) === 1 ? "" : "s"}.`);
   }).catch((error) => showError(error.message));
 }
 
@@ -7794,7 +7958,8 @@ async function loadDigitalServicesSnapshot({ force = false } = {}) {
     if (payload) {
       state.digitalServices.admin = payload;
       state.digitalServices.settings = payload.settings || payload.summary?.settings || state.digitalServices.settings;
-      state.digitalServices.products = payload.products || state.digitalServices.products || [];
+      state.digitalServices.allProducts = payload.products || state.digitalServices.allProducts || [];
+      state.digitalServices.products = state.digitalServices.allProducts;
       state.digitalServices.orders = payload.orders || state.digitalServices.orders || [];
       state.digitalServices.categories = [...new Set((state.digitalServices.products || []).map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     }
@@ -7816,19 +7981,18 @@ async function loadDigitalServiceProducts({ force = false } = {}) {
   const category = String(state.digitalServices.category || "").trim();
   const store = String(state.digitalServices.store || "").trim();
   const params = new URLSearchParams();
-  if (query) params.set("q", query);
-  if (category) params.set("category", category);
   if (store) params.set("store", store);
   if (force) params.set("refresh", "1");
   state.digitalServices.loading = true;
   try {
     const payload = await api(`/api/digital-services/products${params.toString() ? `?${params}` : ""}`);
-    state.digitalServices.products = shuffleList(payload.products || []);
+    state.digitalServices.allProducts = shuffleList(payload.products || []);
     state.digitalServices.categories = payload.categories || [];
     state.digitalServices.settings = {
       ...(state.digitalServices.settings || {}),
       ...(payload.status?.settings || payload.status || {}),
     };
+    applyDigitalServiceProductFilters();
     return state.digitalServices.products;
   } finally {
     state.digitalServices.loading = false;
@@ -8178,12 +8342,48 @@ function renderMenuSheet() {
 
 function getDigitalServiceProductById(productId) {
   const id = String(productId || "").trim();
-  return (state.digitalServices.products || []).find((product) => String(product.id) === id) || null;
+  return [
+    ...(state.digitalServices.products || []),
+    ...(state.digitalServices.allProducts || []),
+    ...(state.digitalServices.admin?.products || []),
+  ].find((product) => String(product.id) === id) || null;
 }
 
 function renderDigitalServiceImage(product = {}, className = "digital-service-img") {
   const src = product.imageUrl || "/services/default-digital-service.png";
   return `<img class="${className}" src="${escapeHtml(src)}" alt="${escapeHtml(product.name || "Digital service")}" loading="lazy" onerror="this.onerror=null;this.src='/services/default-digital-service.png';" />`;
+}
+
+function renderDigitalServiceProductCards(products = []) {
+  return products.map((product) => `
+    <button class="digital-product-card" data-digital-service-product="${escapeHtml(product.id)}" type="button">
+      ${renderDigitalServiceImage(product)}
+      <strong>${escapeHtml(product.name)}</strong>
+      <span>${escapeHtml(product.category || "Digital")}</span>
+      ${renderDigitalProductPrice(product, 1, { compact: true })}
+    </button>
+  `).join("") || `<p class="vtu-empty-state">No digital service found.</p>`;
+}
+
+function openDigitalServiceProduct(productId) {
+  const product = getDigitalServiceProductById(productId);
+  if (!product) {
+    return;
+  }
+  state.actionModal = {
+    type: "digital-service-detail",
+    productId: product.id,
+    product,
+    quantity: 1,
+    returnTo: state.activeTab === "store" ? "store" : "modal",
+  };
+  render();
+}
+
+function bindDigitalProductButtons(root = document) {
+  root.querySelectorAll("[data-digital-service-product]").forEach((button) => {
+    button.addEventListener("click", () => openDigitalServiceProduct(button.dataset.digitalServiceProduct));
+  });
 }
 
 function renderDigitalServiceBrowserModal() {
@@ -8222,15 +8422,8 @@ function renderDigitalServiceBrowserModal() {
                 ${categories.map((category) => `<button class="${activeCategory === category ? "active" : ""}" data-digital-service-category="${escapeHtml(category)}" type="button">${escapeHtml(category)}</button>`).join("")}
               </div>
               ${state.digitalServices.loading ? renderSectionLoadingOverlay("Loading services", "Checking available digital tools") : ""}
-              <div class="digital-product-grid">
-                ${products.map((product) => `
-                  <button class="digital-product-card" data-digital-service-product="${escapeHtml(product.id)}" type="button">
-                    ${renderDigitalServiceImage(product)}
-                    <strong>${escapeHtml(product.name)}</strong>
-                    <span>${escapeHtml(product.category || "Digital")}</span>
-                    ${renderDigitalProductPrice(product, 1, { compact: true })}
-                  </button>
-                `).join("") || `<p class="vtu-empty-state">No digital service found.</p>`}
+              <div class="digital-product-grid" data-digital-product-grid>
+                ${renderDigitalServiceProductCards(products)}
               </div>
               <section class="digital-orders-panel">
                 <div class="section-head compact">
@@ -9960,7 +10153,7 @@ function renderAdminDigitalProductGroup(title, products = []) {
           <p class="muted-copy">${Number(products.length || 0).toLocaleString()} product${products.length === 1 ? "" : "s"}</p>
         </div>
       </div>
-      <div class="admin-digital-product-list compact">
+      <div class="admin-digital-product-list compact" data-admin-digital-product-list="${escapeHtml(title)}">
         ${products.slice(0, 80).map(renderAdminDigitalProductRow).join("") || `<p class="muted-copy">No product synced for ${escapeHtml(title)}.</p>`}
       </div>
     </section>
@@ -10877,6 +11070,16 @@ function renderSettingsPane() {
         <button id="logout-btn" class="button-secondary shimmer-button" type="button">Logout</button>
       </div>
     `;
+    const maintenancePanel = `
+      <div class="maintenance-panel">
+        <div class="maintenance-copy">
+          <strong>Clear history older than 48 hours</strong>
+          <p class="muted-copy">Removes disposable notifications, temporary chat messages, push delivery logs, expired sessions, and strategy logs only.</p>
+          <p class="muted-copy">Users, wallets, balances, transactions, deposits, withdrawals, referrals, store orders, signals, P&amp;L history, audit logs, webhook events, gift cards, quests, and settings are protected.</p>
+        </div>
+        <button class="micro-btn danger" data-admin-history-cleanup-open type="button">${icon("trash")} Clear old history</button>
+      </div>
+    `;
     return `
       ${renderAdminSettingsOverview()}
       ${renderSettingsDisclosure({ key: "appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
@@ -10887,6 +11090,7 @@ function renderSettingsPane() {
       ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
       ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
       ${renderSettingsDisclosure({ key: "referrals", title: "Referral Management", subtitle: "Rewards and progress", iconName: "users", content: renderAdminReferralPanel(), extraClass: "admin-referral-section" })}
+      ${renderSettingsDisclosure({ key: "maintenance", title: "Maintenance", subtitle: "48-hour disposable history", iconName: "settings", content: maintenancePanel })}
       ${renderSettingsDisclosure({ key: "app", title: "App", subtitle: state.pwa.isStandalone ? "Installed" : "Install and alerts", iconName: "download", content: renderPwaSettingsContent(), section: "app" })}
       ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
     `;
@@ -11880,7 +12084,7 @@ function renderDigitalServicesPane() {
         ${STORE_OPTIONS.map((store) => `<button class="${activeStore === store.id ? "active" : ""}" data-store-switch="${store.id}" type="button">${escapeHtml(store.label)}</button>`).join("")}
       </section>
       <section class="store-stat-strip">
-        <div><span>Products</span><strong>${Number(products.length || 0).toLocaleString()}</strong></div>
+        <div><span>Products</span><strong data-store-product-count>${Number(products.length || 0).toLocaleString()}</strong></div>
         <div><span>Orders</span><strong>${Number(orders.length || 0).toLocaleString()}</strong></div>
         <div><span>Ready</span><strong>${Number(readyOrders || 0).toLocaleString()}</strong></div>
       </section>
@@ -11898,12 +12102,10 @@ function renderDigitalServicesPane() {
               <button class="${activeCategory ? "" : "active"}" data-store-category="" type="button">All</button>
               ${categories.map((category) => `<button class="${activeCategory === category ? "active" : ""}" data-store-category="${escapeHtml(category)}" type="button">${escapeHtml(category)}</button>`).join("")}
             </div>
-            ${featuredProducts.length ? `
-              <div class="store-featured-row">
-                ${featuredProducts.map((product) => renderStoreProductCard(product, true)).join("")}
-              </div>
-            ` : ""}
-            <div class="digital-product-grid store-product-grid">
+            <div class="store-featured-row" data-store-featured-row ${featuredProducts.length ? "" : "hidden"}>
+              ${featuredProducts.map((product) => renderStoreProductCard(product, true)).join("")}
+            </div>
+            <div class="digital-product-grid store-product-grid" data-store-product-grid>
               ${products.map((product) => renderStoreProductCard(product)).join("") || `<p class="vtu-empty-state">No digital tool found.</p>`}
             </div>
           </section>
@@ -12028,6 +12230,9 @@ function renderDashboardShell() {
   const focusedFieldSnapshot = getFocusedFieldSnapshot();
   const adminUsersList = document.querySelector(".admin-users-modal-list");
   const adminUsersSearch = document.getElementById("admin-user-search-input");
+  const adminDigitalProductScroll = [...document.querySelectorAll("[data-admin-digital-product-list]")]
+    .map((list) => [list.dataset.adminDigitalProductList || "", list.scrollTop || 0])
+    .filter(([key]) => key);
   const restoreAdminUsersModal = state.actionModal?.type === "admin-users"
     ? {
         scrollTop: adminUsersList ? adminUsersList.scrollTop : state.adminUsersModalScrollTop,
@@ -12074,6 +12279,17 @@ function renderDashboardShell() {
 
   bindDashboardActions();
   bindModalActions();
+  if (adminDigitalProductScroll.length) {
+    requestAnimationFrame(() => {
+      for (const [key, scrollTop] of adminDigitalProductScroll) {
+        const list = [...document.querySelectorAll("[data-admin-digital-product-list]")]
+          .find((item) => item.dataset.adminDigitalProductList === key);
+        if (list) {
+          list.scrollTop = scrollTop;
+        }
+      }
+    });
+  }
   if (restoreAdminUsersModal) {
     requestAnimationFrame(() => {
       const nextList = document.querySelector(".admin-users-modal-list");
@@ -12219,6 +12435,10 @@ function bindDashboardActions() {
         [key]: details.open,
       };
     });
+  });
+
+  document.querySelectorAll("[data-admin-history-cleanup-open]").forEach((button) => {
+    button.addEventListener("click", openAdminHistoryCleanupConfirm);
   });
 
   document.querySelectorAll("[data-notification-open]").forEach((button) => {
@@ -12799,10 +13019,7 @@ function bindDashboardActions() {
   if (digitalSearchInput) {
     digitalSearchInput.addEventListener("input", () => {
       state.digitalServices.query = digitalSearchInput.value;
-      window.clearTimeout(state.digitalServices.searchTimer);
-      state.digitalServices.searchTimer = window.setTimeout(() => {
-        void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
-      }, 250);
+      refreshDigitalProductViews();
     });
   }
 
@@ -12810,17 +13027,14 @@ function bindDashboardActions() {
   if (storeSearchInput) {
     storeSearchInput.addEventListener("input", () => {
       state.digitalServices.query = storeSearchInput.value;
-      window.clearTimeout(state.digitalServices.searchTimer);
-      state.digitalServices.searchTimer = window.setTimeout(() => {
-        void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
-      }, 250);
+      refreshDigitalProductViews();
     });
   }
 
   document.querySelectorAll("[data-digital-service-category]").forEach((button) => {
     button.addEventListener("click", () => {
       state.digitalServices.category = button.dataset.digitalServiceCategory || "";
-      void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      refreshDigitalProductViews();
       render();
     });
   });
@@ -12828,7 +13042,7 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-store-category]").forEach((button) => {
     button.addEventListener("click", () => {
       state.digitalServices.category = button.dataset.storeCategory || "";
-      void loadDigitalServiceProducts().then(() => render()).catch((error) => showError(error.message));
+      applyDigitalServiceProductFilters();
       render();
     });
   });
@@ -12871,22 +13085,7 @@ function bindDashboardActions() {
     button.addEventListener("click", () => requeryDigitalServiceOrder(button.dataset.digitalServiceOrderRequery));
   });
 
-  document.querySelectorAll("[data-digital-service-product]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const product = getDigitalServiceProductById(button.dataset.digitalServiceProduct);
-      if (!product) {
-        return;
-      }
-      state.actionModal = {
-        type: "digital-service-detail",
-        productId: product.id,
-        product,
-        quantity: 1,
-        returnTo: state.activeTab === "store" ? "store" : "modal",
-      };
-      render();
-    });
-  });
+  bindDigitalProductButtons();
 
   document.querySelectorAll("[data-digital-services-back]").forEach((button) => {
     button.addEventListener("click", () => {
