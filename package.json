@@ -6,7 +6,8 @@
   "scripts": {
     "build": "node scripts/write-config.js",
     "start": "npx --yes serve public",
-    "check": "node --check public/app.js && node --check public/components/signal-page.js && node --check public/service-worker.js"
+    "check": "node --check public/app.js && node --check public/trade-classification.js && node --check public/components/signal-page.js && node --check public/service-worker.js",
+    "test": "node --test tests"
   },
   "engines": {
     "node": "24.x"

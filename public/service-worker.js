@@ -1,4 +1,4 @@
-const CACHE_VERSION = "netruefi-pwa-v17";
+const CACHE_VERSION = "netruefi-pwa-v18";
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const OFFLINE_URL = "/offline.html";
 const STATIC_ASSETS = [
@@ -8,6 +8,7 @@ const STATIC_ASSETS = [
   OFFLINE_URL,
   "/config.js",
   "/styles.css",
+  "/trade-classification.js",
   "/app.js",
   "/components/signal-page.js",
   "/vendor/lightweight-charts.js",

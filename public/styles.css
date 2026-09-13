@@ -2380,6 +2380,38 @@ body[data-theme="dark"] .section-loading-card {
   box-shadow: var(--shadow);
 }
 
+.admin-quick-nav {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 1px 8px;
+  scroll-snap-type: x proximity;
+}
+
+.admin-quick-nav-btn {
+  min-width: 92px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 900;
+  box-shadow: 0 10px 22px rgba(12, 20, 33, 0.08);
+  scroll-snap-align: start;
+}
+
+.admin-quick-nav-btn .nav-icon {
+  width: 16px;
+  height: 16px;
+  color: #057a55;
+}
+
 .digital-search {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -2435,7 +2467,7 @@ body[data-theme="dark"] .section-loading-card {
 
 .digital-product-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(146px, 100%), 1fr));
   gap: 10px;
   position: relative;
 }
@@ -2456,11 +2488,14 @@ body[data-theme="dark"] .section-loading-card {
 }
 
 .store-product-card {
-  min-height: 236px;
-  grid-template-rows: 104px minmax(0, 1fr) auto;
+  min-height: 218px;
+  grid-template-rows: 98px minmax(0, 1fr) auto;
   padding: 0;
   overflow: hidden;
   border-color: rgba(5, 122, 85, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.7), transparent 42%),
+    var(--panel);
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
@@ -2476,7 +2511,10 @@ body[data-theme="dark"] .section-loading-card {
 
 .store-product-media {
   display: block;
-  min-height: 104px;
+  min-height: 98px;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(0, 217, 120, 0.16), transparent 5rem),
+    var(--soft-surface);
 }
 
 .digital-service-img,
@@ -2508,6 +2546,16 @@ body[data-theme="dark"] .section-loading-card {
 
 .store-product-body > span {
   color: var(--muted);
+  line-height: 1.25;
+}
+
+.store-product-body strong {
+  display: -webkit-box;
+  min-height: 2.36em;
+  line-height: 1.18;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .store-product-footer {
@@ -2535,6 +2583,9 @@ body[data-theme="dark"] .section-loading-card {
 }
 
 .store-product-footer em {
+  min-height: 32px;
+  display: inline-grid;
+  place-items: center;
   padding: 6px 10px;
   border-radius: 999px;
   color: #053b2f;

@@ -20,7 +20,7 @@ const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.2";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -78,6 +78,7 @@ const SPOT_MIRROR_GUIDANCE = {
   },
 };
 const API_BASE_URL = String(window.TRADE_API_BASE_URL || "").replace(/\/$/, "");
+const tradeClassification = window.TradeClassification || {};
 
 function toApiUrl(path) {
   if (/^https?:\/\//i.test(path)) {
@@ -1565,6 +1566,20 @@ function renderDigitalProductPrice(product = {}, quantity = 1, { compact = false
   return `<span class="store-price-stack"><b>${escapeHtml(price.primary)}</b>${equivalent}</span>`;
 }
 
+function stripLeadingSupplierMetadata(value = "") {
+  const text = String(value || "").trim();
+  return text.replace(/^\{[^{}]{1,160}\}\s+(?=\S)/, "").trim() || text;
+}
+
+function getDigitalProductDisplayName(product = {}) {
+  const overrideName = product.override?.displayName || product.displayName || "";
+  return stripLeadingSupplierMetadata(overrideName || product.name || "Digital service");
+}
+
+function getDigitalProductDisplayCategory(product = {}) {
+  return product.override?.displayCategory || product.displayCategory || product.category || product.storeName || "Digital";
+}
+
 function getUsdtToNgnRate() {
   return Number(
     state.financialDashboard?.settings?.exchangeRate?.usdtToNgn ||
@@ -2346,48 +2361,66 @@ function hasExchangeBalanceForTrade(trade) {
   return totalBalance > 0;
 }
 
+function getTradeExecutionStatus(trade) {
+  return tradeClassification.getExecutionStatus
+    ? tradeClassification.getExecutionStatus(trade)
+    : String(trade?.adminExecution?.status || "").trim().toUpperCase();
+}
+
+function getTradeLifecycleStatus(trade) {
+  return tradeClassification.getLifecycleStatus
+    ? tradeClassification.getLifecycleStatus(trade)
+    : String(trade?.lifecycleStatus || trade?.actualLifecycleStatus || "").trim().toUpperCase();
+}
+
+function isQueuedTrade(trade) {
+  return tradeClassification.isQueuedTrade
+    ? tradeClassification.isQueuedTrade(trade)
+    : getTradeLifecycleStatus(trade) === "PENDING";
+}
+
+function isOpenTrade(trade) {
+  return tradeClassification.isOpenTrade
+    ? tradeClassification.isOpenTrade(trade)
+    : getTradeLifecycleStatus(trade) === "OPEN";
+}
+
+function isClosedTrade(trade) {
+  return tradeClassification.isClosedTrade
+    ? tradeClassification.isClosedTrade(trade)
+    : ["CLOSED", "CANCELED", "CANCELLED", "ERROR"].includes(getTradeLifecycleStatus(trade));
+}
+
+function shouldUserSeeTrade(trade) {
+  return tradeClassification.shouldUserSeeTrade
+    ? tradeClassification.shouldUserSeeTrade(trade)
+    : isOpenTrade(trade) || (isQueuedTrade(trade) && String(trade?.side || "").toUpperCase() === "BUY");
+}
+
 function isTradeStrictlyOpen(trade) {
-  if (String(trade.lifecycleStatus || "").toUpperCase() !== "OPEN" || getTradeRemainingQuantity(trade) <= 0) {
+  if (!isOpenTrade(trade) || getTradeRemainingQuantity(trade) <= 0) {
     return false;
   }
 
-  if (!state.user?.exchangeConnected) {
-    return true;
-  }
-
-  if (trade.side !== "BUY") {
-    return false;
-  }
-
-  // Strict rule: if the connected exchange API no longer shows an active order and no remaining
-  // asset balance for the trade, the app must not keep that trade inside Open Trades.
-  return hasActiveOpenOrderForSymbol(trade.symbol) || hasExchangeBalanceForTrade(trade);
+  return true;
 }
 
 function isTradeLiveForBoard(trade) {
-  const status = String(trade.lifecycleStatus || "").toUpperCase();
-  const userHasJoinedTrade = trade.userInvestment?.status === "ACTIVE" || !!trade.mirroredExecution;
-  if (state.user?.role === "user" && !userHasJoinedTrade && ["OPEN", "PENDING"].includes(status)) {
-    return true;
+  if (state.user?.role === "user") {
+    return shouldUserSeeTrade(trade);
   }
-  if (status === "OPEN") {
-    return isTradeStrictlyOpen(trade);
-  }
-  if (status === "PENDING") {
-    return !state.user?.exchangeConnected || hasActiveOpenOrderForSymbol(trade.symbol);
-  }
-  return false;
+  return isOpenTrade(trade) || isQueuedTrade(trade);
 }
 
 function isTradeVisibleOnHome(trade) {
   if (state.user?.role === "user") {
-    return trade.userInvestment?.status === "ACTIVE" && isTradeLiveForBoard(trade);
+    return shouldUserSeeTrade(trade);
   }
   return isTradeLiveForBoard(trade);
 }
 
 function isTradeClearableFromHistory(trade) {
-  return !isTradeStrictlyOpen(trade) && trade.lifecycleStatus !== "PENDING";
+  return isClosedTrade(trade) || (!isOpenTrade(trade) && !isQueuedTrade(trade));
 }
 
 function syncHistorySelection() {
@@ -2563,7 +2596,7 @@ function savePendingShopOrder(order = {}) {
   localStorage.setItem(SHOP_PENDING_ORDER_STORAGE_KEY, JSON.stringify({
     productId: order.productId,
     quantity: order.quantity || 1,
-    store: state.digitalServices.store || "alaba",
+    store: order.store ?? state.digitalServices.store ?? "",
     savedAt: new Date().toISOString(),
   }));
 }
@@ -2599,10 +2632,13 @@ function mergeDigitalProductList(list = [], product = null) {
 
 function getDigitalProductSearchText(product = {}) {
   return [
+    getDigitalProductDisplayName(product),
     product.name,
     product.displayName,
+    product.override?.displayName,
     product.category,
     product.displayCategory,
+    product.override?.displayCategory,
     product.description,
     product.storeName,
     product.planLabel,
@@ -5935,7 +5971,10 @@ async function refreshTradeStatusData() {
     state.openOrders = nextOpenOrders;
     syncHistorySelection();
     const activeTradeIds = new Set(nextTrades.map((trade) => trade.id));
-    const activeOpenOrderIds = new Set(nextOpenOrders.map((order) => String(order.orderId)));
+    const activeOpenOrderIds = new Set([
+      ...nextOpenOrders.map((order) => String(order.orderId)),
+      ...nextTrades.filter(isQueuedTrade).map(getQueuedTradeKey),
+    ]);
     state.expandedTradeIds = state.expandedTradeIds.filter((id) => activeTradeIds.has(id));
     state.expandedPendingOrderIds = state.expandedPendingOrderIds.filter((id) => activeOpenOrderIds.has(id));
     if (tradesChanged || openOrdersChanged) {
@@ -8212,7 +8251,7 @@ function reviewDigitalServicePurchase() {
   }
   const quantity = Math.max(1, Math.min(Number(document.getElementById("digital-service-quantity-input")?.value || state.actionModal.quantity || 1), 1000));
   if (!state.user) {
-    savePendingShopOrder({ productId: product.id, quantity });
+    savePendingShopOrder({ productId: product.id, quantity, store: product.storeKey || product.provider || state.digitalServices.store || "" });
     state.authTab = "login";
     state.actionModal = {
       type: "shop-auth",
@@ -8351,15 +8390,15 @@ function getDigitalServiceProductById(productId) {
 
 function renderDigitalServiceImage(product = {}, className = "digital-service-img") {
   const src = product.imageUrl || "/services/default-digital-service.png";
-  return `<img class="${className}" src="${escapeHtml(src)}" alt="${escapeHtml(product.name || "Digital service")}" loading="lazy" onerror="this.onerror=null;this.src='/services/default-digital-service.png';" />`;
+  return `<img class="${className}" src="${escapeHtml(src)}" alt="${escapeHtml(getDigitalProductDisplayName(product))}" loading="lazy" onerror="this.onerror=null;this.src='/services/default-digital-service.png';" />`;
 }
 
 function renderDigitalServiceProductCards(products = []) {
   return products.map((product) => `
     <button class="digital-product-card" data-digital-service-product="${escapeHtml(product.id)}" type="button">
       ${renderDigitalServiceImage(product)}
-      <strong>${escapeHtml(product.name)}</strong>
-      <span>${escapeHtml(product.category || "Digital")}</span>
+      <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
+      <span>${escapeHtml(getDigitalProductDisplayCategory(product))}</span>
       ${renderDigitalProductPrice(product, 1, { compact: true })}
     </button>
   `).join("") || `<p class="vtu-empty-state">No digital service found.</p>`;
@@ -8579,11 +8618,11 @@ function renderDigitalServiceDetailModal() {
   const canProceed = !state.user || available >= total;
   return `
     <div class="modal-backdrop">
-      <div class="modal-card action-modal-card digital-service-detail-modal">
+        <div class="modal-card action-modal-card digital-service-detail-modal">
         <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
         ${renderDigitalServiceImage(product, "digital-service-detail-img")}
-        <p class="modal-eyebrow neutral">${escapeHtml(product.category || "Digital")}</p>
-        <h3>${escapeHtml(product.name || "Digital Service")}</h3>
+        <p class="modal-eyebrow neutral">${escapeHtml(getDigitalProductDisplayCategory(product))}</p>
+        <h3>${escapeHtml(getDigitalProductDisplayName(product))}</h3>
         <p class="modal-text">${escapeHtml(product.description || "Premium digital access delivered after purchase.")}</p>
         <div class="action-metric-stack">
           ${product.planLabel ? `<div class="action-metric"><span>Plan</span><strong>${escapeHtml(product.planLabel)}</strong></div>` : ""}
@@ -8618,7 +8657,7 @@ function renderDigitalServiceConfirmModal() {
         <p class="modal-eyebrow neutral">Confirm</p>
         <h3>Buy digital service</h3>
         <div class="action-metric-stack">
-          <div class="action-metric"><span>Service</span><strong>${escapeHtml(product.name || "")}</strong></div>
+          <div class="action-metric"><span>Service</span><strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong></div>
           <div class="action-metric"><span>Quantity</span><strong>${quantity.toLocaleString()}</strong></div>
           <div class="action-metric"><span>Price</span><strong>${escapeHtml(displayPrice.primary)}</strong></div>
           <div class="action-metric"><span>Wallet debit</span><strong>${formatNaira(total)}</strong></div>
@@ -8647,7 +8686,7 @@ function renderDigitalServiceReceiptModal() {
         <p class="modal-eyebrow neutral">Receipt</p>
         <h3>${escapeHtml(formatWalletRequestStatus(displayStatus))}</h3>
         <div class="action-metric-stack">
-          <div class="action-metric"><span>Service</span><strong>${escapeHtml(order.productName || "")}</strong></div>
+          <div class="action-metric"><span>Service</span><strong>${escapeHtml(stripLeadingSupplierMetadata(order.productName || ""))}</strong></div>
           <div class="action-metric"><span>Amount</span><strong>${formatNaira(order.amountCharged || 0)}</strong></div>
           <div class="action-metric"><span>Ref</span><strong>${escapeHtml(order.requestId || "")}</strong></div>
         </div>
@@ -8797,11 +8836,34 @@ function renderSummaryCard() {
   `;
 }
 
+function renderAdminQuickNav() {
+  const items = [
+    { label: "Users", iconName: "users", action: "users" },
+    { label: "Trades", iconName: "signals", tab: "home" },
+    { label: "Finance", iconName: "bank", tab: "history" },
+    { label: "Products", iconName: "gift", tab: "store" },
+    { label: "Orders", iconName: "profile", tab: "store" },
+    { label: "Quests", iconName: "star", tab: "adminQuests" },
+    { label: "Settings", iconName: "settings", tab: "settings" },
+  ];
+  return `
+    <nav class="admin-quick-nav" aria-label="Admin sections">
+      ${items.map((item) => `
+        <button class="admin-quick-nav-btn" ${item.tab ? `data-tab="${escapeHtml(item.tab)}"` : `data-menu-action="${escapeHtml(item.action)}"`} type="button">
+          ${icon(item.iconName)}
+          <span>${escapeHtml(item.label)}</span>
+        </button>
+      `).join("")}
+    </nav>
+  `;
+}
+
 function renderAdminHomeDashboard() {
   const stats = state.financialDashboard || {};
   const pendingDeposits = Number(stats.pendingDeposits || 0);
   const pendingWithdrawals = Number(stats.pendingWithdrawals || 0);
-  const openTrades = (state.trades || []).filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase())).length;
+  const openTrades = (state.trades || []).filter(isOpenTrade).length;
+  const queuedTrades = (state.trades || []).filter(isQueuedTrade).length;
   const exchangeLabel = getExchangeLabel(getAdminDashboardExchange());
   const storeOrdersToday = Number(stats.digitalServices?.ordersToday || 0);
   const userBalanceTotals = stats.totalUserBalance || {};
@@ -8810,6 +8872,7 @@ function renderAdminHomeDashboard() {
   const userBalanceRate = getUsdtToNgnRate();
   const totalUserBalanceEquivalent = totalUserBalanceNgn + (userBalanceRate > 0 ? totalUserBalanceUsdt * userBalanceRate : 0);
   return `
+    ${renderAdminQuickNav()}
     <section class="admin-dashboard-rail" aria-label="Admin overview">
       <button class="admin-stat-tile" data-admin-users-open type="button">
         <span class="card-icon">${icon("profile")}</span>
@@ -8839,8 +8902,8 @@ function renderAdminHomeDashboard() {
       </button>
       <div class="admin-stat-tile passive">
         <span class="card-icon">${icon("signals")}</span>
-        <strong>${openTrades.toLocaleString()}</strong>
-        <small>Open trades</small>
+        <strong>${openTrades.toLocaleString()} / ${queuedTrades.toLocaleString()}</strong>
+        <small>Open / queue</small>
       </div>
     </section>
     <section class="admin-dashboard-section admin-trade-desk">
@@ -9347,6 +9410,86 @@ function getPendingOrderRemainingQuantity(order) {
   return Math.max(origQty - executedQty, 0) || origQty;
 }
 
+function getQueuedTradeOrderId(trade = {}) {
+  return String(trade.adminExecution?.orderId || trade.adminExecution?.clientOrderId || trade.orderId || "").trim();
+}
+
+function getQueuedTradeKey(trade = {}) {
+  return getQueuedTradeOrderId(trade) || `trade-${trade.id || trade.symbol || "queued"}`;
+}
+
+function getQueuedTradeRemainingQuantity(trade = {}) {
+  const execution = trade.adminExecution || {};
+  const origQty = Number(execution.origQty || trade.quantity || 0);
+  const executedQty = Number(execution.executedQty || 0);
+  return Math.max(origQty - executedQty, 0) || origQty;
+}
+
+function getQueuedTradeRequestedPrice(trade = {}) {
+  const execution = trade.adminExecution || {};
+  return Number(execution.rawPrice || execution.price || trade.price || 0);
+}
+
+function renderQueuedTradeDisclosure(trade = {}) {
+  const orderId = getQueuedTradeOrderId(trade);
+  const queueKey = getQueuedTradeKey(trade);
+  const currentPrice = Number(getTradeCurrentMarket(trade.symbol).price || 0);
+  const remainingQty = getQueuedTradeRemainingQuantity(trade);
+  const entryPrice = getQueuedTradeRequestedPrice(trade);
+  const pnlPercent = entryPrice && currentPrice
+    ? ((currentPrice - entryPrice) / entryPrice) * 100 * (String(trade.side || "").toUpperCase() === "SELL" ? -1 : 1)
+    : 0;
+  const isExpanded = state.expandedPendingOrderIds.includes(queueKey);
+  const executionStatus = getTradeExecutionStatus(trade) || getTradeLifecycleStatus(trade) || "PENDING";
+  const placedAt = trade.createdAt ? new Date(trade.createdAt).toLocaleString() : "Recently";
+
+  return `
+    <details class="trade-disclosure trade-row-rich queued-trade-row" data-pending-order-id="${escapeHtml(queueKey)}" data-trade-symbol-row="${escapeHtml(trade.symbol || "")}" data-trade-entry="${entryPrice}" data-trade-side="${escapeHtml(trade.side || "")}" data-trade-quantity="${remainingQty}" ${isExpanded ? "open" : ""}>
+      <summary class="trade-summary-row">
+        <div>
+          <strong>${escapeHtml(trade.symbol || "Trade")}</strong>
+          <p class="muted-copy">${renderExchangeBadge(trade.exchange || getActiveExchange())}</p>
+          <p class="muted-copy">${escapeHtml(trade.side || "-")} ${escapeHtml(trade.type || "ORDER")} | Remaining ${formatNumber(remainingQty, 8)}</p>
+        </div>
+        <div class="asset-values">
+          ${renderTradeStatusBadge("PENDING")}
+          <strong class="${pnlPercent >= 0 ? "positive" : "negative"}" data-trade-pnl>${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>
+        </div>
+      </summary>
+      <div class="trade-disclosure-body">
+        <div class="trade-detail-grid">
+          <div class="trade-detail-pill">
+            <span>Order</span>
+            <strong>${escapeHtml(orderId ? orderId.slice(-8) : "Pending")}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>Status</span>
+            <strong>${escapeHtml(executionStatus)}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>Placed</span>
+            <strong>${escapeHtml(placedAt)}</strong>
+          </div>
+        </div>
+        <div class="trade-detail-lines">
+          <p class="muted-copy trade-meta-line" data-trade-entry>Requested ${entryPrice ? formatNumber(entryPrice, 8) : "Market"}</p>
+          <p class="muted-copy trade-meta-line" data-trade-current>Current ${currentPrice ? formatNumber(currentPrice, 8) : "-"}</p>
+          <p class="muted-copy">Size ${formatNumber(remainingQty, 8)}</p>
+        </div>
+        ${
+          orderId
+            ? `
+              <div class="trade-actions-inline trade-actions-stack reveal-actions">
+                <button class="micro-btn danger" data-cancel-open-order="${escapeHtml(orderId)}" data-order-symbol="${escapeHtml(trade.symbol || "")}" type="button">Cancel</button>
+              </div>
+            `
+            : ""
+        }
+      </div>
+    </details>
+  `;
+}
+
 function renderPendingOrderDisclosure(order, options = {}) {
   const { showCancel = false } = options;
   const currentPrice = Number(getTradeCurrentMarket(order.symbol).price || 0);
@@ -9448,125 +9591,134 @@ function renderExternalHoldingDisclosure(holding) {
 }
 
 function renderOpenOrdersSection() {
-    const visibleTrades = state.trades.filter(isTradeVisibleOnHome);
-    const openTrades = state.user?.role === "admin" ? sortRecent(visibleTrades) : visibleTrades.slice(0, 5);
-    const detectedHoldings = state.user?.role === "user" ? [] : getDetectedSpotHoldings();
-    const openTradeLimit = isListExpanded("home-open-trades") ? openTrades.length : 3;
-    const visibleOpenTrades = openTrades.slice(0, openTradeLimit);
-    const remainingOpenSlots = isListExpanded("home-open-trades") ? detectedHoldings.length : Math.max(0, 3 - visibleOpenTrades.length);
-    const visibleDetectedHoldings = detectedHoldings.slice(0, remainingOpenSlots);
-    const openOrders = sortRecent(state.openOrders || []);
-    const visibleOpenOrders = getPreviewRecords(openOrders, "home-open-orders");
-    const canManageTrades = state.user?.role === "admin";
-    return `
-      <section class="mobile-card split-card${loadingClass(state.loadingTrades)}">
-        ${state.loadingTrades ? renderSectionLoadingOverlay("Loading trades", "Checking your open trades and orders") : ""}
-        <div>
+  const canManageTrades = state.user?.role === "admin";
+  const activeTrades = state.trades.filter(isTradeVisibleOnHome);
+  const openTrades = sortRecent(activeTrades.filter(isTradeStrictlyOpen));
+  const queuedTrades = sortRecent(activeTrades.filter(isQueuedTrade));
+  const queuedTradeOrderIds = new Set(queuedTrades.map(getQueuedTradeOrderId).filter(Boolean));
+  const externalOpenOrders = sortRecent(state.openOrders || []).filter((order) => !queuedTradeOrderIds.has(String(order.orderId || "")));
+  const queueItemsCount = queuedTrades.length + externalOpenOrders.length;
+  const detectedHoldings = state.user?.role === "user" ? [] : getDetectedSpotHoldings();
+  const openTradeLimit = isListExpanded("home-open-trades") ? openTrades.length : 3;
+  const visibleOpenTrades = openTrades.slice(0, openTradeLimit);
+  const remainingOpenSlots = isListExpanded("home-open-trades") ? detectedHoldings.length : Math.max(0, 3 - visibleOpenTrades.length);
+  const visibleDetectedHoldings = detectedHoldings.slice(0, remainingOpenSlots);
+  const visibleQueuedTrades = isListExpanded("home-open-orders") ? queuedTrades : queuedTrades.slice(0, 4);
+  const visibleExternalOrders = isListExpanded("home-open-orders")
+    ? externalOpenOrders
+    : externalOpenOrders.slice(0, Math.max(0, 4 - visibleQueuedTrades.length));
+  return `
+    <section class="mobile-card split-card admin-trade-sections${loadingClass(state.loadingTrades)}">
+      ${state.loadingTrades ? renderSectionLoadingOverlay("Loading trades", "Checking filled trades and queued orders") : ""}
+      <div>
         <div class="section-head">
           <div>
             <h3>Open Trades</h3>
-            <p class="muted-copy">${state.user?.role === "user" ? "Joined trade investments." : "Live spot positions you are managing."}</p>
+            <p class="muted-copy">${state.user?.role === "user" ? "Trades and investments visible to your account." : "Filled spot positions you are managing."}</p>
           </div>
           ${renderListToggle("home-open-trades", openTrades.length + detectedHoldings.length)}
         </div>
         <div class="compact-list">
-            ${visibleOpenTrades
-              .map(
-                (trade) => {
-                  const pnlPercent = getTradePnlPercent(trade);
-                  const currentValue = getTradeCurrentValue(trade);
-                  const currentPrice = Number(getTradeCurrentMarket(trade.symbol).price || 0);
-                  const targetPrice = trade.takeProfitTargetPrice || "";
-                  const targetPnl = getTradeTpPnlPercent(trade, targetPrice);
-                  const isJoinedInvestment = state.user?.role === "user" && trade.userInvestment?.status === "ACTIVE";
-                  const isExpanded = state.expandedTradeIds.includes(trade.id);
-                  return `
-                    <details class="trade-disclosure trade-row-rich" data-trade-id="${trade.id}" data-trade-symbol-row="${trade.symbol}" data-trade-entry="${getTradeEntryPrice(trade)}" data-trade-side="${trade.side}" data-trade-quantity="${getTradeRemainingQuantity(trade)}" ${isExpanded ? "open" : ""}>
-                      <summary class="trade-summary-row">
-                        <div>
-                          <strong>${trade.symbol}</strong>
-                          <p class="muted-copy">${renderExchangeBadge(trade.exchange || getActiveExchange())}</p>
-                          <p class="muted-copy" data-trade-current-value>${formatUsdtUnit(currentValue)}</p>
+          ${visibleOpenTrades
+            .map(
+              (trade) => {
+                const pnlPercent = getTradePnlPercent(trade);
+                const currentValue = getTradeCurrentValue(trade);
+                const currentPrice = Number(getTradeCurrentMarket(trade.symbol).price || 0);
+                const targetPrice = trade.takeProfitTargetPrice || "";
+                const targetPnl = getTradeTpPnlPercent(trade, targetPrice);
+                const isJoinedInvestment = state.user?.role === "user" && trade.userInvestment?.status === "ACTIVE";
+                const isExpanded = state.expandedTradeIds.includes(trade.id);
+                return `
+                  <details class="trade-disclosure trade-row-rich" data-trade-id="${trade.id}" data-trade-symbol-row="${trade.symbol}" data-trade-entry="${getTradeEntryPrice(trade)}" data-trade-side="${trade.side}" data-trade-quantity="${getTradeRemainingQuantity(trade)}" ${isExpanded ? "open" : ""}>
+                    <summary class="trade-summary-row">
+                      <div>
+                        <strong>${trade.symbol}</strong>
+                        <p class="muted-copy">${renderExchangeBadge(trade.exchange || getActiveExchange())}</p>
+                        <p class="muted-copy" data-trade-current-value>${formatUsdtUnit(currentValue)}</p>
+                      </div>
+                      <div class="asset-values">
+                        ${renderTradeStatusBadge(trade.lifecycleStatus)}
+                        <strong class="${pnlPercent >= 0 ? "positive" : "negative"}" data-trade-pnl>${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>
+                        ${canManageTrades ? renderTradeJoinedUsersButton(trade) : ""}
+                      </div>
+                    </summary>
+                    <div class="trade-disclosure-body">
+                      <div class="trade-detail-grid">
+                        <div class="trade-detail-pill">
+                          <span>Side</span>
+                          <strong>${trade.side}</strong>
                         </div>
-                        <div class="asset-values">
-                          ${renderTradeStatusBadge(trade.lifecycleStatus)}
-                          <strong class="${pnlPercent >= 0 ? "positive" : "negative"}" data-trade-pnl>${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>
-                          ${canManageTrades ? renderTradeJoinedUsersButton(trade) : ""}
+                        <div class="trade-detail-pill">
+                          <span>Type</span>
+                          <strong>${trade.type}</strong>
                         </div>
-                      </summary>
-                      <div class="trade-disclosure-body">
-                        <div class="trade-detail-grid">
-                          <div class="trade-detail-pill">
-                            <span>Side</span>
-                            <strong>${trade.side}</strong>
-                          </div>
-                          <div class="trade-detail-pill">
-                            <span>Type</span>
-                            <strong>${trade.type}</strong>
-                          </div>
-                          <div class="trade-detail-pill">
-                            <span>${isJoinedInvestment ? "Amount" : "Quantity"}</span>
-                            <strong>${isJoinedInvestment ? formatUsdtUnit(trade.userInvestment.amountUsdt || 0) : formatNumber(getTradeRemainingQuantity(trade), 8)}</strong>
-                          </div>
+                        <div class="trade-detail-pill">
+                          <span>${isJoinedInvestment ? "Amount" : "Quantity"}</span>
+                          <strong>${isJoinedInvestment ? formatUsdtUnit(trade.userInvestment.amountUsdt || 0) : formatNumber(getTradeRemainingQuantity(trade), 8)}</strong>
                         </div>
-                        <div class="trade-detail-lines">
-                          <p class="muted-copy trade-meta-line" data-trade-entry>Entry ${getTradeEntryPrice(trade) ? formatNumber(getTradeEntryPrice(trade), 8) : "Market"}</p>
-                          <p class="muted-copy trade-meta-line" data-trade-current>Current ${currentPrice ? formatNumber(currentPrice, 8) : "-"}</p>
-                          <p class="muted-copy">Live value <span data-trade-current-value>${formatUsdtUnit(currentValue)}</span></p>
-                          ${
-                            targetPrice
-                              ? `<p class="muted-copy">TP ${formatNumber(targetPrice, 8)} <span class="${targetPnl >= 0 ? "positive" : "negative"}">${targetPnl >= 0 ? "+" : ""}${formatNumber(targetPnl, 2)}%</span></p>`
-                              : `<p class="muted-copy">TP not set yet.</p>`
-                          }
-                        </div>
+                      </div>
+                      <div class="trade-detail-lines">
+                        <p class="muted-copy trade-meta-line" data-trade-entry>Entry ${getTradeEntryPrice(trade) ? formatNumber(getTradeEntryPrice(trade), 8) : "Market"}</p>
+                        <p class="muted-copy trade-meta-line" data-trade-current>Current ${currentPrice ? formatNumber(currentPrice, 8) : "-"}</p>
+                        <p class="muted-copy">Live value <span data-trade-current-value>${formatUsdtUnit(currentValue)}</span></p>
                         ${
-                          canManageTrades || isJoinedInvestment
-                            ? `
-                              <div class="trade-actions-inline trade-actions-stack reveal-actions">
-                                ${canManageTrades ? `<button class="micro-btn" data-sell-trade="${trade.id}" type="button">Sell</button>` : ""}
-                                ${canManageTrades ? `<button class="micro-btn primary" data-tp-trade="${trade.id}" type="button">TP</button>` : ""}
-                                ${isJoinedInvestment ? `<button class="micro-btn danger" data-stop-trade-investment="${trade.id}" type="button">Stop</button>` : ""}
-                              </div>
-                            `
-                            : ""
+                          targetPrice
+                            ? `<p class="muted-copy">TP ${formatNumber(targetPrice, 8)} <span class="${targetPnl >= 0 ? "positive" : "negative"}">${targetPnl >= 0 ? "+" : ""}${formatNumber(targetPnl, 2)}%</span></p>`
+                            : `<p class="muted-copy">TP not set yet.</p>`
                         }
                       </div>
-                    </details>
-                  `;
-                }
-              )
-            .join("")}
-            ${visibleDetectedHoldings.map((holding) => renderExternalHoldingDisclosure(holding)).join("")}
-            ${!openTrades.length && !detectedHoldings.length ? `<p class="muted-copy">No open trades yet.</p>` : ""}
+                      ${
+                        canManageTrades || isJoinedInvestment
+                          ? `
+                            <div class="trade-actions-inline trade-actions-stack reveal-actions">
+                              ${canManageTrades ? `<button class="micro-btn" data-sell-trade="${trade.id}" type="button">Sell</button>` : ""}
+                              ${canManageTrades ? `<button class="micro-btn primary" data-tp-trade="${trade.id}" type="button">TP</button>` : ""}
+                              ${isJoinedInvestment ? `<button class="micro-btn danger" data-stop-trade-investment="${trade.id}" type="button">Stop</button>` : ""}
+                            </div>
+                          `
+                          : ""
+                      }
+                    </div>
+                  </details>
+                `;
+              }
+            )
+          .join("")}
+          ${visibleDetectedHoldings.map((holding) => renderExternalHoldingDisclosure(holding)).join("")}
+          ${!openTrades.length && !detectedHoldings.length ? `<p class="muted-copy">No open trades yet.</p>` : ""}
         </div>
       </div>
-      <div>
-        <div class="section-head">
-          <div>
-            <h3>Open Orders</h3>
-            <p class="muted-copy">Live ${getExchangeLabel(getActiveExchange())} spot orders that are still waiting to fill.</p>
+      ${canManageTrades ? `
+        <div>
+          <div class="section-head">
+            <div>
+              <h3>Queue Trades</h3>
+              <p class="muted-copy">Submitted BUY and SELL orders still waiting to fill.</p>
+            </div>
+            ${renderListToggle("home-open-orders", queueItemsCount)}
           </div>
-          ${renderListToggle("home-open-orders", openOrders.length)}
+          <div class="compact-list">
+            ${visibleQueuedTrades.map(renderQueuedTradeDisclosure).join("")}
+            ${visibleExternalOrders.map((order) => renderPendingOrderDisclosure(order, { showCancel: true })).join("")}
+            ${!queueItemsCount ? `<p class="muted-copy">No queued trades.</p>` : ""}
+          </div>
         </div>
-        <div class="compact-list">
-          ${visibleOpenOrders.map((order) => renderPendingOrderDisclosure(order, { showCancel: true })).join("") || `<p class="muted-copy">No open orders.</p>`}
-        </div>
-      </div>
+      ` : ""}
     </section>
   `;
 }
 
 function getAdminTradeOptionsForUsers() {
   return (state.trades || [])
-    .filter((trade) => ["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "").toUpperCase()))
+    .filter((trade) => isOpenTrade(trade) || isQueuedTrade(trade))
     .map((trade) => {
-      const lifecycleStatus = String(trade.lifecycleStatus || "").toUpperCase();
       const pnlPercent = getTradePnlPercent(trade);
-      const isJoinable = lifecycleStatus === "OPEN" && pnlPercent >= 0;
+      const isJoinable = isOpenTrade(trade) && pnlPercent >= 0;
       return {
         ...trade,
         isJoinable,
-        joinLabel: isJoinable ? "Open" : lifecycleStatus === "PENDING" ? "Queue" : "Hold",
+        joinLabel: isJoinable ? "Open" : isQueuedTrade(trade) ? "Queue" : "Hold",
       };
     })
     .sort((a, b) => Number(b.isJoinable) - Number(a.isJoinable));
@@ -10168,14 +10320,14 @@ function renderAdminDigitalProductRow(product = {}) {
     <article class="admin-digital-product-row">
       ${renderDigitalServiceImage(product)}
       <div class="admin-digital-row-main">
-        <strong>${escapeHtml(product.name || "Digital Service")}</strong>
-        <p class="muted-copy">${escapeHtml(product.category || product.storeName || "Digital")} | ${escapeHtml(product.storeName || "")}</p>
+        <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
+        <p class="muted-copy">${escapeHtml(getDigitalProductDisplayCategory(product))} | ${escapeHtml(product.storeName || "")}</p>
       </div>
       <div class="admin-digital-row-price">
         <strong>${escapeHtml(storeDisplayPrice.equivalent ? `${storeDisplayPrice.primary} / ${storeDisplayPrice.equivalent}` : storeDisplayPrice.primary)}</strong>
         <span class="${productStatus === "Visible" ? "success-copy" : "warning-copy"}">${productStatus}</span>
       </div>
-      <button class="icon-action" data-admin-digital-product-edit="${escapeHtml(product.id || "")}" type="button" aria-label="Edit ${escapeHtml(product.name || "product")}" title="Edit product">${icon("edit")}</button>
+      <button class="icon-action" data-admin-digital-product-edit="${escapeHtml(product.id || "")}" type="button" aria-label="Edit ${escapeHtml(getDigitalProductDisplayName(product))}" title="Edit product">${icon("edit")}</button>
     </article>
   `;
 }
@@ -10215,7 +10367,7 @@ function renderAdminDigitalProductForm(product = {}) {
     <form class="admin-digital-product-card" data-admin-digital-product-form="${escapeHtml(product.id || "")}">
       ${renderDigitalServiceImage(product)}
       <div class="admin-digital-product-main">
-        <strong>${escapeHtml(product.name || "Digital Service")}</strong>
+        <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
         <p class="muted-copy">${escapeHtml(product.storeName || (product.provider === "emma" ? "Emma Store" : "Alaba Store"))}</p>
         <div class="admin-digital-price-row">
           <span><small>API cost</small><b>${escapeHtml(sourcePrice)}</b></span>
@@ -10223,8 +10375,8 @@ function renderAdminDigitalProductForm(product = {}) {
           <em class="${product.supplierAvailable === false ? "warning-copy" : "success-copy"}">${supplierStatus}</em>
         </div>
         <div class="admin-digital-product-grid">
-          <label>Name <input name="displayName" value="${escapeHtml(override.displayName || "")}" placeholder="${escapeHtml(product.name || "")}" /></label>
-          <label>Category <input name="displayCategory" value="${escapeHtml(override.displayCategory || "")}" placeholder="${escapeHtml(product.category || "")}" /></label>
+          <label>Name <input name="displayName" value="${escapeHtml(override.displayName || "")}" placeholder="${escapeHtml(getDigitalProductDisplayName(product))}" /></label>
+          <label>Category <input name="displayCategory" value="${escapeHtml(override.displayCategory || "")}" placeholder="${escapeHtml(getDigitalProductDisplayCategory(product))}" /></label>
           <label>Image <input name="customImageUrl" value="${escapeHtml(override.customImageUrl || "")}" placeholder="https://..." /></label>
           <label>Status
             <select name="enabled">
@@ -10263,7 +10415,7 @@ function renderAdminDigitalOrderRow(order = {}) {
   return `
     <div class="asset-card admin-finance-card admin-store-order-row">
       <div>
-        <strong>${escapeHtml(order.productName || "Digital service")}</strong>
+        <strong>${escapeHtml(stripLeadingSupplierMetadata(order.productName || "Digital service"))}</strong>
         <p class="muted-copy">${escapeHtml(order.user?.name || "User")} | ${escapeHtml(order.user?.email || "")}</p>
         <p class="muted-copy">Ref: ${escapeHtml(order.requestId || "")}</p>
         ${deliveryLink ? `<a class="text-link compact-link" href="${escapeHtml(deliveryLink)}" target="_blank" rel="noopener noreferrer">Delivery link</a>` : ""}
@@ -12066,7 +12218,7 @@ function renderDigitalServicesPane() {
   const categories = state.digitalServices.categories || [];
   const query = state.digitalServices.query || "";
   const activeCategory = state.digitalServices.category || "";
-  const activeStore = state.digitalServices.store || "alaba";
+  const activeStore = state.digitalServices.store || "";
   const balance = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   const readyOrders = orders.filter((order) => String(order.status || "").toLowerCase() === "delivered" || getDigitalDeliveryLink(order.delivery)).length;
   const featuredProducts = products.filter((product) => product.featured).slice(0, 4);
@@ -13998,6 +14150,9 @@ async function confirmMarketSell(tradeId) {
 }
 
 async function cancelPendingOrder(orderId, symbol) {
+  if (!window.confirm(`Cancel ${symbol || "this"} queued order ${String(orderId || "").slice(-8)}?`)) {
+    return;
+  }
   await withLoading(async () => {
     await api(`/api/exchange/open-orders/${encodeURIComponent(orderId)}/cancel`, {
       method: "POST",
