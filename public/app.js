@@ -2365,6 +2365,10 @@ function isTradeStrictlyOpen(trade) {
 
 function isTradeLiveForBoard(trade) {
   const status = String(trade.lifecycleStatus || "").toUpperCase();
+  const userHasJoinedTrade = trade.userInvestment?.status === "ACTIVE" || !!trade.mirroredExecution;
+  if (state.user?.role === "user" && !userHasJoinedTrade && ["OPEN", "PENDING"].includes(status)) {
+    return true;
+  }
   if (status === "OPEN") {
     return isTradeStrictlyOpen(trade);
   }
