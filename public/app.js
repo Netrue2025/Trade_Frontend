@@ -668,7 +668,9 @@ async function api(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error || "Request failed.");
+    const error = new Error(payload.error || "Request failed.");
+    error.payload = payload;
+    throw error;
   }
   return payload;
 }
@@ -7496,6 +7498,28 @@ async function requeryAdminDigitalOrder(orderId) {
   }).catch((error) => showError(error.message));
 }
 
+async function retryAdminDigitalOrderFulfillment(orderId) {
+  if (!orderId) {
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/orders/${encodeURIComponent(orderId)}/retry-fulfillment`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (payload.order) {
+      state.digitalServices.admin = {
+        ...(state.digitalServices.admin || {}),
+        orders: (state.digitalServices.admin?.orders || []).map((order) => order.id === payload.order.id ? payload.order : order),
+        summary: payload.summary || state.digitalServices.admin?.summary || {},
+      };
+    }
+    await loadDigitalServicesSnapshot({ force: true });
+    render();
+    showNotice("Fulfillment retry queued");
+  }).catch((error) => showError(error.message));
+}
+
 async function recoverAdminDigitalOrders() {
   await withLoading(async () => {
     const payload = await api("/api/admin/integrations/digital-services/recover-orders", {
@@ -8293,7 +8317,7 @@ function updateDigitalServiceReviewState() {
     ...state.actionModal,
     quantity,
   };
-  button.disabled = !(total > 0);
+  button.disabled = !(total > 0) || !isDigitalProductPurchasable(product);
   if (totalNode) {
     totalNode.textContent = displayPrice.equivalent ? `${displayPrice.primary} (${displayPrice.equivalent})` : displayPrice.primary;
   }
@@ -8400,6 +8424,10 @@ function reviewDigitalServicePurchase() {
     showError("Select a digital service.");
     return;
   }
+  if (!isDigitalProductPurchasable(product)) {
+    showError("This product is currently unavailable.");
+    return;
+  }
   const quantity = Math.max(1, Math.min(Number(document.getElementById("digital-service-quantity-input")?.value || state.actionModal.quantity || 1), 1000));
   if (!state.user) {
     savePendingShopOrder({ productId: product.id, quantity, store: product.storeKey || product.provider || state.digitalServices.store || "" });
@@ -8436,6 +8464,10 @@ async function submitDigitalServicePurchase() {
     showError("Select a digital service.");
     return;
   }
+  if (!isDigitalProductPurchasable(product)) {
+    showError("This product is currently unavailable.");
+    return;
+  }
   const quantity = Math.max(1, Math.min(Number(state.actionModal.quantity || 1), 1000));
   const total = getDigitalProductNgnPrice(product) * quantity;
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
@@ -8450,6 +8482,7 @@ async function submitDigitalServicePurchase() {
         productId: product.id,
         quantity,
         paymentMethod,
+        expectedAmount: String(total),
       }),
     });
     if (paymentMethod === "paystack" && response.payment?.authorizationUrl) {
@@ -8463,7 +8496,16 @@ async function submitDigitalServicePurchase() {
     await Promise.all([loadFinancialDashboard(), loadDigitalServicesSnapshot()]);
     render();
     showNotice("Digital service order submitted.");
-  }).catch((error) => showError(error.message));
+  }).catch((error) => {
+    if (error.payload?.code === "PRICE_CHANGED") {
+      const previous = error.payload.previousAmount ? formatNaira(error.payload.previousAmount) : formatNaira(total);
+      const current = error.payload.currentAmount ? formatNaira(error.payload.currentAmount) : "";
+      showError(`Price updated. Old price: ${previous}${current ? `. Current price: ${current}` : ""}. Please review again.`);
+      void loadDigitalServiceProducts({ force: true }).then(() => render()).catch(() => undefined);
+      return;
+    }
+    showError(error.message);
+  });
 }
 
 function getPaystackReferenceFromUrl() {
@@ -8587,6 +8629,20 @@ function getDigitalServiceProductById(productId) {
   ].find((product) => String(product.id) === id) || null;
 }
 
+function isDigitalProductPurchasable(product = {}) {
+  return product && product.available !== false && Number(product.sellingPrice || product.price || product.ngnEquivalent || 0) > 0;
+}
+
+function getDigitalProductAvailabilityLabel(product = {}) {
+  if (product.available !== false) {
+    return "";
+  }
+  if (product.supplierAvailable === false || Number(product.stock || 0) <= 0) {
+    return "OUT OF STOCK";
+  }
+  return "UNAVAILABLE";
+}
+
 function renderDigitalServiceImage(product = {}, className = "digital-service-img") {
   const src = product.imageUrl || "/services/default-digital-service.png";
   return `<img class="${className}" src="${escapeHtml(src)}" alt="${escapeHtml(getDigitalProductDisplayName(product))}" loading="lazy" onerror="this.onerror=null;this.src='/services/default-digital-service.png';" />`;
@@ -8594,11 +8650,12 @@ function renderDigitalServiceImage(product = {}, className = "digital-service-im
 
 function renderDigitalServiceProductCards(products = []) {
   return products.map((product) => `
-    <button class="digital-product-card" data-digital-service-product="${escapeHtml(product.id)}" type="button">
+    <button class="digital-product-card ${isDigitalProductPurchasable(product) ? "" : "is-unavailable"}" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${isDigitalProductPurchasable(product) ? "" : "disabled"}>
       ${renderDigitalServiceImage(product)}
       <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
       <span>${escapeHtml(getDigitalProductDisplayCategory(product))}</span>
       ${renderDigitalProductPrice(product, 1, { compact: true })}
+      ${!isDigitalProductPurchasable(product) ? `<em class="store-stock-badge">${escapeHtml(getDigitalProductAvailabilityLabel(product))}</em>` : ""}
     </button>
   `).join("") || `<p class="vtu-empty-state">No digital service found.</p>`;
 }
@@ -8620,6 +8677,9 @@ function openDigitalServiceProduct(productId) {
 
 function bindDigitalProductButtons(root = document) {
   root.querySelectorAll("[data-digital-service-product]").forEach((button) => {
+    if (button.disabled) {
+      return;
+    }
     button.addEventListener("click", () => openDigitalServiceProduct(button.dataset.digitalServiceProduct));
   });
 }
@@ -8815,6 +8875,7 @@ function renderDigitalServiceDetailModal() {
   const total = getDigitalProductNgnPrice(product) * quantity;
   const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  const purchasable = isDigitalProductPurchasable(product);
   return `
     <div class="modal-backdrop">
         <div class="modal-card action-modal-card digital-service-detail-modal">
@@ -8830,6 +8891,7 @@ function renderDigitalServiceDetailModal() {
           <div class="action-metric"><span>Total</span><strong id="digital-service-total-preview">${escapeHtml(displayPrice.equivalent ? `${displayPrice.primary} (${displayPrice.equivalent})` : displayPrice.primary)}</strong></div>
           ${displayPrice.equivalent ? `<div class="action-metric"><span>Wallet debit</span><strong>${formatNaira(total)}</strong></div>` : ""}
         </div>
+        ${!purchasable ? `<p class="warning-copy">${escapeHtml(getDigitalProductAvailabilityLabel(product) || "This product is unavailable now.")}</p>` : ""}
         <label class="stack-label">
           <span>Quantity</span>
           <input id="digital-service-quantity-input" type="number" min="1" max="1000" step="1" value="${escapeHtml(quantity)}" />
@@ -8837,7 +8899,7 @@ function renderDigitalServiceDetailModal() {
         <p class="muted-copy" id="digital-service-balance-preview">${state.user ? `Wallet balance ${formatNaira(available)}` : "Login or signup to complete checkout."}</p>
         <div class="modal-actions">
           <button class="button-secondary" data-digital-services-back type="button">Back</button>
-          <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 ? "" : "disabled"}>${icon("check")} ${state.user ? "Buy now" : "Login to buy"}</button>
+          <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 && purchasable ? "" : "disabled"}>${icon("check")} ${purchasable ? (state.user ? "Buy now" : "Login to buy") : "Unavailable"}</button>
         </div>
       </div>
     </div>
@@ -8851,6 +8913,7 @@ function renderDigitalServiceConfirmModal() {
   const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   const walletDisabled = available < total;
+  const purchasable = isDigitalProductPurchasable(product);
   const paymentMethod = String(state.actionModal.paymentMethod || (walletDisabled ? "paystack" : "wallet")).toLowerCase();
   return `
     <div class="modal-backdrop">
@@ -8883,7 +8946,7 @@ function renderDigitalServiceConfirmModal() {
         </section>
         <div class="modal-actions">
           <button class="button-secondary" data-digital-services-back-detail type="button">Cancel</button>
-          <button class="button-primary shimmer-button" id="digital-service-confirm-btn" type="button">${icon("check")} ${paymentMethod === "paystack" ? "Continue to Paystack" : "Pay with Wallet"}</button>
+          <button class="button-primary shimmer-button" id="digital-service-confirm-btn" type="button" ${purchasable ? "" : "disabled"}>${icon("check")} ${purchasable ? (paymentMethod === "paystack" ? "Continue to Paystack" : "Pay with Wallet") : "Unavailable"}</button>
         </div>
       </div>
     </div>
@@ -10486,7 +10549,7 @@ function renderAdminDigitalServicesPanel() {
             <option value="false" ${!settings.enabled ? "selected" : ""}>Disabled</option>
           </select>
         </label>
-        <label>Global markup % <input name="globalMarkupPercent" type="number" min="0" max="100" step="0.01" value="${escapeHtml(settings.globalMarkupPercent || "0")}" /></label>
+        <label>Global markup % <input name="globalMarkupPercent" type="number" min="0" step="0.01" value="${escapeHtml(settings.globalMarkupPercent || "0")}" /></label>
         <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop", "ssondigitalworks.online"]).join(", "))}" placeholder="akunding.shop, ssondigitalworks.online" /></label>
         <div class="modal-actions inline-modal-actions">
           <button class="button-secondary" id="admin-digital-services-sync-btn" type="button">${icon("refresh")} Sync products</button>
@@ -10631,6 +10694,9 @@ function renderAdminDigitalProductForm(product = {}) {
 function renderAdminDigitalOrderRow(order = {}) {
   const status = String(order.status || "processing").toUpperCase();
   const canRequery = ["PAYMENT_RESERVED", "SUBMITTED", "PROCESSING"].includes(status) && order.supplierOrderId;
+  const canRetryFulfillment = String(order.paymentStatus || "").toLowerCase() === "paid"
+    && String(order.fulfillmentStatus || "").toLowerCase() === "failed_retryable"
+    && status !== "DELIVERED";
   const deliveryLink = getDigitalDeliveryLink(order.delivery);
   return `
     <div class="asset-card admin-finance-card admin-store-order-row">
@@ -10645,6 +10711,7 @@ function renderAdminDigitalOrderRow(order = {}) {
         <strong>${formatNaira(order.amountCharged || 0)}</strong>
         ${deliveryLink ? `<button class="micro-btn" data-copy-text="${escapeHtml(deliveryLink)}" type="button">${icon("copy")} Copy</button>` : ""}
         ${canRequery ? `<button class="micro-btn" data-admin-digital-order-requery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Requery</button>` : ""}
+        ${canRetryFulfillment ? `<button class="micro-btn" data-admin-digital-order-retry="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Retry Fulfillment</button>` : ""}
       </div>
     </div>
   `;
@@ -12499,17 +12566,19 @@ function renderDigitalServicesPane() {
 }
 
 function renderStoreProductCard(product = {}, featured = false) {
+  const purchasable = isDigitalProductPurchasable(product);
   return `
-    <button class="digital-product-card store-product-card ${featured ? "featured" : ""}" data-digital-service-product="${escapeHtml(product.id)}" type="button">
+    <button class="digital-product-card store-product-card ${featured ? "featured" : ""} ${purchasable ? "" : "is-unavailable"}" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${purchasable ? "" : "disabled"}>
       <span class="store-product-media">${renderDigitalServiceImage(product)}</span>
       <span class="store-product-body">
         <small>${escapeHtml(getDigitalProductDisplayCategory(product))}</small>
         <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
         <span>${escapeHtml(product.description || product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
+        ${!purchasable ? `<em class="store-stock-badge">${escapeHtml(getDigitalProductAvailabilityLabel(product))}</em>` : ""}
       </span>
       <span class="store-product-footer">
         ${renderDigitalProductPrice(product, 1, { compact: true })}
-        <em>${state.user ? "Buy" : "Login"}</em>
+        <em>${purchasable ? (state.user ? "Buy" : "Login") : "Unavailable"}</em>
       </span>
     </button>
   `;
@@ -13242,6 +13311,10 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-admin-digital-order-requery]").forEach((button) => {
     button.addEventListener("click", () => requeryAdminDigitalOrder(button.dataset.adminDigitalOrderRequery));
+  });
+
+  document.querySelectorAll("[data-admin-digital-order-retry]").forEach((button) => {
+    button.addEventListener("click", () => retryAdminDigitalOrderFulfillment(button.dataset.adminDigitalOrderRetry));
   });
 
   document.querySelectorAll("[data-admin-digital-orders-recover]").forEach((button) => {
