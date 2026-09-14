@@ -29,6 +29,7 @@ const PWA_NOTIFICATION_DISMISSED_UNTIL_KEY = "netruefi-pwa-notification-dismisse
 const PWA_NOTIFICATION_DISMISS_MS = 1000 * 60 * 60 * 24 * 3;
 const REFERRAL_CODE_STORAGE_KEY = "netruefi-referral-code";
 const SHOP_PENDING_ORDER_STORAGE_KEY = "netruefi-pending-shop-order";
+const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const STORE_OPTIONS = [
   { id: "", label: "All Products" },
   { id: "alaba", label: "Alaba Store" },
@@ -118,6 +119,14 @@ const state = {
   authExchange: localStorage.getItem("tradeflow-auth-exchange") || "bybit",
   selectedExchange: localStorage.getItem("tradeflow-selected-exchange") || "bybit",
   authTab: "login",
+  googleAuth: {
+    loaded: false,
+    loading: false,
+    enabled: false,
+    clientId: "",
+    scriptReady: false,
+    buttonMounted: false,
+  },
   showSplash: false,
   hasShownSplash: true,
   activeTab: "home",
@@ -912,6 +921,121 @@ async function requireSessionUser() {
     );
   }
   return normalizeUserPayload(payload.user);
+}
+
+async function loadGoogleAuthConfig() {
+  if (state.googleAuth.loaded || state.googleAuth.loading) {
+    return state.googleAuth;
+  }
+  state.googleAuth.loading = true;
+  try {
+    const payload = await api("/api/auth/google/config");
+    state.googleAuth = {
+      ...state.googleAuth,
+      loaded: true,
+      loading: false,
+      enabled: !!payload.enabled && !!payload.clientId,
+      clientId: payload.clientId || "",
+    };
+  } catch {
+    state.googleAuth = {
+      ...state.googleAuth,
+      loaded: true,
+      loading: false,
+      enabled: false,
+      clientId: "",
+    };
+  }
+  return state.googleAuth;
+}
+
+function loadGoogleIdentityScript() {
+  if (state.googleAuth.scriptReady || window.google?.accounts?.id) {
+    state.googleAuth.scriptReady = true;
+    return Promise.resolve();
+  }
+  const existing = document.querySelector(`script[src="${GOOGLE_IDENTITY_SCRIPT_URL}"]`);
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      existing.addEventListener("load", () => {
+        state.googleAuth.scriptReady = true;
+        resolve();
+      }, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = GOOGLE_IDENTITY_SCRIPT_URL;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => {
+      state.googleAuth.scriptReady = true;
+      resolve();
+    };
+    script.onerror = () => reject(new Error("Google sign-in could not be loaded."));
+    document.head.appendChild(script);
+  });
+}
+
+function getVisibleAuthRole() {
+  return document.querySelector(".auth-form select[name='role']")?.value || "user";
+}
+
+async function completeGoogleAuth(credential) {
+  await withLoading(async () => {
+    const result = await api("/api/auth/google", {
+      method: "POST",
+      body: JSON.stringify({
+        credential,
+        role: getVisibleAuthRole(),
+        referralCode: getPendingReferralCode(),
+        exchange: state.authExchange || "bybit",
+      }),
+    });
+    setAuthSessionToken(result.sessionToken);
+    state.user = normalizeUserPayload(result.user || await requireSessionUser());
+    setSelectedExchange(state.user.activeExchange || "bybit");
+    const resumedShopOrder = await resumePendingShopOrder();
+    if (!resumedShopOrder) {
+      state.activeTab = "home";
+    }
+    if (window.history?.replaceState && !resumedShopOrder) {
+      window.history.replaceState({}, "", getTabRoute("home"));
+    }
+    await loadDashboardData();
+    await verifyPaystackDigitalPaymentFromUrl();
+    clearPendingReferralCode();
+    showNotice(result.isNewUser ? "Account created" : `Welcome back, ${state.user.name}`);
+  }).catch((error) => showError(error.message));
+}
+
+function mountGoogleAuthButtons() {
+  if (!state.googleAuth.enabled || !state.googleAuth.clientId) {
+    return;
+  }
+  const hosts = [...document.querySelectorAll("[data-google-auth-button]")].filter((host) => !host.dataset.googleMounted);
+  if (!hosts.length) {
+    return;
+  }
+  void loadGoogleIdentityScript()
+    .then(() => {
+      window.google.accounts.id.initialize({
+        client_id: state.googleAuth.clientId,
+        callback: (response) => completeGoogleAuth(response?.credential || ""),
+      });
+      for (const host of hosts) {
+        host.dataset.googleMounted = "1";
+        window.google.accounts.id.renderButton(host, {
+          theme: state.theme === "dark" ? "filled_black" : "outline",
+          size: "large",
+          shape: "pill",
+          text: "continue_with",
+          width: Math.min(host.clientWidth || 320, 360),
+        });
+      }
+    })
+    .catch((error) => showError(error.message));
 }
 
 function beginLoading() {
@@ -2611,6 +2735,13 @@ function readPendingShopOrder() {
 
 function clearPendingShopOrder() {
   localStorage.removeItem(SHOP_PENDING_ORDER_STORAGE_KEY);
+}
+
+function createIdempotencyKey(prefix = "request") {
+  if (window.crypto?.randomUUID) {
+    return `${prefix}-${window.crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function shuffleList(items = []) {
@@ -4754,13 +4885,14 @@ function renderActionModal() {
   }
 
   if (state.actionModal.type === "shop-auth") {
+    const isPaymentReturn = !!state.actionModal.paymentReference;
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card shop-auth-modal">
           <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
-          <p class="modal-eyebrow neutral">Complete order</p>
+          <p class="modal-eyebrow neutral">${isPaymentReturn ? "Verify payment" : "Complete order"}</p>
           <h3>${state.authTab === "register" ? "Create account" : "Login to continue"}</h3>
-          <p class="modal-text">Your selected product is saved. Login or signup to complete checkout.</p>
+          <p class="modal-text">${isPaymentReturn ? "Login or signup with the account used for checkout so we can verify your Paystack payment." : "Your selected product is saved. Login or signup to complete checkout."}</p>
           <div class="auth-tab-row compact-auth-tabs">
             <button class="${state.authTab === "login" ? "active" : ""}" data-auth-mode="login" type="button">Login</button>
             <button class="${state.authTab === "register" ? "active" : ""}" data-auth-mode="register" type="button">Signup</button>
@@ -5300,10 +5432,12 @@ function startSplashSequence(force = false) {
 }
 
 function renderAuthPane() {
+  const googleButton = renderGoogleAuthButton();
   if (state.authTab === "register") {
     const referralCode = getPendingReferralCode();
     return `
       <form id="register-form" class="auth-form">
+        ${googleButton}
         ${referralCode ? `<div class="referral-signup-note">${icon("gift")} Referral code applied</div>` : ""}
         <input type="hidden" name="referralCode" value="${escapeHtml(referralCode)}" />
         <div class="auth-name-grid">
@@ -5331,6 +5465,7 @@ function renderAuthPane() {
 
   return `
     <form id="login-form" class="auth-form">
+      ${googleButton}
       <label>Email <input name="email" type="email" placeholder="Email address" autocomplete="email" required /></label>
       ${renderPasswordField({
         label: "Password",
@@ -5386,6 +5521,20 @@ function renderAuthLanding() {
         ${renderAuthPane()}
       </section>
     </section>
+  `;
+}
+
+function renderGoogleAuthButton() {
+  if (state.googleAuth.loaded && !state.googleAuth.enabled) {
+    return "";
+  }
+  return `
+    <div class="google-auth-block">
+      ${state.googleAuth.enabled
+        ? `<div class="google-auth-button" data-google-auth-button></div>`
+        : `<button class="google-auth-fallback" type="button" disabled>Continue with Google</button>`}
+      <div class="auth-divider"><span>or</span></div>
+    </div>
   `;
 }
 
@@ -5620,6 +5769,7 @@ function bindPasswordVisibilityToggles() {
 
 function bindAuthForms() {
   bindPasswordVisibilityToggles();
+  mountGoogleAuthButtons();
 
   const loginForm = document.getElementById("login-form");
   const registerForm = document.getElementById("register-form");
@@ -5644,6 +5794,7 @@ function bindAuthForms() {
           window.history.replaceState({}, "", getTabRoute("home"));
         }
         await loadDashboardData();
+        await verifyPaystackDigitalPaymentFromUrl();
         clearFormDraft(loginForm);
         showNotice(`Welcome back, ${state.user.name}`);
       }).catch((error) => showError(error.message));
@@ -5672,6 +5823,7 @@ function bindAuthForms() {
           window.history.replaceState({}, "", getTabRoute("home"));
         }
         await loadDashboardData();
+        await verifyPaystackDigitalPaymentFromUrl();
         clearFormDraft(registerForm);
         clearPendingReferralCode();
         showNotice("Account created");
@@ -8137,12 +8289,11 @@ function updateDigitalServiceReviewState() {
   const total = getDigitalProductNgnPrice(product) * quantity;
   const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
-  const canProceed = !state.user || available >= total;
   state.actionModal = {
     ...state.actionModal,
     quantity,
   };
-  button.disabled = !(total > 0 && canProceed);
+  button.disabled = !(total > 0);
   if (totalNode) {
     totalNode.textContent = displayPrice.equivalent ? `${displayPrice.primary} (${displayPrice.equivalent})` : displayPrice.primary;
   }
@@ -8265,11 +8416,15 @@ function reviewDigitalServicePurchase() {
     showNotice("Order saved. Login or signup to complete checkout.");
     return;
   }
+  const total = getDigitalProductNgnPrice(product) * quantity;
+  const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   state.actionModal = {
     type: "digital-service-confirm",
     productId: product.id,
     product,
     quantity,
+    paymentMethod: available >= total ? "wallet" : "paystack",
+    idempotencyKey: createIdempotencyKey(`digital-${product.id}`),
     returnTo: state.actionModal?.returnTo || (state.activeTab === "store" ? "store" : "modal"),
   };
   render();
@@ -8282,15 +8437,25 @@ async function submitDigitalServicePurchase() {
     return;
   }
   const quantity = Math.max(1, Math.min(Number(state.actionModal.quantity || 1), 1000));
+  const total = getDigitalProductNgnPrice(product) * quantity;
+  const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  const requestedPaymentMethod = String(state.actionModal.paymentMethod || "wallet").toLowerCase();
+  const paymentMethod = requestedPaymentMethod === "paystack" || available < total ? "paystack" : "wallet";
+  const idempotencyKey = state.actionModal.idempotencyKey || createIdempotencyKey(`digital-${product.id}`);
   await withLoading(async () => {
     const response = await api("/api/digital-services/orders", {
       method: "POST",
-      headers: { "Idempotency-Key": `digital-${product.id}-${Date.now()}-${Math.random().toString(16).slice(2)}` },
+      headers: { "Idempotency-Key": idempotencyKey },
       body: JSON.stringify({
         productId: product.id,
         quantity,
+        paymentMethod,
       }),
     });
+    if (paymentMethod === "paystack" && response.payment?.authorizationUrl) {
+      window.location.assign(response.payment.authorizationUrl);
+      return;
+    }
     state.actionModal = {
       type: "digital-service-receipt",
       order: response.order,
@@ -8299,6 +8464,36 @@ async function submitDigitalServicePurchase() {
     render();
     showNotice("Digital service order submitted.");
   }).catch((error) => showError(error.message));
+}
+
+function getPaystackReferenceFromUrl() {
+  const params = new URLSearchParams(window.location.search || "");
+  return String(params.get("reference") || params.get("trxref") || "").trim();
+}
+
+async function verifyPaystackDigitalPaymentFromUrl() {
+  const reference = getPaystackReferenceFromUrl();
+  if (!reference || !state.user || state.user.role !== "user") {
+    return false;
+  }
+  await withLoading(async () => {
+    const payload = await api("/api/digital-services/orders/paystack/verify", {
+      method: "POST",
+      body: JSON.stringify({ reference }),
+    });
+    state.activeTab = "store";
+    state.actionModal = {
+      type: "digital-service-receipt",
+      order: payload.order,
+    };
+    await Promise.all([loadFinancialDashboard(), loadDigitalServicesSnapshot()]);
+    if (window.history?.replaceState) {
+      window.history.replaceState({}, "", getTabRoute("store"));
+    }
+    render();
+    showNotice("Payment verified.");
+  }).catch((error) => showError(error.message));
+  return true;
 }
 
 async function resumePendingShopOrder() {
@@ -8315,11 +8510,15 @@ async function resumePendingShopOrder() {
     return false;
   }
   state.activeTab = "store";
+  const total = getDigitalProductNgnPrice(product) * Math.max(1, Math.min(Number(pending.quantity || 1), 1000));
+  const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   state.actionModal = {
     type: "digital-service-confirm",
     productId: product.id,
     product,
     quantity: Math.max(1, Math.min(Number(pending.quantity || 1), 1000)),
+    paymentMethod: available >= total ? "wallet" : "paystack",
+    idempotencyKey: createIdempotencyKey(`digital-${product.id}`),
     returnTo: "store",
   };
   clearPendingShopOrder();
@@ -8485,10 +8684,10 @@ function renderDigitalServiceBrowserModal() {
 function renderDigitalServiceOrderRow(order = {}) {
   const deliveryLink = getDigitalDeliveryLink(order.delivery);
   const rawStatus = String(order.status || "processing").toUpperCase();
-  const status = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING"].includes(rawStatus)
+  const status = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING", "PAID"].includes(rawStatus)
     ? "DELIVERED"
     : rawStatus;
-  const canCheckDelivery = !deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING"].includes(rawStatus);
+  const canCheckDelivery = !deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING", "PAID"].includes(rawStatus);
   const orderId = order.id || order.requestId || "";
   return `
     <div class="asset-card digital-order-row">
@@ -8502,6 +8701,7 @@ function renderDigitalServiceOrderRow(order = {}) {
       </div>
       <div class="asset-values">
         <strong>${formatNaira(order.amountCharged || 0)}</strong>
+        <p class="muted-copy">${escapeHtml(order.paymentMethod === "paystack" ? "Paystack" : "Wallet")}</p>
         <p class="muted-copy">${escapeHtml(order.requestId || "")}</p>
         <button class="text-link compact-link" data-digital-service-order-receipt="${escapeHtml(orderId)}" type="button">View</button>
         ${canCheckDelivery ? `<button class="micro-btn" data-digital-service-order-requery="${escapeHtml(orderId)}" type="button">${icon("refresh")} Check</button>` : ""}
@@ -8615,7 +8815,6 @@ function renderDigitalServiceDetailModal() {
   const total = getDigitalProductNgnPrice(product) * quantity;
   const displayPrice = getDigitalProductDisplayPrice(product, quantity);
   const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
-  const canProceed = !state.user || available >= total;
   return `
     <div class="modal-backdrop">
         <div class="modal-card action-modal-card digital-service-detail-modal">
@@ -8638,7 +8837,7 @@ function renderDigitalServiceDetailModal() {
         <p class="muted-copy" id="digital-service-balance-preview">${state.user ? `Wallet balance ${formatNaira(available)}` : "Login or signup to complete checkout."}</p>
         <div class="modal-actions">
           <button class="button-secondary" data-digital-services-back type="button">Back</button>
-          <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 && canProceed ? "" : "disabled"}>${icon("check")} ${state.user ? "Buy now" : "Login to buy"}</button>
+          <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 ? "" : "disabled"}>${icon("check")} ${state.user ? "Buy now" : "Login to buy"}</button>
         </div>
       </div>
     </div>
@@ -8650,21 +8849,41 @@ function renderDigitalServiceConfirmModal() {
   const quantity = Math.max(1, Number(state.actionModal.quantity || 1));
   const total = getDigitalProductNgnPrice(product) * quantity;
   const displayPrice = getDigitalProductDisplayPrice(product, quantity);
+  const available = Number(getFinancialWallet("NGN")?.availableBalance || 0);
+  const walletDisabled = available < total;
+  const paymentMethod = String(state.actionModal.paymentMethod || (walletDisabled ? "paystack" : "wallet")).toLowerCase();
   return `
     <div class="modal-backdrop">
-      <div class="modal-card action-modal-card">
+      <div class="modal-card action-modal-card digital-checkout-modal">
         <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
         <p class="modal-eyebrow neutral">Confirm</p>
-        <h3>Buy digital service</h3>
+        <h3>Complete purchase</h3>
+        <div class="digital-checkout-product">
+          ${renderDigitalServiceImage(product, "digital-checkout-img")}
+          <div>
+            <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
+            <p>${escapeHtml(product.description || product.planLabel || product.deliveryLabel || "Premium digital access delivered after purchase.")}</p>
+          </div>
+        </div>
         <div class="action-metric-stack">
           <div class="action-metric"><span>Service</span><strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong></div>
           <div class="action-metric"><span>Quantity</span><strong>${quantity.toLocaleString()}</strong></div>
           <div class="action-metric"><span>Price</span><strong>${escapeHtml(displayPrice.primary)}</strong></div>
-          <div class="action-metric"><span>Wallet debit</span><strong>${formatNaira(total)}</strong></div>
+          <div class="action-metric"><span>Total</span><strong>${formatNaira(total)}</strong></div>
         </div>
+        <section class="checkout-payment-methods" aria-label="Payment method">
+          <button class="checkout-payment-card ${paymentMethod === "wallet" ? "active" : ""}" data-digital-payment-method="wallet" type="button" ${walletDisabled ? "disabled" : ""}>
+            <span>${paymentMethod === "wallet" ? "◉" : "○"} NetrueFi Wallet</span>
+            <small>${walletDisabled ? `Insufficient balance: ${formatNaira(available)}` : `Balance: ${formatNaira(available)}`}</small>
+          </button>
+          <button class="checkout-payment-card ${paymentMethod === "paystack" ? "active" : ""}" data-digital-payment-method="paystack" type="button">
+            <span>${paymentMethod === "paystack" ? "◉" : "○"} Paystack</span>
+            <small>Card, bank or transfer</small>
+          </button>
+        </section>
         <div class="modal-actions">
           <button class="button-secondary" data-digital-services-back-detail type="button">Cancel</button>
-          <button class="button-primary shimmer-button" id="digital-service-confirm-btn" type="button">${icon("check")} Pay</button>
+          <button class="button-primary shimmer-button" id="digital-service-confirm-btn" type="button">${icon("check")} ${paymentMethod === "paystack" ? "Continue to Paystack" : "Pay with Wallet"}</button>
         </div>
       </div>
     </div>
@@ -8676,7 +8895,7 @@ function renderDigitalServiceReceiptModal() {
   const delivery = order.delivery || null;
   const deliveryLink = getDigitalDeliveryLink(delivery);
   const rawStatus = String(order.status || "processing").toUpperCase();
-  const displayStatus = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING"].includes(rawStatus)
+  const displayStatus = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING", "PAID"].includes(rawStatus)
     ? "delivered"
     : order.status || "processing";
   return `
@@ -8688,6 +8907,7 @@ function renderDigitalServiceReceiptModal() {
         <div class="action-metric-stack">
           <div class="action-metric"><span>Service</span><strong>${escapeHtml(stripLeadingSupplierMetadata(order.productName || ""))}</strong></div>
           <div class="action-metric"><span>Amount</span><strong>${formatNaira(order.amountCharged || 0)}</strong></div>
+          <div class="action-metric"><span>Payment</span><strong>${escapeHtml(order.paymentMethod === "paystack" ? "Paystack" : "NetrueFi Wallet")}</strong></div>
           <div class="action-metric"><span>Ref</span><strong>${escapeHtml(order.requestId || "")}</strong></div>
         </div>
         ${renderDigitalServiceDelivery(delivery)}
@@ -12283,9 +12503,9 @@ function renderStoreProductCard(product = {}, featured = false) {
     <button class="digital-product-card store-product-card ${featured ? "featured" : ""}" data-digital-service-product="${escapeHtml(product.id)}" type="button">
       <span class="store-product-media">${renderDigitalServiceImage(product)}</span>
       <span class="store-product-body">
-        <small>${escapeHtml(product.category || "Digital")}</small>
-        <strong>${escapeHtml(product.name || "Digital service")}</strong>
-        <span>${escapeHtml(product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
+        <small>${escapeHtml(getDigitalProductDisplayCategory(product))}</small>
+        <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
+        <span>${escapeHtml(product.description || product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
       </span>
       <span class="store-product-footer">
         ${renderDigitalProductPrice(product, 1, { compact: true })}
@@ -13283,6 +13503,19 @@ function bindDashboardActions() {
   if (digitalConfirmButton) {
     digitalConfirmButton.addEventListener("click", submitDigitalServicePurchase);
   }
+
+  document.querySelectorAll("[data-digital-payment-method]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) {
+        return;
+      }
+      state.actionModal = {
+        ...state.actionModal,
+        paymentMethod: button.dataset.digitalPaymentMethod || "wallet",
+      };
+      render();
+    });
+  });
 
   const transferOpenButton = document.querySelector("[data-transfer-open]");
   if (transferOpenButton) {
@@ -14418,6 +14651,7 @@ async function bootstrap() {
   captureReferralCodeFromUrl();
   beginLoading();
   try {
+    await loadGoogleAuthConfig().catch(() => undefined);
     const me = await api("/api/auth/me");
     state.user = normalizeUserPayload(me.user);
     if (state.user?.activeExchange) {
@@ -14426,6 +14660,7 @@ async function bootstrap() {
     if (state.user) {
       applyRouteTarget();
       await loadDashboardData();
+      await verifyPaystackDigitalPaymentFromUrl();
     } else {
       clearAuthSessionToken();
       disconnectWatchSocket();
@@ -14437,11 +14672,20 @@ async function bootstrap() {
       }
       stopTradeRefreshTimer();
       if (isPublicShopRoute()) {
+        if (getPaystackReferenceFromUrl()) {
+          state.authTab = "login";
+          state.actionModal = {
+            type: "shop-auth",
+            paymentReference: getPaystackReferenceFromUrl(),
+          };
+          showNotice("Login to verify your Paystack payment.");
+        }
         await loadDigitalServiceProducts({ force: true }).catch(() => undefined);
       }
       render();
     }
   } catch {
+    await loadGoogleAuthConfig().catch(() => undefined);
     state.user = null;
     clearAuthSessionToken();
     disconnectWatchSocket();
@@ -14453,6 +14697,14 @@ async function bootstrap() {
     }
     stopTradeRefreshTimer();
     seenSignalIds.clear();
+    if (isPublicShopRoute() && getPaystackReferenceFromUrl()) {
+      state.authTab = "login";
+      state.actionModal = {
+        type: "shop-auth",
+        paymentReference: getPaystackReferenceFromUrl(),
+      };
+      showNotice("Login to verify your Paystack payment.");
+    }
     render();
   } finally {
     endLoading();
