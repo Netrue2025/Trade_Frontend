@@ -1,20 +1,26 @@
-const CACHE_VERSION = "netruefi-pwa-v18";
-const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
+const NETRUE_CACHE_PREFIX = "netruefi-app";
+const OWNED_CACHE_PREFIXES = [NETRUE_CACHE_PREFIX, "netruefi-pwa"];
+const FIRST_UPGRADE_FALLBACK_VERSION = "pwa-update-2026-09-14";
+const SERVICE_WORKER_VERSION = new URL(self.location.href).searchParams.get("v") || FIRST_UPGRADE_FALLBACK_VERSION;
+const APP_SHELL_CACHE = `${NETRUE_CACHE_PREFIX}-${SERVICE_WORKER_VERSION}-shell`;
+const RUNTIME_CACHE = `${NETRUE_CACHE_PREFIX}-${SERVICE_WORKER_VERSION}-runtime`;
 const OFFLINE_URL = "/offline.html";
-const STATIC_ASSETS = [
-  "/",
-  "/shop/",
+const APP_SHELL_ASSETS = [
   "/index.html",
   OFFLINE_URL,
+  "/site.webmanifest",
   "/config.js",
   "/styles.css",
   "/trade-classification.js",
   "/app.js",
   "/components/signal-page.js",
   "/vendor/lightweight-charts.js",
+];
+const STATIC_ASSETS = [
   "/favicon.png",
   "/og-image-whatsapp.jpg",
   "/services/default-digital-service.png",
+  "/netrue-quest-ad.png",
   "/netruefi-logo.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -40,7 +46,7 @@ const SAFE_ROUTE_PREFIXES = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(APP_SHELL_CACHE)
-      .then((cache) => cache.addAll(STATIC_ASSETS))
+      .then((cache) => cache.addAll([...APP_SHELL_ASSETS, ...STATIC_ASSETS]))
       .catch(() => undefined)
   );
 });
@@ -48,7 +54,11 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== APP_SHELL_CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(
+        keys
+          .filter((key) => OWNED_CACHE_PREFIXES.some((prefix) => key.startsWith(`${prefix}-`)) && key !== APP_SHELL_CACHE && key !== RUNTIME_CACHE)
+          .map((key) => caches.delete(key))
+      ))
       .then(() => self.clients.claim())
   );
 });
@@ -63,11 +73,20 @@ function isSensitiveRequest(url) {
   return url.pathname.startsWith("/api");
 }
 
+function isAppShellAsset(url) {
+  return APP_SHELL_ASSETS.includes(url.pathname);
+}
+
 async function networkFirstNavigation(request) {
   try {
-    return await fetch(request);
+    const response = await fetch(request, { cache: "no-store" });
+    if (response.ok) {
+      const cache = await caches.open(APP_SHELL_CACHE);
+      cache.put("/index.html", response.clone());
+    }
+    return response;
   } catch {
-    return caches.match(OFFLINE_URL);
+    return (await caches.match("/index.html")) || caches.match(OFFLINE_URL);
   }
 }
 
@@ -78,7 +97,7 @@ async function cacheFirstStatic(request) {
   }
   const response = await fetch(request);
   if (response.ok) {
-    const cache = await caches.open(APP_SHELL_CACHE);
+    const cache = await caches.open(RUNTIME_CACHE);
     cache.put(request, response.clone());
   }
   return response;
@@ -86,7 +105,7 @@ async function cacheFirstStatic(request) {
 
 async function networkFirstStatic(request) {
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: "no-store" });
     if (response.ok) {
       const cache = await caches.open(APP_SHELL_CACHE);
       cache.put(request, response.clone());
@@ -104,16 +123,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(fetch(request));
     return;
   }
-  if (url.pathname === "/config.js") {
-    event.respondWith(networkFirstStatic(request));
-    return;
-  }
-  if ([".js", ".css"].some((extension) => url.pathname.endsWith(extension))) {
-    event.respondWith(networkFirstStatic(request));
-    return;
-  }
   if (request.mode === "navigate") {
     event.respondWith(networkFirstNavigation(request));
+    return;
+  }
+  if (isAppShellAsset(url) || [".js", ".css"].some((extension) => url.pathname.endsWith(extension))) {
+    event.respondWith(networkFirstStatic(request));
     return;
   }
   event.respondWith(cacheFirstStatic(request));

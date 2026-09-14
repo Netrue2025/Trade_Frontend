@@ -27,6 +27,8 @@ const PWA_INSTALL_DELAY_MS = 9000;
 const PWA_INSTALL_DISMISS_MS = 1000 * 60 * 60 * 24 * 5;
 const PWA_NOTIFICATION_DISMISSED_UNTIL_KEY = "netruefi-pwa-notification-dismissed-until";
 const PWA_NOTIFICATION_DISMISS_MS = 1000 * 60 * 60 * 24 * 3;
+const PWA_UPDATE_RELOAD_GUARD_KEY = "netruefi-pwa-update-reload-once";
+const PWA_UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const REFERRAL_CODE_STORAGE_KEY = "netruefi-referral-code";
 const SHOP_PENDING_ORDER_STORAGE_KEY = "netruefi-pending-shop-order";
 const DEPOSIT_DRAFT_STORAGE_KEY = "netruefi-deposit-draft";
@@ -281,6 +283,10 @@ const state = {
     pushPreferences: null,
     pushSubscriptions: [],
     pushSubscribed: false,
+    waitingWorker: null,
+    updateDismissedForSession: false,
+    updateReloading: false,
+    lastUpdateCheckAt: 0,
     notificationPermission: typeof Notification === "undefined" ? "unsupported" : Notification.permission,
     isStandalone: false,
     isIos: false,
@@ -830,6 +836,13 @@ async function updatePushPreferences(form) {
   state.pwa.pushPreferences = result.preferences || preferences;
 }
 
+function getPwaBuildId() {
+  return String(window.NETRUEFI_BUILD_ID || APP_VERSION || "local")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .slice(0, 80) || "local";
+}
+
 function hasSensitiveActionInProgress() {
   const type = String(state.actionModal?.type || "").toLowerCase();
   return /withdraw|deposit|trade|gift|vtu|airtime|data|quest/.test(type);
@@ -847,17 +860,48 @@ function updateAppBadge() {
   }
 }
 
+function markPwaUpdateAvailable(worker, { force = false } = {}) {
+  if (!worker) {
+    return;
+  }
+  state.pwa.waitingWorker = worker;
+  if (force || !state.pwa.updateDismissedForSession) {
+    state.pwa.updateAvailable = true;
+    render();
+  }
+}
+
+async function checkForPwaUpdate({ force = false } = {}) {
+  const registration = state.pwa.serviceWorkerRegistration;
+  if (!registration || typeof registration.update !== "function") {
+    return null;
+  }
+  const now = Date.now();
+  if (!force && now - Number(state.pwa.lastUpdateCheckAt || 0) < PWA_UPDATE_CHECK_INTERVAL_MS) {
+    return registration;
+  }
+  state.pwa.lastUpdateCheckAt = now;
+  try {
+    const updatedRegistration = await registration.update();
+    const waiting = updatedRegistration?.waiting || registration.waiting;
+    if (waiting) {
+      markPwaUpdateAvailable(waiting);
+    }
+    return updatedRegistration || registration;
+  } catch {
+    return registration;
+  }
+}
+
 async function registerNetrueServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     return null;
   }
   try {
-    const registration = await navigator.serviceWorker.register("/service-worker.js");
+    const registration = await navigator.serviceWorker.register(`/service-worker.js?v=${encodeURIComponent(getPwaBuildId())}`);
     state.pwa.serviceWorkerRegistration = registration;
-    registration.update?.().catch(() => undefined);
     if (registration.waiting) {
-      state.pwa.updateAvailable = true;
-      render();
+      markPwaUpdateAvailable(registration.waiting, { force: true });
     }
     registration.addEventListener("updatefound", () => {
       const worker = registration.installing;
@@ -866,14 +910,20 @@ async function registerNetrueServiceWorker() {
       }
       worker.addEventListener("statechange", () => {
         if (worker.state === "installed" && navigator.serviceWorker.controller) {
-          state.pwa.updateAvailable = true;
-          render();
+          markPwaUpdateAvailable(worker, { force: true });
         }
       });
     });
     navigator.serviceWorker.addEventListener("controllerchange", () => {
+      const reloadKey = getPwaBuildId();
+      if (state.pwa.updateReloading || sessionStorage.getItem(PWA_UPDATE_RELOAD_GUARD_KEY) === reloadKey) {
+        return;
+      }
+      state.pwa.updateReloading = true;
+      sessionStorage.setItem(PWA_UPDATE_RELOAD_GUARD_KEY, reloadKey);
       window.location.reload();
     });
+    await checkForPwaUpdate({ force: true });
     return registration;
   } catch {
     return null;
@@ -900,6 +950,7 @@ function initPwaExperience() {
   window.addEventListener("online", () => {
     state.pwa.isOnline = true;
     state.pwa.onlineNoticeVisible = true;
+    void checkForPwaUpdate();
     render();
     if (state.user) {
       void loadDashboardData();
@@ -912,6 +963,14 @@ function initPwaExperience() {
   window.addEventListener("offline", () => {
     state.pwa.isOnline = false;
     render();
+  });
+  window.addEventListener("focus", () => {
+    void checkForPwaUpdate();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void checkForPwaUpdate();
+    }
   });
   void registerNetrueServiceWorker();
   void loadPushSettings();
@@ -4216,12 +4275,13 @@ function renderPwaUpdatePrompt() {
   }
   return `
     <div class="pwa-update-banner">
+      <span class="pwa-update-icon">${icon("refresh")}</span>
       <div>
-        <strong>NetrueFi update available</strong>
-        <p>A new version is ready.</p>
+        <strong>New Update Available</strong>
+        <p>We've improved NetrueFi. Update now to get the latest version.</p>
       </div>
       <button class="button-secondary" id="pwa-update-later-btn" type="button">Later</button>
-      <button class="button-primary shimmer-button" id="pwa-update-now-btn" type="button">Update</button>
+      <button class="button-primary shimmer-button" id="pwa-update-now-btn" type="button">Update Now</button>
     </div>
   `;
 }
@@ -4342,12 +4402,13 @@ async function activatePwaUpdate() {
     return;
   }
   const registration = state.pwa.serviceWorkerRegistration || await navigator.serviceWorker.ready.catch(() => null);
-  const worker = registration?.waiting;
+  const worker = state.pwa.waitingWorker || registration?.waiting;
   if (!worker) {
     state.pwa.updateAvailable = false;
     render();
     return;
   }
+  state.pwa.updateReloading = false;
   worker.postMessage({ type: "SKIP_WAITING" });
 }
 
@@ -4423,6 +4484,7 @@ function bindPwaActions() {
   const updateLater = document.getElementById("pwa-update-later-btn");
   if (updateLater) {
     updateLater.onclick = () => {
+      state.pwa.updateDismissedForSession = true;
       state.pwa.updateAvailable = false;
       render();
     };
@@ -11486,7 +11548,8 @@ function renderQuestPane() {
       <div class="quest-hero">
         <div>
           <p class="eyebrow">Netrue Quest</p>
-          <h2>Choose. Win. Credit.</h2>
+          <h2>Quest Reward</h2>
+          <p class="muted-copy">Complete quests. Earn rewards.</p>
         </div>
         ${renderQuestNav()}
       </div>
