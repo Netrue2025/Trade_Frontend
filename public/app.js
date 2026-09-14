@@ -29,6 +29,7 @@ const PWA_NOTIFICATION_DISMISSED_UNTIL_KEY = "netruefi-pwa-notification-dismisse
 const PWA_NOTIFICATION_DISMISS_MS = 1000 * 60 * 60 * 24 * 3;
 const REFERRAL_CODE_STORAGE_KEY = "netruefi-referral-code";
 const SHOP_PENDING_ORDER_STORAGE_KEY = "netruefi-pending-shop-order";
+const DEPOSIT_DRAFT_STORAGE_KEY = "netruefi-deposit-draft";
 const GOOGLE_IDENTITY_SCRIPT_URL = "https://accounts.google.com/gsi/client";
 const STORE_OPTIONS = [
   { id: "", label: "All Products" },
@@ -300,6 +301,7 @@ let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
 let questCountdownTimer = null;
 let homePromoTimer = null;
+let depositStatusTimer = null;
 const seenSignalIds = new Set();
 
 function getAuthSessionToken() {
@@ -1348,6 +1350,173 @@ function clearWalletDrafts() {
   ]);
 }
 
+function getDepositDraftStorageKey() {
+  const userKey = state.user?.id || state.user?.email || "guest";
+  return `${DEPOSIT_DRAFT_STORAGE_KEY}:${userKey}`;
+}
+
+function readDepositDraft() {
+  try {
+    return JSON.parse(localStorage.getItem(getDepositDraftStorageKey()) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDepositDraft(nextDraft = {}) {
+  const currency = ["NGN", "USDT"].includes(String(nextDraft.currency || "").toUpperCase())
+    ? String(nextDraft.currency || "").toUpperCase()
+    : "";
+  const draft = {
+    currency,
+    amount: String(nextDraft.amount || "").trim(),
+    transactionHash: String(nextDraft.transactionHash || "").trim(),
+    depositorName: String(nextDraft.depositorName || "").trim(),
+    step: nextDraft.step || (currency ? "amount" : "currency"),
+    idempotencyKey: nextDraft.idempotencyKey || createIdempotencyKey("deposit"),
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    localStorage.setItem(getDepositDraftStorageKey(), JSON.stringify(draft));
+  } catch {
+    // Deposit drafts are a convenience only; backend deposits remain authoritative.
+  }
+  return draft;
+}
+
+function clearDepositDraft() {
+  try {
+    localStorage.removeItem(getDepositDraftStorageKey());
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function isActiveDepositRecord(deposit = {}) {
+  return ["PENDING", "PROCESSING"].includes(String(deposit.status || "").toUpperCase());
+}
+
+async function loadActiveDepositRequest() {
+  if (!state.user || state.user.role !== "user") {
+    return null;
+  }
+  const payload = await api("/api/deposits?status=PENDING");
+  const deposits = Array.isArray(payload.deposits) ? payload.deposits : [];
+  return deposits.find(isActiveDepositRecord) || null;
+}
+
+async function refreshDepositFlowStatus({ silent = false } = {}) {
+  const depositId = state.actionModal?.backendDeposit?.id;
+  if (!state.user || !depositId) {
+    return null;
+  }
+  try {
+    const payload = await api(`/api/deposits/${encodeURIComponent(depositId)}`);
+    const deposit = payload.deposit || payload;
+    const status = String(deposit.status || "").toUpperCase();
+    state.actionModal = {
+      ...state.actionModal,
+      backendDeposit: deposit,
+      depositStep: status === "APPROVED" ? "approved" : status === "REJECTED" ? "rejected" : "processing",
+    };
+    if (status === "APPROVED") {
+      await loadFinancialDashboard().catch(() => undefined);
+    }
+    if (!silent) {
+      render();
+      showNotice(status === "APPROVED" ? "Deposit approved." : status === "REJECTED" ? "Deposit rejected." : "Deposit is still processing.");
+    } else {
+      render();
+    }
+    return deposit;
+  } catch (error) {
+    if (!silent) {
+      showError(error.message || "Could not refresh deposit status.");
+    }
+    return null;
+  }
+}
+
+function readDepositFlowFields(step = state.actionModal?.depositStep || "amount") {
+  const currency = ["NGN", "USDT"].includes(state.actionModal?.currency) ? state.actionModal.currency : "";
+  return {
+    currency,
+    amount: document.getElementById("deposit-amount-input")?.value?.trim() || state.actionModal?.amount || "",
+    transactionHash: document.getElementById("deposit-reference-input")?.value?.trim() || state.actionModal?.transactionHash || "",
+    depositorName: document.getElementById("deposit-sender-input")?.value?.trim() || state.actionModal?.depositorName || state.user?.name || "",
+    step,
+    idempotencyKey: state.actionModal?.depositIdempotencyKey || readDepositDraft().idempotencyKey || createIdempotencyKey("deposit"),
+  };
+}
+
+function updateDepositFlowDraft(step) {
+  const draft = saveDepositDraft(readDepositFlowFields(step));
+  state.actionModal = {
+    ...state.actionModal,
+    ...draft,
+    depositStep: draft.step,
+    depositIdempotencyKey: draft.idempotencyKey,
+  };
+  return draft;
+}
+
+async function submitDepositFlowRequest() {
+  const draft = updateDepositFlowDraft("details");
+  if (!draft.currency) {
+    showError("Choose a deposit currency.");
+    return;
+  }
+  if (!draft.amount || Number(draft.amount) <= 0) {
+    showError("Enter a valid amount.");
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api("/api/deposits", {
+      method: "POST",
+      headers: { "Idempotency-Key": draft.idempotencyKey || createIdempotencyKey("deposit") },
+      body: JSON.stringify({
+        currency: draft.currency,
+        amount: draft.amount,
+        transactionHash: draft.transactionHash,
+        depositorName: draft.depositorName,
+      }),
+    });
+    clearDepositDraft();
+    clearWalletDrafts();
+    state.actionModal = {
+      type: "deposit",
+      currency: payload.deposit?.currency || draft.currency,
+      depositMode: "manual",
+      depositStep: "processing",
+      backendDeposit: payload.deposit,
+    };
+    await loadFinancialDashboard().catch(() => undefined);
+    render();
+    showNotice("Deposit submitted. Waiting for admin confirmation.");
+  }).catch((error) => showError(error.message));
+}
+
+function syncDepositStatusTimer() {
+  const shouldPoll = !!(
+    state.actionModal?.type === "deposit" &&
+    state.actionModal?.backendDeposit?.id &&
+    isActiveDepositRecord(state.actionModal.backendDeposit)
+  );
+  if (!shouldPoll) {
+    if (depositStatusTimer) {
+      window.clearInterval(depositStatusTimer);
+      depositStatusTimer = null;
+    }
+    return;
+  }
+  if (depositStatusTimer) {
+    return;
+  }
+  depositStatusTimer = window.setInterval(() => {
+    void refreshDepositFlowStatus({ silent: true });
+  }, 15000);
+}
+
 function bindFormDraftCapture() {
   if (bindFormDraftCapture.bound || !app) {
     return;
@@ -1536,7 +1705,28 @@ async function openWalletActionModal(type) {
       });
       return;
     }
-    showActionModal({ type, currency: "", depositMode: "manual" });
+    const pendingDeposit = type === "deposit" ? await loadActiveDepositRequest().catch(() => null) : null;
+    if (pendingDeposit) {
+      showActionModal({
+        type,
+        currency: pendingDeposit.currency || "",
+        depositMode: "manual",
+        depositStep: "processing",
+        backendDeposit: pendingDeposit,
+      });
+      return;
+    }
+    const draft = type === "deposit" ? readDepositDraft() : {};
+    showActionModal({
+      type,
+      currency: draft.currency || "",
+      amount: draft.amount || "",
+      transactionHash: draft.transactionHash || "",
+      depositorName: draft.depositorName || state.user?.name || "",
+      depositMode: "manual",
+      depositStep: draft.step || (draft.currency ? "amount" : "currency"),
+      depositIdempotencyKey: draft.idempotencyKey || createIdempotencyKey("deposit"),
+    });
   }).catch((error) => showError(error.message));
 }
 
@@ -1548,6 +1738,182 @@ function clearActionModal() {
   const returnModal = state.actionModal?.returnModal || null;
   state.actionModal = returnModal;
   render();
+}
+
+function renderDepositFlowModal() {
+  const settings = getFinancialSettings();
+  const depositSettings = settings.deposit || {};
+  const rate = Number(settings.exchangeRate?.usdtToNgn || state.financialDashboard?.totalBalance?.usdtToNgnRate || 0);
+  const deposit = state.actionModal.backendDeposit || null;
+  const depositStatus = String(deposit?.status || "").toUpperCase();
+  const currency = ["NGN", "USDT"].includes(state.actionModal.currency) ? state.actionModal.currency : "";
+  const step = deposit
+    ? depositStatus === "APPROVED"
+      ? "approved"
+      : depositStatus === "REJECTED"
+        ? "rejected"
+        : "processing"
+    : state.actionModal.depositStep || (currency ? "amount" : "currency");
+  const amount = String(state.actionModal.amount || deposit?.amount || "");
+  const transactionHash = String(state.actionModal.transactionHash || deposit?.transactionHash || "");
+  const depositorName = String(state.actionModal.depositorName || state.user?.name || deposit?.depositorName || "");
+  const minAmount = currency === "NGN" ? depositSettings.minNgn || "1000" : depositSettings.minUsdt || "1";
+  const amountLabel = currency === "NGN" ? "Amount (Naira)" : "Amount (USDT)";
+  const formattedAmount = currency ? formatCurrencyAmount(amount || 0, currency) : "";
+  const amountHint = currency === "NGN" && rate
+    ? `Rate: ${formatNaira(rate)} / USDT`
+    : currency === "USDT"
+      ? `Network: ${depositSettings.usdtNetwork || "USDT"}`
+      : "Choose where you are depositing from.";
+  const steps = ["Currency", "Amount", "Payment", "Processing"];
+  const activeIndex = step === "currency" ? 0 : step === "amount" ? 1 : step === "details" ? 2 : 3;
+  const renderSteps = () => `
+    <div class="deposit-stepper" aria-label="Deposit progress">
+      ${steps.map((label, index) => `<span class="${index <= activeIndex ? "active" : ""}">${index + 1}<small>${label}</small></span>`).join("")}
+    </div>
+  `;
+  const depositModeSwitch = `
+    <div class="wallet-choice-row deposit-mode-row">
+      <button class="wallet-choice active" id="wallet-manual-deposit-btn" type="button">Deposit</button>
+      <button class="wallet-choice" id="wallet-gift-redeem-btn" type="button">${icon("gift")} Gift Card</button>
+    </div>
+  `;
+  const currencyScreen = `
+    <div class="deposit-flow-section">
+      <div class="deposit-choice-grid">
+        <button class="deposit-currency-card ${currency === "NGN" ? "active" : ""}" data-deposit-currency="NGN" type="button">
+          <span>${icon("bank")}</span>
+          <strong>Naira</strong>
+          <small>Bank transfer</small>
+        </button>
+        <button class="deposit-currency-card ${currency === "USDT" ? "active" : ""}" data-deposit-currency="USDT" type="button">
+          <span>${icon("wallet")}</span>
+          <strong>USDT</strong>
+          <small>${escapeHtml(depositSettings.usdtNetwork || "Crypto wallet")}</small>
+        </button>
+      </div>
+    </div>
+  `;
+  const amountChips = currency === "NGN" ? [1000, 5000, 10000, 50000] : [10, 25, 50, 100];
+  const amountScreen = `
+    <div class="deposit-flow-section">
+      <label class="stack-label wallet-amount-field">
+        <span>${amountLabel}</span>
+        <input id="deposit-amount-input" class="wallet-amount-input" type="number" min="${escapeHtml(minAmount)}" step="${currency === "NGN" ? "1" : "0.00000001"}" value="${escapeHtml(amount)}" placeholder="${escapeHtml(minAmount)}" />
+      </label>
+      <p class="wallet-equivalent-preview" id="wallet-equivalent-preview">Equivalent: --</p>
+      <div class="deposit-amount-chips">
+        ${amountChips.map((value) => `<button data-deposit-amount="${value}" type="button">${currency === "NGN" ? formatNaira(value).replace(".00", "") : formatUsdtUnit(value)}</button>`).join("")}
+      </div>
+    </div>
+  `;
+  const bankDetails = `
+    <div class="wallet-instructions deposit-account-card compact-deposit-account">
+      <span>Bank</span>
+      <strong>${escapeHtml(depositSettings.bankName || "Bank not configured")}</strong>
+      <span>Account</span>
+      <div class="copy-value-row">
+        <code>${escapeHtml(depositSettings.accountNumber || "Not configured")}</code>
+        ${renderCopyButton(depositSettings.accountNumber, "Copy account number")}
+      </div>
+      <span>Name</span>
+      <strong>${escapeHtml(depositSettings.accountName || "Not configured")}</strong>
+      ${depositSettings.bankNote ? `<p>${escapeHtml(depositSettings.bankNote)}</p>` : ""}
+    </div>
+  `;
+  const usdtDetails = `
+    <div class="wallet-instructions compact-deposit-account">
+      <span>Send to</span>
+      <div class="copy-value-row">
+        <code>${escapeHtml(depositSettings.usdtAddress || "Deposit address not configured")}</code>
+        ${renderCopyButton(depositSettings.usdtAddress, "Copy wallet address")}
+      </div>
+      <span>Network</span>
+      <strong>${escapeHtml(depositSettings.usdtNetwork || "Not configured")}</strong>
+    </div>
+  `;
+  const paymentScreen = `
+    <div class="deposit-flow-section">
+      <div class="deposit-pay-summary">
+        <span>Send exactly</span>
+        <strong>${formattedAmount}</strong>
+        <small>${escapeHtml(amountHint)}</small>
+      </div>
+      ${currency === "NGN" ? bankDetails : usdtDetails}
+      ${currency === "NGN"
+        ? `
+          <label class="stack-label compact-field">
+            <span>Sender name</span>
+            <input id="deposit-sender-input" type="text" placeholder="Name on payment" value="${escapeHtml(depositorName)}" />
+          </label>
+          <label class="stack-label compact-field">
+            <span>Reference</span>
+            <input id="deposit-reference-input" type="text" placeholder="Payment reference" value="${escapeHtml(transactionHash)}" />
+          </label>
+        `
+        : `
+          <label class="stack-label compact-field">
+            <span>Transaction hash</span>
+            <input id="deposit-reference-input" type="text" placeholder="Transaction hash" value="${escapeHtml(transactionHash)}" />
+          </label>
+        `}
+    </div>
+  `;
+  const processingScreen = `
+    <div class="deposit-status-panel">
+      <span class="deposit-status-icon ${depositStatus === "APPROVED" ? "success" : depositStatus === "REJECTED" ? "failed" : ""}">
+        ${depositStatus === "APPROVED" ? icon("check") : depositStatus === "REJECTED" ? icon("x") : icon("refresh")}
+      </span>
+      <h4>${depositStatus === "APPROVED" ? "Deposit approved" : depositStatus === "REJECTED" ? "Deposit rejected" : "Waiting for admin approval"}</h4>
+      <p>${depositStatus === "APPROVED" ? "Your wallet has been updated by the backend." : depositStatus === "REJECTED" ? escapeHtml(deposit?.adminNote || "Admin rejected this deposit request.") : "We will keep checking this request. Closing this screen will not cancel it."}</p>
+      <div class="action-metric-stack compact-metrics">
+        <div class="action-metric"><span>Amount</span><strong>${formatCurrencyAmount(deposit?.amount || amount || 0, deposit?.currency || currency || "NGN")}</strong></div>
+        <div class="action-metric"><span>Status</span><strong>${escapeHtml(formatWalletRequestStatus(depositStatus || "PENDING"))}</strong></div>
+        <div class="action-metric"><span>Ref</span><strong>${escapeHtml(deposit?.id || "Pending")}</strong></div>
+      </div>
+    </div>
+  `;
+  const screen = step === "currency"
+    ? currencyScreen
+    : step === "amount"
+      ? amountScreen
+      : step === "details"
+        ? paymentScreen
+        : processingScreen;
+  const actions = step === "currency"
+    ? `<button class="button-secondary" id="action-modal-cancel-btn" type="button">Close</button>`
+    : step === "amount"
+      ? `
+        <button class="button-secondary" data-deposit-back="currency" type="button">Back</button>
+        <button class="button-primary shimmer-button" id="deposit-continue-btn" type="button">Continue</button>
+      `
+      : step === "details"
+        ? `
+          <button class="button-secondary" data-deposit-back="amount" type="button">Back</button>
+          <button class="button-primary shimmer-button" id="deposit-sent-btn" type="button">${icon("check")} I Have Sent It</button>
+        `
+        : `
+          <button class="button-secondary" id="deposit-refresh-btn" type="button">${icon("refresh")} Refresh</button>
+          <button class="button-primary shimmer-button" id="action-modal-cancel-btn" type="button">${depositStatus === "APPROVED" || depositStatus === "REJECTED" ? "Done" : "Close"}</button>
+        `;
+  const localCancel = !deposit && (currency || amount)
+    ? `<button class="text-link deposit-draft-cancel" id="deposit-draft-cancel-btn" type="button">Discard draft</button>`
+    : "";
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card deposit-action-card deposit-flow-card">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Wallet</p>
+        <h3>${currency ? `Deposit ${currency === "NGN" ? "Naira" : "USDT"}` : "Deposit"}</h3>
+        <p class="modal-text">${step === "processing" ? "Submitted deposit requests are confirmed by admin." : amountHint}</p>
+        ${depositModeSwitch}
+        ${renderSteps()}
+        ${screen}
+        ${localCancel}
+        <div class="modal-actions wallet-action-buttons">${actions}</div>
+      </div>
+    </div>
+  `;
 }
 
 function showNotice(message) {
@@ -2216,6 +2582,8 @@ function icon(name) {
       '<path d="M12 5v14"/><path d="M5 12h14"/>',
     card:
       '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M7 15h4"/>',
+    wallet:
+      '<path d="M20 7V6a2 2 0 0 0-2-2H5a3 3 0 0 0 0 6h15v8a2 2 0 0 1-2 2H5a3 3 0 0 1-3-3V7"/><path d="M16 13h.01"/>',
     gift:
       '<path d="M20 12v8H4v-8"/><path d="M2 8h20v4H2z"/><path d="M12 8v12"/><path d="M12 8H8.5a2 2 0 1 1 2-2c0 2-2.5 2-2.5 2"/><path d="M12 8h3.5a2 2 0 1 0-2-2c0 2 2.5 2 2.5 2"/>',
     lock:
@@ -5019,6 +5387,10 @@ function renderActionModal() {
         </div>
       </div>
     `;
+  }
+
+  if (state.actionModal.type === "deposit" && state.actionModal.depositMode !== "gift") {
+    return renderDepositFlowModal();
   }
 
   if (state.actionModal.type === "deposit" || state.actionModal.type === "withdraw") {
@@ -13782,6 +14154,104 @@ function bindDashboardActions() {
     });
   }
 
+  document.querySelectorAll("[data-deposit-currency]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const currency = button.dataset.depositCurrency || "";
+      const draft = saveDepositDraft({
+        ...readDepositDraft(),
+        currency,
+        amount: state.actionModal?.currency === currency ? state.actionModal?.amount || readDepositDraft().amount || "" : "",
+        step: "amount",
+        idempotencyKey: state.actionModal?.depositIdempotencyKey || readDepositDraft().idempotencyKey || createIdempotencyKey("deposit"),
+      });
+      state.actionModal = {
+        ...state.actionModal,
+        ...draft,
+        depositStep: "amount",
+        depositIdempotencyKey: draft.idempotencyKey,
+      };
+      render();
+    });
+  });
+
+  const depositAmountInput = document.getElementById("deposit-amount-input");
+  if (depositAmountInput) {
+    updateWalletEquivalentPreview(depositAmountInput, state.actionModal?.currency || "NGN");
+    depositAmountInput.addEventListener("input", () => {
+      updateWalletEquivalentPreview(depositAmountInput, state.actionModal?.currency || "NGN");
+      updateDepositFlowDraft("amount");
+    });
+  }
+
+  document.querySelectorAll("[data-deposit-amount]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = document.getElementById("deposit-amount-input");
+      if (input) {
+        input.value = button.dataset.depositAmount || "";
+        updateWalletEquivalentPreview(input, state.actionModal?.currency || "NGN");
+      }
+      updateDepositFlowDraft("amount");
+    });
+  });
+
+  document.querySelectorAll("[data-deposit-back]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const step = button.dataset.depositBack || "currency";
+      updateDepositFlowDraft(step);
+      render();
+    });
+  });
+
+  const depositContinueButton = document.getElementById("deposit-continue-btn");
+  if (depositContinueButton) {
+    depositContinueButton.addEventListener("click", () => {
+      const draft = updateDepositFlowDraft("details");
+      const settings = getFinancialSettings();
+      const minimum = Number(draft.currency === "NGN" ? settings.deposit?.minNgn || 1000 : settings.deposit?.minUsdt || 1);
+      if (!draft.currency) {
+        showError("Choose a deposit currency.");
+        return;
+      }
+      if (!draft.amount || Number(draft.amount) < minimum) {
+        showError(`Minimum deposit is ${draft.currency === "NGN" ? formatNaira(minimum) : formatUsdtUnit(minimum)}.`);
+        return;
+      }
+      render();
+    });
+  }
+
+  const depositDraftCancelButton = document.getElementById("deposit-draft-cancel-btn");
+  if (depositDraftCancelButton) {
+    depositDraftCancelButton.addEventListener("click", () => {
+      clearDepositDraft();
+      state.actionModal = {
+        type: "deposit",
+        currency: "",
+        depositMode: "manual",
+        depositStep: "currency",
+        depositIdempotencyKey: createIdempotencyKey("deposit"),
+      };
+      render();
+    });
+  }
+
+  ["deposit-reference-input", "deposit-sender-input"].forEach((id) => {
+    const field = document.getElementById(id);
+    if (field) {
+      field.addEventListener("input", () => updateDepositFlowDraft("details"));
+    }
+  });
+
+  const depositSentButton = document.getElementById("deposit-sent-btn");
+  if (depositSentButton) {
+    depositSentButton.addEventListener("click", submitDepositFlowRequest);
+  }
+
+  const depositRefreshButton = document.getElementById("deposit-refresh-btn");
+  if (depositRefreshButton) {
+    depositRefreshButton.addEventListener("click", () => refreshDepositFlowStatus());
+  }
+
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
     button.addEventListener("click", () => {
       const nextCurrency = button.dataset.walletCurrency;
@@ -14702,6 +15172,7 @@ function render() {
   renderTopbarActions();
   if (!state.user) {
     syncHomePromoSliderTimer();
+    syncDepositStatusTimer();
     if (isPublicShopRoute()) {
       renderPublicShopLanding();
       refreshWatchlistDom();
@@ -14714,6 +15185,7 @@ function render() {
   renderDashboardShell();
   syncQuestCountdownTimer();
   syncHomePromoSliderTimer();
+  syncDepositStatusTimer();
   bindTradeTicketActions();
   refreshWatchlistDom();
   refreshTradeDom();

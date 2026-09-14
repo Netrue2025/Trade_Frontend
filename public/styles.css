@@ -70,6 +70,8 @@ body {
   min-height: 100dvh;
   color: var(--text);
   font-family: var(--app-font);
+  font-size: 14px;
+  line-height: 1.45;
   letter-spacing: 0;
   background:
     radial-gradient(circle at top left, var(--bg-glow-1), transparent 24rem),
@@ -88,12 +90,36 @@ textarea {
   font: inherit;
 }
 
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
 h1,
 h2,
 h3,
 h4,
 strong {
   letter-spacing: 0;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.08;
+}
+
+h1 {
+  font-size: clamp(1.75rem, 7vw, 2.6rem);
+}
+
+h2 {
+  font-size: clamp(1.35rem, 5vw, 2rem);
+}
+
+h3 {
+  font-size: clamp(1.05rem, 3.8vw, 1.35rem);
 }
 
 body[data-app-shell="guest"] .shell {
@@ -2511,6 +2537,11 @@ body[data-theme="dark"] .section-loading-card {
   position: relative;
 }
 
+.store-product-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .digital-product-card {
   min-height: 210px;
   display: grid;
@@ -2527,8 +2558,8 @@ body[data-theme="dark"] .section-loading-card {
 }
 
 .store-product-card {
-  min-height: 236px;
-  grid-template-rows: 104px minmax(0, 1fr) auto;
+  min-height: 224px;
+  grid-template-rows: 96px minmax(0, 1fr) auto;
   padding: 0;
   overflow: hidden;
   border-color: rgba(5, 122, 85, 0.18);
@@ -2577,7 +2608,7 @@ body[data-theme="dark"] .section-loading-card {
 
 .store-product-media {
   display: block;
-  min-height: 104px;
+  min-height: 96px;
   background:
     radial-gradient(circle at 20% 15%, rgba(0, 217, 120, 0.16), transparent 5rem),
     var(--soft-surface);
@@ -2624,6 +2655,7 @@ body[data-theme="dark"] .section-loading-card {
   display: -webkit-box;
   min-height: 2.36em;
   line-height: 1.18;
+  font-size: 0.92rem;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -2664,6 +2696,12 @@ body[data-theme="dark"] .section-loading-card {
   font-size: 0.72rem;
   font-style: normal;
   font-weight: 900;
+}
+
+@media (max-width: 339px) {
+  .store-product-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .digital-product-card strong,
@@ -5045,6 +5083,205 @@ body[data-theme="dark"] .mirror-guide-pill {
   min-height: 36px;
 }
 
+.deposit-flow-card {
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto auto;
+  max-height: min(92dvh, 620px);
+  overflow: hidden;
+}
+
+.deposit-mode-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.deposit-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.deposit-stepper span {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 7px 3px;
+  border-radius: 10px;
+  background: var(--soft-surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.deposit-stepper span.active {
+  color: #053b2f;
+  background: rgba(22, 196, 127, 0.18);
+}
+
+.deposit-stepper small {
+  max-width: 100%;
+  color: inherit;
+  font-size: 0.58rem;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deposit-flow-section {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.deposit-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deposit-currency-card {
+  min-height: 118px;
+  display: grid;
+  place-items: center;
+  gap: 7px;
+  padding: 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--soft-surface);
+  color: var(--text);
+  text-align: center;
+}
+
+.deposit-currency-card.active {
+  border-color: rgba(22, 196, 127, 0.42);
+  background: rgba(22, 196, 127, 0.14);
+}
+
+.deposit-currency-card span {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--panel);
+  color: #057a55;
+}
+
+.deposit-currency-card small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.deposit-amount-chips {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.deposit-amount-chips button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.deposit-pay-summary {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(22, 196, 127, 0.16), rgba(47, 125, 246, 0.1));
+}
+
+.deposit-pay-summary span,
+.deposit-pay-summary small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.deposit-pay-summary strong {
+  color: var(--text);
+  font-size: 1.25rem;
+}
+
+.compact-deposit-account {
+  gap: 3px;
+  padding: 9px;
+  border-radius: 12px;
+}
+
+.compact-deposit-account strong,
+.compact-deposit-account code {
+  overflow-wrap: anywhere;
+}
+
+.compact-field {
+  gap: 3px;
+}
+
+.compact-field input {
+  min-height: 38px;
+}
+
+.deposit-status-panel {
+  min-height: 0;
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  text-align: center;
+  overflow-y: auto;
+}
+
+.deposit-status-icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #057a55;
+  background: rgba(22, 196, 127, 0.16);
+}
+
+.deposit-status-icon .nav-icon {
+  animation: questCountdownSpin 1.1s linear infinite;
+}
+
+.deposit-status-icon.success .nav-icon,
+.deposit-status-icon.failed .nav-icon {
+  animation: none;
+}
+
+.deposit-status-icon.failed {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.deposit-status-panel h4,
+.deposit-status-panel p {
+  margin: 0;
+}
+
+.compact-metrics {
+  width: 100%;
+  gap: 6px;
+}
+
+.compact-metrics .action-metric {
+  padding: 9px 10px;
+  border-radius: 12px;
+}
+
+.deposit-draft-cancel {
+  justify-self: center;
+  font-size: 0.78rem;
+}
+
 .wallet-resolve-primary {
   width: 100%;
   min-height: 52px;
@@ -5947,6 +6184,7 @@ body[data-theme="dark"] .mirror-guide-pill {
 
 .quest-playfield {
   position: relative;
+  height: 100%;
   min-height: 100%;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
@@ -5959,7 +6197,7 @@ body[data-theme="dark"] .mirror-guide-pill {
     radial-gradient(circle at 86% 10%, rgba(47, 125, 246, 0.36), transparent 30%),
     linear-gradient(150deg, #071019, #08251e 48%, #0e1b32);
   box-shadow: var(--shadow);
-  overflow: visible;
+  overflow: hidden;
 }
 
 .quest-playfield-bg {
@@ -6049,6 +6287,8 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-play-zone {
   grid-row: 3;
   align-content: start;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .quest-view-panel {
@@ -6144,9 +6384,9 @@ body[data-theme="dark"] .mirror-guide-pill {
   position: relative;
   min-height: 0;
   display: grid;
-  gap: 12px;
+  gap: 10px;
   place-items: center;
-  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
 }
 
 .quest-confetti {
@@ -6215,8 +6455,8 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-gift-card {
   width: min(100%, 360px);
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 14px;
   border-radius: 18px;
   color: #142033;
   background:
@@ -6246,7 +6486,7 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-gift-card-body strong {
   display: block;
   margin-top: 3px;
-  font-size: clamp(1.55rem, 8vw, 2.35rem);
+  font-size: clamp(1.35rem, 6.8vw, 2.1rem);
 }
 
 .quest-gift-card-code,
@@ -6428,6 +6668,15 @@ body[data-theme="dark"] .mirror-guide-pill {
     grid-template-rows: 92px auto auto auto;
   }
 
+  .store-product-card {
+    min-height: 214px;
+    grid-template-rows: 88px minmax(0, 1fr) auto;
+  }
+
+  .store-product-media {
+    min-height: 88px;
+  }
+
   .admin-digital-summary,
   .admin-digital-product-grid {
     grid-template-columns: 1fr;
@@ -6456,6 +6705,18 @@ body[data-theme="dark"] .mirror-guide-pill {
 
   .admin-digital-price-row {
     grid-template-columns: 1fr;
+  }
+
+  .deposit-flow-card {
+    max-height: min(94dvh, 600px);
+  }
+
+  .deposit-currency-card {
+    min-height: 104px;
+  }
+
+  .deposit-amount-chips {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-digital-price-row em {
@@ -6512,6 +6773,83 @@ body[data-theme="dark"] .mirror-guide-pill {
 
   .manual-approval-box .button-primary {
     width: 100%;
+  }
+}
+
+@media (max-height: 700px) {
+  body[data-active-tab="quest"] .app-shell {
+    gap: 8px;
+  }
+
+  .quest-playfield {
+    gap: 7px;
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .quest-playfield .quest-hero h2 {
+    font-size: 1.18rem;
+  }
+
+  .quest-playfield .quest-hero .muted-copy {
+    display: none;
+  }
+
+  .quest-playfield .quest-world-grid {
+    display: none;
+  }
+
+  .quest-start-card,
+  .quest-loading-card,
+  .quest-playfield .quest-card,
+  .quest-playfield .quest-countdown-screen,
+  .quest-playfield .quest-unavailable-screen {
+    gap: 8px;
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .quest-playfield .quest-congrats-panel {
+    padding: 10px;
+  }
+
+  .quest-gift-card {
+    gap: 7px;
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .quest-gift-card-band {
+    min-height: 32px;
+    border-radius: 10px;
+  }
+
+  .quest-gift-card-code,
+  .quest-pin-revealed {
+    padding: 8px 10px;
+  }
+
+  .quest-playfield .quest-scratch-mask {
+    min-height: 48px;
+  }
+}
+
+@media (max-height: 610px) {
+  .quest-playfield .quest-hero {
+    display: none;
+  }
+
+  .quest-playfield {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .quest-play-zone,
+  .quest-view-panel {
+    grid-row: 2 / -1;
+  }
+
+  .quest-prize-stage {
+    gap: 7px;
   }
 }
 
