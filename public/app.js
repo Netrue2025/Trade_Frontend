@@ -11527,8 +11527,13 @@ function renderAdminDigitalProductForm(product = {}) {
 function renderAdminDigitalOrderRow(order = {}) {
   const status = String(order.status || "processing").toUpperCase();
   const canRequery = ["PAYMENT_RESERVED", "SUBMITTED", "PROCESSING"].includes(status) && order.supplierOrderId;
+  const fulfillmentStatus = String(order.fulfillmentStatus || "").toLowerCase();
+  const supplierStatus = String(order.supplierStatus || "").toLowerCase();
+  const configurationFailure = ["configuration_error", "manual_review"].includes(fulfillmentStatus)
+    || ["supplier_auth_error", "supplier_endpoint_unavailable", "supplier_method_not_allowed", "supplier_payload_error", "manual_fulfillment_required"].includes(supplierStatus);
   const canRetryFulfillment = String(order.paymentStatus || "").toLowerCase() === "paid"
     && String(order.fulfillmentStatus || "").toLowerCase() === "failed_retryable"
+    && !configurationFailure
     && status !== "DELIVERED";
   const deliveryLink = getDigitalDeliveryLink(order.delivery);
   return `
@@ -11537,6 +11542,10 @@ function renderAdminDigitalOrderRow(order = {}) {
         <strong>${escapeHtml(stripLeadingSupplierMetadata(order.productName || "Digital service"))}</strong>
         <p class="muted-copy">${escapeHtml(order.user?.name || "User")} | ${escapeHtml(order.user?.email || "")}</p>
         <p class="muted-copy">Ref: ${escapeHtml(order.requestId || "")}</p>
+        <p class="muted-copy">Payment: ${escapeHtml(String(order.paymentStatus || "").toUpperCase() || "PENDING")} | Fulfillment: ${escapeHtml((order.fulfillmentStatus || "pending").replace(/_/g, " ").toUpperCase())}</p>
+        ${order.supplierStatus ? `<p class="muted-copy">Supplier: ${escapeHtml(order.provider || "supplier")} | ${escapeHtml(String(order.supplierStatus || "").replace(/_/g, " "))}</p>` : ""}
+        ${order.lastFulfillmentAttemptAt ? `<p class="muted-copy">Last attempt: ${escapeHtml(new Date(order.lastFulfillmentAttemptAt).toLocaleString())}</p>` : ""}
+        ${order.lastFulfillmentError ? `<p class="warning-copy compact-copy">Error: ${escapeHtml(order.lastFulfillmentError)}</p>` : ""}
         ${deliveryLink ? `<a class="text-link compact-link" href="${escapeHtml(deliveryLink)}" target="_blank" rel="noopener noreferrer">Delivery link</a>` : ""}
       </div>
       <div class="asset-values">
@@ -11544,6 +11553,7 @@ function renderAdminDigitalOrderRow(order = {}) {
         <strong>${formatNaira(order.amountCharged || 0)}</strong>
         ${deliveryLink ? `<button class="micro-btn" data-copy-text="${escapeHtml(deliveryLink)}" type="button">${icon("copy")} Copy</button>` : ""}
         ${canRequery ? `<button class="micro-btn" data-admin-digital-order-requery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Requery</button>` : ""}
+        ${configurationFailure && status !== "DELIVERED" ? `<span class="wallet-status-badge warning">Action required</span>` : ""}
         ${canRetryFulfillment ? `<button class="micro-btn" data-admin-digital-order-retry="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Retry Fulfillment</button>` : ""}
       </div>
     </div>

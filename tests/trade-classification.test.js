@@ -131,3 +131,14 @@ test("Shop cards show one unavailable badge and admin supplier controls are pres
   assert.match(app, /data-admin-digital-supplier-import-form/);
   assert.match(app, /Custom headers JSON/);
 });
+
+test("Admin store orders show action required for supplier configuration failures", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /const configurationFailure = \["configuration_error", "manual_review"\]\.includes\(fulfillmentStatus\)/);
+  assert.match(app, /supplier_endpoint_unavailable/);
+  assert.match(app, /supplier_method_not_allowed/);
+  assert.match(app, /Action required/);
+  assert.match(app, /Payment: \$\{escapeHtml\(String\(order\.paymentStatus/);
+  assert.match(app, /Error: \$\{escapeHtml\(order\.lastFulfillmentError\)\}/);
+  assert.match(app, /canRetryFulfillment[\s\S]*&& !configurationFailure/);
+});
