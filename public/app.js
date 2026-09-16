@@ -9491,6 +9491,93 @@ function getDigitalDeliveryLink(delivery) {
   return extractFirstUrl(delivery);
 }
 
+function formatDeliveryValue(value) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function renderDeliveryCopyButton(value, label = "Copy") {
+  const text = formatDeliveryValue(value);
+  return text ? `<button class="micro-btn" data-copy-text="${escapeHtml(text)}" type="button">${icon("copy")} ${escapeHtml(label)}</button>` : "";
+}
+
+function normalizeDeliveryItemsForDisplay(delivery = {}) {
+  const rawItems = Array.isArray(delivery.deliveryItems)
+    ? delivery.deliveryItems
+    : Array.isArray(delivery.delivery_items)
+      ? delivery.delivery_items
+      : [];
+  return rawItems
+    .map((item, index) => {
+      if (typeof item === "string") {
+        const separatorIndex = item.indexOf(":");
+        if (separatorIndex > 0) {
+          return {
+            label: `Account ${index + 1}`,
+            email: item.slice(0, separatorIndex).trim(),
+            password: item.slice(separatorIndex + 1).trim(),
+          };
+        }
+        return { label: `Delivery ${index + 1}`, value: item };
+      }
+      if (item && typeof item === "object") {
+        return { label: item.label || `Account ${index + 1}`, ...item };
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function renderDeliveryField(label, value, { secret = false } = {}) {
+  const text = formatDeliveryValue(value);
+  if (!text) {
+    return "";
+  }
+  return `
+    <div class="digital-delivery-field">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${secret ? "delivery-secret" : ""}">${escapeHtml(text)}</strong>
+      ${renderDeliveryCopyButton(text)}
+    </div>
+  `;
+}
+
+function renderDigitalServiceDeliveryDetails(delivery = {}, link = "") {
+  if (!delivery || typeof delivery !== "object") {
+    return "";
+  }
+  const fields = [
+    ["Email", delivery.email || delivery.username || delivery.user || delivery.login],
+    ["Password", delivery.password || delivery.pass, { secret: true }],
+    ["Account", delivery.account],
+    ["PIN", delivery.pin],
+    ["Code", delivery.code],
+    ["License", delivery.license],
+    ["Instructions", delivery.instructions || delivery.instruction],
+  ];
+  const renderedFields = fields.map(([label, value, options]) => renderDeliveryField(label, value, options || {})).join("");
+  const renderedItems = normalizeDeliveryItemsForDisplay(delivery).map((item, index) => `
+    <div class="digital-delivery-account">
+      <p class="modal-eyebrow neutral">${escapeHtml(item.label || `Account ${index + 1}`)}</p>
+      ${renderDeliveryField("Email", item.email || item.username || item.user || item.login)}
+      ${renderDeliveryField("Password", item.password || item.pass, { secret: true })}
+      ${renderDeliveryField("Activation Link", item.activationLink || item.activation_link || item.link || item.url)}
+      ${renderDeliveryField("PIN", item.pin)}
+      ${renderDeliveryField("Code", item.code)}
+      ${renderDeliveryField("License", item.license)}
+      ${renderDeliveryField("Details", item.value)}
+      ${renderDeliveryField("Instructions", item.instructions || item.instruction)}
+    </div>
+  `).join("");
+  const activationField = link ? "" : renderDeliveryField("Activation Link", delivery.activationLink || delivery.activation_link || delivery.link || delivery.url);
+  return [activationField, renderedFields, renderedItems].filter(Boolean).join("");
+}
+
 function extractFirstUrl(value) {
   if (typeof value === "string") {
     const text = value.trim();
@@ -9525,22 +9612,23 @@ function renderDigitalServiceDelivery(delivery) {
   if (!delivery) {
     return `<p class="muted-copy">Delivery is processing. You will get a notification when it is ready.</p>`;
   }
-  if (!link) {
-    return `<pre class="digital-delivery-box">${escapeHtml(JSON.stringify(delivery, null, 2))}</pre>`;
-  }
+  const details = renderDigitalServiceDeliveryDetails(delivery, link);
   return `
     <section class="digital-delivery-card">
-      <p class="modal-eyebrow neutral">Activation link</p>
-      <a class="digital-delivery-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a>
-      <div class="modal-actions inline-modal-actions">
-        <a class="button-primary shimmer-button" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${icon("send")} Open link</a>
-        <button class="button-secondary" data-copy-text="${escapeHtml(link)}" type="button">${icon("copy")} Copy link</button>
-      </div>
-      <ol class="digital-delivery-steps">
-        <li>Click or copy this link to your browser.</li>
-        <li>Click on activate after the next page opens.</li>
-        <li>Enjoy.</li>
-      </ol>
+      <p class="modal-eyebrow neutral">Order ready</p>
+      ${link ? `
+        <a class="digital-delivery-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a>
+        <div class="modal-actions inline-modal-actions">
+          <a class="button-primary shimmer-button" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${icon("send")} Open link</a>
+          <button class="button-secondary" data-copy-text="${escapeHtml(link)}" type="button">${icon("copy")} Copy link</button>
+        </div>
+        <ol class="digital-delivery-steps">
+          <li>Click or copy this link to your browser.</li>
+          <li>Click on activate after the next page opens.</li>
+          <li>Enjoy.</li>
+        </ol>
+      ` : ""}
+      ${details || `<pre class="digital-delivery-box">${escapeHtml(JSON.stringify(delivery, null, 2))}</pre>`}
     </section>
   `;
 }

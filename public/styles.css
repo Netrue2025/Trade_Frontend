@@ -2872,6 +2872,38 @@ body[data-theme="dark"] .digital-category-row button.active {
   text-decoration: none;
 }
 
+.digital-delivery-field,
+.digital-delivery-account {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  min-width: 0;
+}
+
+.digital-delivery-field span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.digital-delivery-field strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.digital-delivery-field .micro-btn {
+  justify-self: start;
+}
+
+.delivery-secret {
+  letter-spacing: 0;
+}
+
 .digital-delivery-steps {
   display: grid;
   gap: 6px;
