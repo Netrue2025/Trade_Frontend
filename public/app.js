@@ -11276,6 +11276,8 @@ function renderAdminDigitalSupplierCard(supplier = {}) {
   const isBuiltIn = ["akunding", "emma"].includes(String(supplier.id || ""));
   const connected = supplier.configured && supplier.enabled !== false;
   const lastSync = supplier.lastSuccessfulSyncAt || supplier.lastSyncAt || supplier.lastConnectionTestAt || "";
+  const balance = supplier.supplierBalance ?? supplier.lastKnownBalance ?? null;
+  const balanceCurrency = String(supplier.supplierBalanceCurrency || supplier.currency || "NGN").toUpperCase();
   return `
     <article class="admin-supplier-card">
       <div>
@@ -11287,6 +11289,8 @@ function renderAdminDigitalSupplierCard(supplier = {}) {
         <span>${Number(supplier.productCount || 0).toLocaleString()} products</span>
         <span>${Number(supplier.availableCount || 0).toLocaleString()} available</span>
         <span>${supplier.automaticFulfillment ? "Auto fulfillment" : "Manual only"}</span>
+        ${supplier.supportsIdempotency ? `<span>Idempotency supported</span>` : ""}
+        ${balance !== null && balance !== undefined && balance !== "" ? `<span>Balance ${balanceCurrency === "NGN" ? formatNaira(balance) : `${escapeHtml(balanceCurrency)} ${escapeHtml(balance)}`}</span>` : ""}
         ${lastSync ? `<small>Last sync ${new Date(lastSync).toLocaleString()}</small>` : `<small>No sync yet</small>`}
       </div>
       <div class="admin-supplier-actions">

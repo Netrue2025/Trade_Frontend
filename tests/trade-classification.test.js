@@ -130,6 +130,8 @@ test("Shop cards show one unavailable badge and admin supplier controls are pres
   assert.match(app, /data-admin-digital-supplier-preview/);
   assert.match(app, /data-admin-digital-supplier-import-form/);
   assert.match(app, /Custom headers JSON/);
+  assert.match(app, /Idempotency supported/);
+  assert.match(app, /supplier\.supplierBalance/);
 });
 
 test("Admin store orders show action required for supplier configuration failures", () => {
