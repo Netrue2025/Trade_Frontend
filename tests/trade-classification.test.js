@@ -99,17 +99,18 @@ test("PWA update prompt uses waiting worker and one-time reload guard", () => {
   assert.match(app, /visibilitychange/);
 });
 
-test("Quest reward mobile layout hides chrome scrollbars and keeps wallet CTA rendered", () => {
+test("Quest reward mobile layout uses dynamic viewport and keeps wallet CTA reachable", () => {
   const app = readPublicFile("app.js");
   const styles = readPublicFile("styles.css");
   assert.match(app, /<h2>Quest Reward<\/h2>/);
   assert.match(app, /data-quest-redeem/);
   assert.match(app, /Add to wallet/);
   assert.match(styles, /body\[data-active-tab="quest"\] \.dashboard-topbar\s*{\s*display:\s*none;/);
-  assert.match(styles, /\.app-screen-quest::-webkit-scrollbar\s*{\s*display:\s*none;/);
-  assert.match(styles, /\.quest-play-zone::-webkit-scrollbar/);
-  assert.match(styles, /scrollbar-width:\s*none/);
-  assert.match(styles, /\.quest-playfield \.quest-actions\s*{[^}]*position:\s*sticky/s);
+  assert.match(styles, /\.app-screen-quest\s*{[^}]*min-height:\s*100svh/s);
+  assert.match(styles, /\.app-screen-quest\s*{[^}]*min-height:\s*100dvh/s);
+  assert.match(styles, /\.quest-playfield\s*{[^}]*overflow-x:\s*hidden/s);
+  assert.match(styles, /\.quest-play-zone,[\s\S]*\.quest-view-panel\s*{[^}]*max-height:\s*calc\(100dvh - 128px\)/s);
+  assert.match(styles, /\.quest-playfield \.quest-actions\s*{[^}]*position:\s*sticky[^}]*bottom:\s*max\(10px, env\(safe-area-inset-bottom\)\)/s);
 });
 
 test("Shop products sort by availability before randomized display", () => {
@@ -123,6 +124,9 @@ test("Shop products sort by availability before randomized display", () => {
 
 test("Shop cards show one unavailable badge and admin supplier controls are present", () => {
   const app = readPublicFile("app.js");
+  assert.match(app, /function getDigitalProductStoreBadgeLabel\(product = {}\)/);
+  assert.match(app, /return "Emma Store"/);
+  assert.match(app, /class="store-origin-badge">\$\{escapeHtml\(getDigitalProductStoreBadgeLabel\(product\)\)\}/);
   assert.match(app, /<em class="store-stock-badge">\$\{escapeHtml\(getDigitalProductAvailabilityLabel\(product\)\)\}<\/em>/);
   assert.doesNotMatch(app, /green UNAVAILABLE/i);
   assert.match(app, /renderAdminDigitalSuppliersSection/);
@@ -132,6 +136,36 @@ test("Shop cards show one unavailable badge and admin supplier controls are pres
   assert.match(app, /Custom headers JSON/);
   assert.match(app, /Idempotency supported/);
   assert.match(app, /supplier\.supplierBalance/);
+});
+
+test("iOS PWA settings use platform states and preserve Android install prompt", () => {
+  const app = readPublicFile("app.js");
+  const styles = readPublicFile("styles.css");
+  assert.match(app, /function getPwaInstallStatusLabel\(\)/);
+  assert.match(app, /function getPwaNotificationStatusLabel\(\)/);
+  assert.match(app, /Install App First/);
+  assert.match(app, /Permission Denied/);
+  assert.match(app, /Not Supported/);
+  assert.match(app, /Notification\.requestPermission\(\)/);
+  assert.match(app, /state\.pwa\.isIos && !state\.pwa\.isStandalone/);
+  assert.match(app, /beforeinstallprompt/);
+  assert.match(app, /pwa-update-check-btn/);
+  assert.match(styles, /\.pwa-sheet\s*{[^}]*max-height:\s*calc\(100dvh - 28px/s);
+  assert.match(styles, /\.pwa-backdrop\s*{[^}]*env\(safe-area-inset-bottom\)/s);
+});
+
+test("Admin settings expose category navigation and danger zone separation", () => {
+  const app = readPublicFile("app.js");
+  const styles = readPublicFile("styles.css");
+  assert.match(app, /admin-settings-category-grid/);
+  assert.match(app, /data-settings-jump/);
+  assert.match(app, /data-settings-category/);
+  assert.match(app, /Danger Zone/);
+  assert.match(app, /settings-danger-zone/);
+  assert.match(app, /Choose a category, then expand only what you need/);
+  assert.match(styles, /\.admin-settings-category-grid\s*{[^}]*grid-template-columns:\s*repeat\(auto-fit, minmax\(150px, 1fr\)\)/s);
+  assert.match(styles, /\.settings-danger-zone\s*{[^}]*border-color:\s*rgba\(255, 77, 109, 0\.35\)/s);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*\.admin-settings-category-grid,[\s\S]*\.pwa-settings-grid\s*{[\s\S]*grid-template-columns:\s*1fr/s);
 });
 
 test("Admin store orders show action required for supplier configuration failures", () => {

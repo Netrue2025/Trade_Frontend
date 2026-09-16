@@ -80,7 +80,8 @@ body {
 }
 
 body[data-active-tab="quest"] {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 button,
@@ -155,14 +156,16 @@ button {
 }
 
 body[data-active-tab="quest"] .shell {
-  height: 100dvh;
-  overflow: hidden;
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  overflow: visible;
   padding-top: max(6px, env(safe-area-inset-top));
-  padding-bottom: max(6px, env(safe-area-inset-bottom));
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
 }
 
 body[data-active-tab="quest"] .app-shell {
-  height: 100%;
+  min-height: 100%;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   gap: 0;
@@ -2607,6 +2610,23 @@ body[data-theme="dark"] .section-loading-card {
   padding: 3px 7px;
 }
 
+.store-origin-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(47, 125, 246, 0.11);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
 .store-product-card.featured {
   scroll-snap-align: start;
 }
@@ -3661,6 +3681,52 @@ body[data-theme="dark"] .vtu-amount-field input {
   gap: 10px;
 }
 
+.admin-settings-overview {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-settings-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.admin-settings-category-card {
+  min-width: 0;
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px;
+  background: var(--soft-surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.admin-settings-category-card strong,
+.admin-settings-category-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.admin-settings-category-card small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.settings-danger-zone {
+  border-color: rgba(255, 77, 109, 0.35);
+  background:
+    radial-gradient(circle at top right, rgba(255, 77, 109, 0.1), transparent 8rem),
+    var(--panel);
+}
+
 .admin-dashboard-section {
   display: grid;
   gap: 12px;
@@ -4213,6 +4279,15 @@ body[data-theme="dark"] .mirror-guide-pill {
     grid-template-columns: 1fr;
   }
 
+  .admin-settings-category-grid,
+  .pwa-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-settings-category-card {
+    min-height: 64px;
+  }
+
   .admin-profile-form,
   .progressive-settings-form {
     grid-template-columns: 1fr;
@@ -4729,10 +4804,15 @@ body[data-theme="dark"] .mirror-guide-pill {
 .pwa-backdrop {
   place-items: end center;
   padding-bottom: max(14px, env(safe-area-inset-bottom));
+  padding-left: max(10px, env(safe-area-inset-left));
+  padding-right: max(10px, env(safe-area-inset-right));
 }
 
 .pwa-sheet {
   width: min(420px, 100%);
+  max-height: calc(100vh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
   display: grid;
   gap: 12px;
   padding: 18px;
@@ -6282,26 +6362,36 @@ body[data-theme="dark"] .mirror-guide-pill {
 }
 
 .app-screen-quest {
-  min-height: 100%;
+  width: 100%;
+  max-width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  max-height: none;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  padding: max(4px, env(safe-area-inset-top)) max(0px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(0px, env(safe-area-inset-left));
   overscroll-behavior: contain;
-  scrollbar-width: none;
+  scrollbar-width: thin;
   -ms-overflow-style: none;
 }
 
 .app-screen-quest::-webkit-scrollbar {
-  display: none;
+  width: 4px;
 }
 
 .quest-playfield {
   position: relative;
-  height: 100%;
-  min-height: 100%;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: calc(100vh - 12px);
+  min-height: calc(100svh - 12px);
+  min-height: calc(100dvh - 12px);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
-  padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
   border-radius: 18px;
   color: #ffffff;
   background:
@@ -6309,7 +6399,8 @@ body[data-theme="dark"] .mirror-guide-pill {
     radial-gradient(circle at 86% 10%, rgba(47, 125, 246, 0.36), transparent 30%),
     linear-gradient(150deg, #071019, #08251e 48%, #0e1b32);
   box-shadow: var(--shadow);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .quest-playfield-bg {
@@ -6390,17 +6481,21 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-play-zone,
 .quest-view-panel {
   min-height: 0;
+  max-height: calc(100vh - 128px);
+  max-height: calc(100svh - 128px);
+  max-height: calc(100dvh - 128px);
   display: grid;
   align-content: start;
   gap: 8px;
   overflow-y: auto;
-  scrollbar-width: none;
+  overflow-x: hidden;
+  scrollbar-width: thin;
   -ms-overflow-style: none;
 }
 
 .quest-play-zone::-webkit-scrollbar,
 .quest-view-panel::-webkit-scrollbar {
-  display: none;
+  width: 4px;
 }
 
 .quest-play-zone {
@@ -6498,11 +6593,14 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-prize-stage {
   position: relative;
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
   display: grid;
   gap: 8px;
   place-items: center;
   align-content: start;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
+  overflow-x: hidden;
 }
 
 .quest-confetti {
@@ -6666,7 +6764,8 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-playfield .quest-actions {
   width: min(100%, 360px);
   position: sticky;
-  bottom: max(0px, env(safe-area-inset-bottom));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  z-index: 3;
 }
 
 .quest-playfield .quest-actions .button-primary {

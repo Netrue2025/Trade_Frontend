@@ -761,6 +761,33 @@ function canUseWebPush() {
   );
 }
 
+function getPwaInstallStatusLabel() {
+  if (state.pwa.isStandalone) {
+    return "Installed";
+  }
+  return state.pwa.isIos && !state.pwa.installEvent ? "Add to Home Screen" : "Not installed";
+}
+
+function getPwaNotificationStatusLabel() {
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+    return "Not Supported";
+  }
+  if (state.pwa.isIos && !state.pwa.isStandalone) {
+    return "Install App First";
+  }
+  if (state.pwa.notificationPermission === "denied") {
+    return "Permission Denied";
+  }
+  return state.pwa.pushSubscribed ? "Enabled" : "Not Enabled";
+}
+
+function getPwaInstallActionLabel() {
+  if (state.pwa.isStandalone) {
+    return "Installed";
+  }
+  return state.pwa.isIos && !state.pwa.installEvent ? "Add to Home Screen" : "Install NetrueFi";
+}
+
 async function loadPushSettings() {
   const config = await api("/api/push/public-key").catch(() => ({ enabled: false, publicKey: "" }));
   state.pwa.pushConfig = config;
@@ -2129,6 +2156,18 @@ function getDigitalProductDisplayName(product = {}) {
 
 function getDigitalProductDisplayCategory(product = {}) {
   return product.override?.displayCategory || product.displayCategory || product.category || product.storeName || "Digital";
+}
+
+function isEmmaStoreProduct(product = {}) {
+  const storeKey = String(product.storeKey || product.provider || product.storeName || "").trim().toLowerCase();
+  return storeKey === "emma" || storeKey.includes("emma");
+}
+
+function getDigitalProductStoreBadgeLabel(product = {}) {
+  if (isEmmaStoreProduct(product)) {
+    return "Emma Store";
+  }
+  return getDigitalProductDisplayCategory(product);
 }
 
 function getUsdtToNgnRate() {
@@ -4348,12 +4387,8 @@ function renderPwaLayer() {
 
 function renderPwaSettingsContent() {
   const preferences = state.pwa.pushPreferences || state.pwa.pushConfig.preferences || {};
-  const installedLabel = state.pwa.isStandalone ? "Installed" : "Not installed";
-  const notificationLabel = state.pwa.pushSubscribed
-    ? "Enabled"
-    : state.pwa.notificationPermission === "denied"
-      ? "Blocked"
-      : "Disabled";
+  const installedLabel = getPwaInstallStatusLabel();
+  const notificationLabel = getPwaNotificationStatusLabel();
   const rows = [
     ["transactions", "Transaction Updates"],
     ["messages", "Messages"],
@@ -4366,7 +4401,10 @@ function renderPwaSettingsContent() {
   return `
     <div class="pwa-settings-card">
       <div class="pwa-settings-title-row">
-        <p class="muted-copy">Install, offline support, and alerts.</p>
+        <div>
+          <strong>APP & DEVICE</strong>
+          <p class="muted-copy">Install, offline support, alerts, and updates.</p>
+        </div>
         <span class="app-version-pill">v${escapeHtml(APP_VERSION)}</span>
       </div>
       <div class="pwa-settings-grid">
@@ -4380,8 +4418,9 @@ function renderPwaSettingsContent() {
         </div>
       </div>
       <div class="pwa-settings-actions">
-        ${state.pwa.isStandalone ? "" : `<button class="button-secondary" id="pwa-settings-install-btn" type="button">${icon("download")} Install NetrueFi</button>`}
-        <button class="button-secondary" id="pwa-settings-notification-btn" type="button">${icon("bell")} Manage notifications</button>
+        ${state.pwa.isStandalone ? `<button class="button-secondary" type="button" disabled>${icon("check")} Installed</button>` : `<button class="button-secondary" id="pwa-settings-install-btn" type="button">${icon("download")} ${escapeHtml(getPwaInstallActionLabel())}</button>`}
+        <button class="button-secondary" id="pwa-settings-notification-btn" type="button">${icon("bell")} ${notificationLabel === "Enabled" ? "Manage notifications" : "Enable notifications"}</button>
+        <button class="button-secondary" id="pwa-update-check-btn" type="button">${icon("refresh")} Check for updates</button>
       </div>
       <form id="pwa-notification-preferences-form" class="pwa-preference-list">
         ${rows
@@ -4503,6 +4542,19 @@ function bindPwaActions() {
   const notificationButton = document.getElementById("pwa-settings-notification-btn");
   if (notificationButton) {
     notificationButton.onclick = showNotificationSoftPrompt;
+  }
+
+  const updateCheckButton = document.getElementById("pwa-update-check-btn");
+  if (updateCheckButton) {
+    updateCheckButton.onclick = () => {
+      updateCheckButton.disabled = true;
+      void checkForPwaUpdate({ force: true })
+        .then(() => showNotice(state.pwa.updateAvailable ? "Update ready" : "NetrueFi is up to date"))
+        .catch((error) => showError(error.message))
+        .finally(() => {
+          updateCheckButton.disabled = false;
+        });
+    };
   }
 
   const notificationEnable = document.getElementById("pwa-notification-enable-btn");
@@ -9352,7 +9404,7 @@ function renderDigitalServiceProductCards(products = []) {
     <button class="digital-product-card ${isDigitalProductPurchasable(product) ? "" : "is-unavailable"}" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${isDigitalProductPurchasable(product) ? "" : "disabled"}>
       ${renderDigitalServiceImage(product)}
       <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
-      <span>${escapeHtml(getDigitalProductDisplayCategory(product))}</span>
+      <span class="store-origin-badge">${escapeHtml(getDigitalProductStoreBadgeLabel(product))}</span>
       ${renderDigitalProductPrice(product, 1, { compact: true })}
       ${!isDigitalProductPurchasable(product) ? `<em class="store-stock-badge">${escapeHtml(getDigitalProductAvailabilityLabel(product))}</em>` : ""}
     </button>
@@ -11766,13 +11818,32 @@ function renderAdminSettingsOverview() {
   const pendingWithdrawals = (state.adminWithdrawals || []).filter((item) => ["PENDING", "PROCESSING"].includes(String(item.status || "").toUpperCase())).length;
   const activeGiftCards = (state.adminGiftCards || []).filter((card) => String(card.status || "").toUpperCase() !== "USED").length;
   const referralStats = state.adminReferrals?.stats || state.financialDashboard?.referral?.stats || {};
+  const settingsCategories = [
+    ["general", "settings", "General", "Appearance and exchange", "appearance"],
+    ["finance", "bank", "Finance", "Wallet, deposits, withdrawals", "deposit-channel"],
+    ["services", "gift", "Services", "VTU, store, quest, referrals", "digital-services"],
+    ["communication", "bell", "Communication", "Telegram, push and alerts", "app"],
+    ["system", "refresh", "System", "PWA, maintenance, security", "maintenance"],
+  ];
   return `
     <section class="mobile-card settings-card admin-settings-overview">
       <div class="section-head">
         <div>
-          <h3>Admin Controls</h3>
-          <p class="muted-copy">Fast access</p>
+          <h3>Admin Settings</h3>
+          <p class="muted-copy">Choose a category, then expand only what you need.</p>
         </div>
+      </div>
+      <div class="admin-settings-category-grid" aria-label="Admin settings categories">
+        ${settingsCategories.map(([category, iconName, title, subtitle, target]) => `
+          <button class="admin-settings-category-card" data-settings-jump="${escapeHtml(target)}" data-settings-category="${escapeHtml(category)}" type="button">
+            <span class="card-icon">${icon(iconName)}</span>
+            <span>
+              <strong>${escapeHtml(title)}</strong>
+              <small>${escapeHtml(subtitle)}</small>
+            </span>
+            <span class="settings-disclosure-chevron">${icon("chevronDown")}</span>
+          </button>
+        `).join("")}
       </div>
       <div class="admin-control-grid">
         <button class="admin-control-tile" data-admin-users-open type="button">
@@ -12279,10 +12350,10 @@ function isSettingsDisclosureOpen(key, fallback = false) {
   return fallback;
 }
 
-function renderSettingsDisclosure({ key, title, subtitle = "", iconName = "settings", content = "", open = false, extraClass = "", section = "" }) {
+function renderSettingsDisclosure({ key, title, subtitle = "", iconName = "settings", content = "", open = false, extraClass = "", section = "", category = "" }) {
   const isOpen = isSettingsDisclosureOpen(key, open);
   return `
-    <details class="mobile-card settings-card settings-disclosure ${escapeHtml(extraClass)}" data-settings-disclosure="${escapeHtml(key || title)}" ${section ? `data-section="${escapeHtml(section)}"` : ""} ${isOpen ? "open" : ""}>
+    <details class="mobile-card settings-card settings-disclosure ${escapeHtml(extraClass)}" data-settings-disclosure="${escapeHtml(key || title)}" ${category ? `data-settings-category="${escapeHtml(category)}"` : ""} ${section ? `data-section="${escapeHtml(section)}"` : ""} ${isOpen ? "open" : ""}>
       <summary class="settings-disclosure-summary">
         <span class="card-icon">${icon(iconName)}</span>
         <span>
@@ -12486,17 +12557,17 @@ function renderSettingsPane() {
     `;
     return `
       ${renderAdminSettingsOverview()}
-      ${renderSettingsDisclosure({ key: "appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
-      ${renderSettingsDisclosure({ key: "exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
-      ${renderSettingsDisclosure({ key: "deposit-channel", title: "Wallet Rules", subtitle: "Bank, fees, minimums", iconName: "bank", content: depositPanel, open: true })}
-      ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel })}
-      ${renderSettingsDisclosure({ key: "digital-services", title: "Digital Services", subtitle: digitalServiceSettings.enabled ? "Akunding" : "Disabled", iconName: "gift", content: renderAdminDigitalServicesPanel() })}
-      ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel })}
-      ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section" })}
-      ${renderSettingsDisclosure({ key: "referrals", title: "Referral Management", subtitle: "Rewards and progress", iconName: "users", content: renderAdminReferralPanel(), extraClass: "admin-referral-section" })}
-      ${renderSettingsDisclosure({ key: "maintenance", title: "Maintenance", subtitle: "48-hour disposable history", iconName: "settings", content: maintenancePanel })}
-      ${renderSettingsDisclosure({ key: "app", title: "App", subtitle: state.pwa.isStandalone ? "Installed" : "Install and alerts", iconName: "download", content: renderPwaSettingsContent(), section: "app" })}
-      ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support" })}
+      ${renderSettingsDisclosure({ key: "appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel, category: "general" })}
+      ${renderSettingsDisclosure({ key: "exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers), category: "general" })}
+      ${renderSettingsDisclosure({ key: "deposit-channel", title: "Wallet Rules", subtitle: "Bank, fees, minimums", iconName: "bank", content: depositPanel, open: true, category: "finance" })}
+      ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel, category: "services" })}
+      ${renderSettingsDisclosure({ key: "digital-services", title: "Digital Services", subtitle: digitalServiceSettings.enabled ? "Multi-shop" : "Disabled", iconName: "gift", content: renderAdminDigitalServicesPanel(), category: "services" })}
+      ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel, category: "finance" })}
+      ${renderSettingsDisclosure({ key: "gift-cards", title: "Gift Cards", subtitle: "Generate and track", iconName: "gift", content: renderAdminGiftCardsPanel(), extraClass: "admin-gift-card-section", category: "services" })}
+      ${renderSettingsDisclosure({ key: "referrals", title: "Referral Management", subtitle: "Rewards and progress", iconName: "users", content: renderAdminReferralPanel(), extraClass: "admin-referral-section", category: "services" })}
+      ${renderSettingsDisclosure({ key: "maintenance", title: "Danger Zone", subtitle: "48-hour disposable history", iconName: "settings", content: maintenancePanel, extraClass: "settings-danger-zone", category: "system" })}
+      ${renderSettingsDisclosure({ key: "app", title: "App & Device", subtitle: getPwaInstallStatusLabel(), iconName: "download", content: renderPwaSettingsContent(), section: "app", category: "communication" })}
+      ${renderSettingsDisclosure({ key: "security", title: "Security", subtitle: "Password and logout", iconName: "lock", content: supportPanel, section: "support", category: "system" })}
     `;
   }
   if (state.user.role === "user") {
@@ -13536,7 +13607,7 @@ function renderStoreProductCard(product = {}, featured = false) {
     <button class="digital-product-card store-product-card ${featured ? "featured" : ""} ${purchasable ? "" : "is-unavailable"}" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${purchasable ? "" : "disabled"}>
       <span class="store-product-media">${renderDigitalServiceImage(product)}</span>
       <span class="store-product-body">
-        <small>${escapeHtml(getDigitalProductDisplayCategory(product))}</small>
+        <small class="store-origin-badge">${escapeHtml(getDigitalProductStoreBadgeLabel(product))}</small>
         <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
         <span>${escapeHtml(product.description || product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
         ${!purchasable ? `<em class="store-stock-badge">${escapeHtml(getDigitalProductAvailabilityLabel(product))}</em>` : ""}
@@ -13840,6 +13911,24 @@ function bindDashboardActions() {
         ...(state.settingsDisclosureOpen || {}),
         [key]: details.open,
       };
+    });
+  });
+
+  document.querySelectorAll("[data-settings-jump]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.settingsJump;
+      const panel = key
+        ? Array.from(document.querySelectorAll("[data-settings-disclosure]")).find((item) => item.dataset.settingsDisclosure === key)
+        : null;
+      if (!panel) {
+        return;
+      }
+      panel.open = true;
+      state.settingsDisclosureOpen = {
+        ...(state.settingsDisclosureOpen || {}),
+        [key]: true,
+      };
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 
