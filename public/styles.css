@@ -2935,6 +2935,65 @@ body[data-theme="dark"] .digital-category-row button.active {
   gap: 10px;
 }
 
+.admin-supplier-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.admin-supplier-toolbar p {
+  margin: 0;
+}
+
+.admin-supplier-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-supplier-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, auto);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft-surface);
+}
+
+.admin-supplier-card strong,
+.admin-supplier-card p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-supplier-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.admin-supplier-meta > span,
+.admin-supplier-meta > small {
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.admin-supplier-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .admin-digital-store-groups {
   display: grid;
   gap: 12px;
@@ -6720,6 +6779,18 @@ body[data-theme="dark"] .mirror-guide-pill {
 
   .admin-store-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-supplier-toolbar,
+  .admin-supplier-card {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .admin-supplier-toolbar,
+  .admin-supplier-actions,
+  .admin-supplier-meta {
+    justify-content: flex-start;
   }
 
   .admin-digital-product-card {

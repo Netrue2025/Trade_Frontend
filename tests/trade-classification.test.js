@@ -111,3 +111,23 @@ test("Quest reward mobile layout hides chrome scrollbars and keeps wallet CTA re
   assert.match(styles, /scrollbar-width:\s*none/);
   assert.match(styles, /\.quest-playfield \.quest-actions\s*{[^}]*position:\s*sticky/s);
 });
+
+test("Shop products sort by availability before randomized display", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /function normalizeDigitalProductAvailability\(product = {}\)/);
+  assert.match(app, /function sortDigitalProductsForDisplay\(products = \[\], \{ shuffle = false \} = {}\)/);
+  assert.match(app, /groups\[rank\]\.push\(\{ product, index \}\)/);
+  assert.match(app, /return \(shuffle \? shuffleList\(sorted\) : sorted\)\.map\(\(item\) => item\.product\)/);
+  assert.match(app, /state\.digitalServices\.allProducts = sortDigitalProductsForDisplay\(payload\.products \|\| \[\], \{ shuffle: true \}\)/);
+});
+
+test("Shop cards show one unavailable badge and admin supplier controls are present", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /<em class="store-stock-badge">\$\{escapeHtml\(getDigitalProductAvailabilityLabel\(product\)\)\}<\/em>/);
+  assert.doesNotMatch(app, /green UNAVAILABLE/i);
+  assert.match(app, /renderAdminDigitalSuppliersSection/);
+  assert.match(app, /data-admin-digital-supplier-add/);
+  assert.match(app, /data-admin-digital-supplier-preview/);
+  assert.match(app, /data-admin-digital-supplier-import-form/);
+  assert.match(app, /Custom headers JSON/);
+});

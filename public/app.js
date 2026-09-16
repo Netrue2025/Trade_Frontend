@@ -3142,7 +3142,18 @@ function isPublicShopRoute() {
 }
 
 function getActiveStoreLabel() {
-  return STORE_OPTIONS.find((store) => store.id === state.digitalServices.store)?.label || "All Products";
+  const stores = state.digitalServices.stores?.length
+    ? [{ id: "", name: "All Products", label: "All Products" }, ...state.digitalServices.stores]
+    : STORE_OPTIONS;
+  const match = stores.find((store) => store.id === state.digitalServices.store);
+  return match?.label || match?.name || "All Products";
+}
+
+function getDigitalStoreOptions() {
+  const stores = state.digitalServices.stores?.length
+    ? state.digitalServices.stores.map((store) => ({ id: store.id, label: store.label || store.name || store.id }))
+    : STORE_OPTIONS.filter((store) => store.id);
+  return [{ id: "", label: "All Products" }, ...stores.filter((store) => store.id)];
 }
 
 function savePendingShopOrder(order = {}) {
@@ -3182,12 +3193,51 @@ function shuffleList(items = []) {
   return shuffled;
 }
 
+function normalizeDigitalProductAvailability(product = {}) {
+  const rankFromServer = Number(product.availabilityRank);
+  if (Number.isFinite(rankFromServer)) {
+    return {
+      rank: Math.max(0, Math.min(2, rankFromServer)),
+      available: rankFromServer === 0 && product.available !== false,
+      label: product.available !== false ? "" : getDigitalProductAvailabilityLabel(product),
+    };
+  }
+  const price = Number(product.sellingPrice || product.price || product.ngnEquivalent || 0);
+  const supplierAvailable = product.supplierAvailable !== false && product.sourceMissing !== true;
+  const stock = Number(product.stock || 0);
+  const inStock = !Number.isFinite(stock) || stock > 0;
+  const available = product.available !== false && supplierAvailable && inStock && price > 0;
+  const temporary = !available && supplierAvailable && price > 0;
+  return {
+    rank: available ? 0 : temporary ? 1 : 2,
+    available,
+    label: available ? "" : getDigitalProductAvailabilityLabel(product),
+  };
+}
+
+function sortDigitalProductsForDisplay(products = [], { shuffle = false } = {}) {
+  const groups = [[], [], []];
+  (products || []).forEach((product, index) => {
+    const availability = normalizeDigitalProductAvailability(product);
+    const rank = Math.max(0, Math.min(2, Number(availability.rank || 0)));
+    groups[rank].push({ product, index });
+  });
+  return groups.flatMap((group) => {
+    const sorted = [...group].sort((a, b) =>
+      Number(b.product.featured) - Number(a.product.featured)
+      || Number(a.product.order || 0) - Number(b.product.order || 0)
+      || a.index - b.index
+    );
+    return (shuffle ? shuffleList(sorted) : sorted).map((item) => item.product);
+  });
+}
+
 function mergeDigitalProductList(list = [], product = null) {
   if (!product?.id) {
     return list;
   }
   const exists = list.some((item) => item.id === product.id);
-  return exists ? list.map((item) => item.id === product.id ? product : item) : [product, ...list];
+  return sortDigitalProductsForDisplay(exists ? list.map((item) => item.id === product.id ? product : item) : [product, ...list]);
 }
 
 function getDigitalProductSearchText(product = {}) {
@@ -3218,6 +3268,7 @@ function applyDigitalServiceProductFilters() {
     const queryMatches = !query || getDigitalProductSearchText(product).includes(query);
     return categoryMatches && queryMatches;
   });
+  state.digitalServices.products = sortDigitalProductsForDisplay(state.digitalServices.products);
   return state.digitalServices.products;
 }
 
@@ -5349,6 +5400,14 @@ function renderActionModal() {
 
   if (state.actionModal.type === "admin-digital-product-edit") {
     return renderAdminDigitalProductEditModal();
+  }
+
+  if (state.actionModal.type === "admin-digital-supplier") {
+    return renderAdminDigitalSupplierModal();
+  }
+
+  if (state.actionModal.type === "admin-digital-supplier-preview") {
+    return renderAdminDigitalSupplierPreviewModal();
   }
 
   if (state.actionModal.type === "admin-history-cleanup-confirm") {
@@ -7848,6 +7907,183 @@ async function syncAdminDigitalServices() {
   }).catch((error) => showError(error.message));
 }
 
+function getAdminDigitalSuppliers() {
+  const settingsSuppliers = state.digitalServices.admin?.settings?.suppliers || state.digitalServices.settings?.suppliers || [];
+  const statusSuppliers = Object.values(state.digitalServices.admin?.suppliers || {});
+  const byId = new Map();
+  [...settingsSuppliers, ...statusSuppliers].forEach((supplier) => {
+    if (supplier?.id) {
+      byId.set(String(supplier.id), { ...(byId.get(String(supplier.id)) || {}), ...supplier });
+    }
+  });
+  return [...byId.values()];
+}
+
+function getAdminDigitalSupplierById(supplierId) {
+  const id = String(supplierId || "");
+  return getAdminDigitalSuppliers().find((supplier) => String(supplier.id) === id) || null;
+}
+
+function readAdminSupplierForm(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  let customHeaders = {};
+  if (String(data.customHeaders || "").trim()) {
+    customHeaders = JSON.parse(String(data.customHeaders || "{}"));
+  }
+  return {
+    id: data.id || "",
+    name: data.name || "",
+    enabled: data.enabled !== "false",
+    baseUrl: data.baseUrl || "",
+    authType: data.authType || "api_key",
+    apiKey: data.apiKey || "",
+    bearerToken: data.bearerToken || "",
+    username: data.username || "",
+    password: data.password || "",
+    customHeaders,
+    productEndpoint: data.productEndpoint || "/products",
+    orderEndpoint: data.orderEndpoint || "",
+    orderStatusEndpoint: data.orderStatusEndpoint || "",
+    productSync: data.productSync !== "false",
+    automaticFulfillment: data.automaticFulfillment === "true",
+    orderReconciliation: data.orderReconciliation === "true",
+    fieldMapping: {
+      supplierProductId: data.mapSupplierProductId || "",
+      name: data.mapName || "",
+      description: data.mapDescription || "",
+      category: data.mapCategory || "",
+      supplierCost: data.mapSupplierCost || "",
+      availability: data.mapAvailability || "",
+      image: data.mapImage || "",
+    },
+  };
+}
+
+async function submitAdminDigitalSupplier(form) {
+  let input;
+  try {
+    input = readAdminSupplierForm(form);
+  } catch (error) {
+    showError(`Custom headers are invalid JSON: ${error.message}`);
+    return;
+  }
+  const isEdit = !!form.dataset.adminDigitalSupplierForm;
+  const supplierId = form.dataset.adminDigitalSupplierForm || input.id;
+  await withLoading(async () => {
+    const payload = await api(isEdit
+      ? `/api/admin/integrations/digital-services/suppliers/${encodeURIComponent(supplierId)}`
+      : "/api/admin/integrations/digital-services/suppliers", {
+      method: isEdit ? "PATCH" : "POST",
+      body: JSON.stringify(input),
+    });
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      settings: payload.settings || state.digitalServices.admin?.settings,
+      suppliers: payload.suppliers || state.digitalServices.admin?.suppliers,
+    };
+    state.digitalServices.settings = payload.settings || state.digitalServices.settings;
+    clearActionModal();
+    render();
+    showNotice("Supplier saved");
+  }).catch((error) => showError(error.message));
+}
+
+async function testAdminDigitalSupplier(supplierId, form = null) {
+  let body = { id: supplierId };
+  if (form) {
+    try {
+      body = readAdminSupplierForm(form);
+    } catch (error) {
+      showError(`Custom headers are invalid JSON: ${error.message}`);
+      return;
+    }
+  }
+  await withLoading(async () => {
+    const payload = await api("/api/admin/integrations/digital-services/suppliers/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (payload.supplier) {
+      state.digitalServices.admin = {
+        ...(state.digitalServices.admin || {}),
+        settings: {
+          ...(state.digitalServices.admin?.settings || {}),
+          suppliers: getAdminDigitalSuppliers().map((supplier) => supplier.id === payload.supplier.id ? payload.supplier : supplier),
+        },
+      };
+    }
+    render();
+    showNotice(`Connection successful: ${Number(payload.result?.productCount || 0).toLocaleString()} products found`);
+  }).catch((error) => showError(error.message));
+}
+
+async function previewAdminDigitalSupplier(supplierId) {
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/suppliers/${encodeURIComponent(supplierId)}/preview`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.actionModal = {
+      type: "admin-digital-supplier-preview",
+      supplierId,
+      preview: payload,
+    };
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function importAdminDigitalSupplier(supplierId, form = null) {
+  const mapping = form ? Object.fromEntries(new FormData(form).entries()) : {};
+  const normalizedMapping = {
+    supplierProductId: mapping.supplierProductId || "",
+    name: mapping.name || "",
+    description: mapping.description || "",
+    category: mapping.category || "",
+    supplierCost: mapping.supplierCost || "",
+    availability: mapping.availability || "",
+    image: mapping.image || "",
+  };
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/suppliers/${encodeURIComponent(supplierId)}/import`, {
+      method: "POST",
+      body: JSON.stringify({ mapping: normalizedMapping }),
+    });
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      products: sortDigitalProductsForDisplay(payload.products || []),
+      suppliers: payload.suppliers || state.digitalServices.admin?.suppliers,
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    state.digitalServices.allProducts = state.digitalServices.admin.products;
+    state.digitalServices.products = state.digitalServices.admin.products;
+    clearActionModal();
+    render();
+    showNotice(`${Number(payload.summary?.importedCount || 0).toLocaleString()} supplier products imported`);
+  }).catch((error) => showError(error.message));
+}
+
+async function disableAdminDigitalSupplier(supplierId) {
+  if (!supplierId || !window.confirm("Disable this supplier and stop new purchases from its products?")) {
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/suppliers/${encodeURIComponent(supplierId)}/disable`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      products: sortDigitalProductsForDisplay(payload.products || state.digitalServices.admin?.products || []),
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    state.digitalServices.allProducts = state.digitalServices.admin.products;
+    state.digitalServices.products = state.digitalServices.admin.products;
+    await loadDigitalServicesSnapshot({ force: true }).catch(() => undefined);
+    render();
+    showNotice("Supplier disabled");
+  }).catch((error) => showError(error.message));
+}
+
 async function submitAdminDigitalProductOverride(form) {
   const productId = form.dataset.adminDigitalProductForm;
   if (!productId) {
@@ -8607,9 +8843,10 @@ async function loadDigitalServicesSnapshot({ force = false } = {}) {
     if (payload) {
       state.digitalServices.admin = payload;
       state.digitalServices.settings = payload.settings || payload.summary?.settings || state.digitalServices.settings;
-      state.digitalServices.allProducts = payload.products || state.digitalServices.allProducts || [];
+      state.digitalServices.allProducts = sortDigitalProductsForDisplay(payload.products || state.digitalServices.allProducts || []);
       state.digitalServices.products = state.digitalServices.allProducts;
       state.digitalServices.orders = payload.orders || state.digitalServices.orders || [];
+      state.digitalServices.stores = payload.stores || state.digitalServices.stores || [];
       state.digitalServices.categories = [...new Set((state.digitalServices.products || []).map((item) => item.category).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     }
     return;
@@ -8635,8 +8872,9 @@ async function loadDigitalServiceProducts({ force = false } = {}) {
   state.digitalServices.loading = true;
   try {
     const payload = await api(`/api/digital-services/products${params.toString() ? `?${params}` : ""}`);
-    state.digitalServices.allProducts = shuffleList(payload.products || []);
+    state.digitalServices.allProducts = sortDigitalProductsForDisplay(payload.products || [], { shuffle: true });
     state.digitalServices.categories = payload.categories || [];
+    state.digitalServices.stores = payload.stores || state.digitalServices.stores || STORE_OPTIONS;
     state.digitalServices.settings = {
       ...(state.digitalServices.settings || {}),
       ...(payload.status?.settings || payload.status || {}),
@@ -9064,14 +9302,18 @@ function getDigitalServiceProductById(productId) {
 }
 
 function isDigitalProductPurchasable(product = {}) {
-  return product && product.available !== false && Number(product.sellingPrice || product.price || product.ngnEquivalent || 0) > 0;
+  return !!product && normalizeDigitalProductAvailability(product).available && Number(product.sellingPrice || product.price || product.ngnEquivalent || 0) > 0;
 }
 
 function getDigitalProductAvailabilityLabel(product = {}) {
-  if (product.available !== false) {
+  if (product.available !== false && Number(product.availabilityRank || 0) === 0) {
     return "";
   }
-  if (product.supplierAvailable === false || Number(product.stock || 0) <= 0) {
+  const status = String(product.availability || product.providerStatus || "").trim().toLowerCase();
+  if (status.includes("source_missing")) {
+    return "UNAVAILABLE";
+  }
+  if (product.supplierAvailable === false || Number(product.stock || 0) <= 0 || status.includes("out")) {
     return "OUT OF STOCK";
   }
   return "UNAVAILABLE";
@@ -10996,6 +11238,7 @@ function renderAdminDigitalServicesPanel() {
         <div><span>Revenue</span><strong>${formatNaira(summary.revenue || 0)}</strong></div>
         <div><span>Profit</span><strong>${formatNaira(summary.profit || 0)}</strong></div>
       </div>
+      ${renderAdminDigitalSuppliersSection()}
       <details class="settings-disclosure nested-disclosure" open>
         <summary><span>${icon("gift")}</span><strong>Products</strong></summary>
         <div class="admin-digital-store-groups">
@@ -11010,6 +11253,50 @@ function renderAdminDigitalServicesPanel() {
         </div>
       </details>
     </div>
+  `;
+}
+
+function renderAdminDigitalSuppliersSection() {
+  const suppliers = getAdminDigitalSuppliers();
+  return `
+    <details class="settings-disclosure nested-disclosure" open>
+      <summary><span>${icon("gift")}</span><strong>Shops / Suppliers</strong></summary>
+      <div class="admin-supplier-toolbar">
+        <p class="muted-copy">Manage product-sync suppliers. Secrets stay backend-only and are never shown here.</p>
+        <button class="micro-btn primary" data-admin-digital-supplier-add type="button">${icon("plus")} Add Shop</button>
+      </div>
+      <div class="admin-supplier-grid">
+        ${suppliers.map(renderAdminDigitalSupplierCard).join("") || `<p class="muted-copy">No suppliers configured.</p>`}
+      </div>
+    </details>
+  `;
+}
+
+function renderAdminDigitalSupplierCard(supplier = {}) {
+  const isBuiltIn = ["akunding", "emma"].includes(String(supplier.id || ""));
+  const connected = supplier.configured && supplier.enabled !== false;
+  const lastSync = supplier.lastSuccessfulSyncAt || supplier.lastSyncAt || supplier.lastConnectionTestAt || "";
+  return `
+    <article class="admin-supplier-card">
+      <div>
+        <strong>${escapeHtml(supplier.name || supplier.id || "Supplier")}</strong>
+        <p class="muted-copy">${escapeHtml(supplier.baseUrl || (isBuiltIn ? "Deployment environment" : "No API URL"))}</p>
+      </div>
+      <div class="admin-supplier-meta">
+        <span class="wallet-status-badge ${connected ? "wallet-status-success" : "wallet-status-pending"}">${connected ? "Connected" : "Needs setup"}</span>
+        <span>${Number(supplier.productCount || 0).toLocaleString()} products</span>
+        <span>${Number(supplier.availableCount || 0).toLocaleString()} available</span>
+        <span>${supplier.automaticFulfillment ? "Auto fulfillment" : "Manual only"}</span>
+        ${lastSync ? `<small>Last sync ${new Date(lastSync).toLocaleString()}</small>` : `<small>No sync yet</small>`}
+      </div>
+      <div class="admin-supplier-actions">
+        ${isBuiltIn ? "" : `<button class="icon-action" data-admin-digital-supplier-edit="${escapeHtml(supplier.id || "")}" type="button" aria-label="Edit supplier" title="Edit supplier">${icon("edit")}</button>`}
+        ${isBuiltIn ? "" : `<button class="micro-btn" data-admin-digital-supplier-test="${escapeHtml(supplier.id || "")}" type="button">${icon("refresh")} Test</button>`}
+        ${isBuiltIn ? "" : `<button class="micro-btn" data-admin-digital-supplier-preview="${escapeHtml(supplier.id || "")}" type="button">${icon("signals")} Fetch</button>`}
+        ${isBuiltIn ? "" : `<button class="micro-btn primary" data-admin-digital-supplier-import="${escapeHtml(supplier.id || "")}" type="button">${icon("download")} Sync</button>`}
+        ${isBuiltIn ? "" : `<button class="micro-btn danger" data-admin-digital-supplier-disable="${escapeHtml(supplier.id || "")}" type="button">${icon("trash")} Disable</button>`}
+      </div>
+    </article>
   `;
 }
 
@@ -11053,6 +11340,118 @@ function getAdminDigitalProductById(productId) {
   const id = String(productId || "");
   const adminProducts = state.digitalServices.admin?.products || [];
   return [...adminProducts, ...(state.digitalServices.products || [])].find((product) => String(product.id) === id) || null;
+}
+
+function renderAdminDigitalSupplierModal() {
+  const supplier = getAdminDigitalSupplierById(state.actionModal?.supplierId) || {};
+  const isEdit = !!supplier.id;
+  const mapping = supplier.fieldMapping || {};
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card admin-digital-edit-modal">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Supplier</p>
+        <h3>${isEdit ? "Manage shop" : "Add shop"}</h3>
+        <form class="stack-form subtle-form" data-admin-digital-supplier-form="${escapeHtml(supplier.id || "")}">
+          <div class="admin-digital-product-grid">
+            <label>Shop name <input name="name" value="${escapeHtml(supplier.name || "")}" placeholder="Akunding" required /></label>
+            <label>Supplier ID <input name="id" value="${escapeHtml(supplier.id || "")}" placeholder="emma-store" ${isEdit ? "readonly" : ""} /></label>
+            <label>API base URL <input name="baseUrl" value="${escapeHtml(supplier.baseUrl || "")}" placeholder="https://supplier.example/api" required /></label>
+            <label>Product endpoint <input name="productEndpoint" value="${escapeHtml(supplier.productEndpoint || "/products")}" placeholder="/products" /></label>
+            <label>Order endpoint <input name="orderEndpoint" value="${escapeHtml(supplier.orderEndpoint || "")}" placeholder="/orders (optional)" /></label>
+            <label>Status
+              <select name="enabled">
+                <option value="true" ${supplier.enabled !== false ? "selected" : ""}>Enabled</option>
+                <option value="false" ${supplier.enabled === false ? "selected" : ""}>Disabled</option>
+              </select>
+            </label>
+            <label>Auth type
+              <select name="authType">
+                ${[
+                  ["api_key", "API Key"],
+                  ["bearer", "Bearer Token"],
+                  ["basic", "Basic Auth"],
+                  ["custom_headers", "Custom Headers"],
+                  ["none", "None"],
+                ].map(([value, label]) => `<option value="${value}" ${String(supplier.authType || "api_key") === value ? "selected" : ""}>${label}</option>`).join("")}
+              </select>
+            </label>
+            <label>API key <input name="apiKey" value="" placeholder="${escapeHtml(supplier.secrets?.apiKey || "Leave blank to keep saved key")}" autocomplete="off" /></label>
+            <label>Bearer token <input name="bearerToken" value="" placeholder="${escapeHtml(supplier.secrets?.bearerToken || "Leave blank to keep saved token")}" autocomplete="off" /></label>
+            <label>Username <input name="username" value="" placeholder="${escapeHtml(supplier.secrets?.username || "Basic auth username")}" autocomplete="off" /></label>
+            <label>Password <input name="password" type="password" value="" placeholder="${escapeHtml(supplier.secrets?.password || "Leave blank to keep saved password")}" autocomplete="new-password" /></label>
+            <label>Auto fulfillment
+              <select name="automaticFulfillment">
+                <option value="false" ${!supplier.automaticFulfillment ? "selected" : ""}>No, manual only</option>
+                <option value="true" ${supplier.automaticFulfillment ? "selected" : ""}>Yes</option>
+              </select>
+            </label>
+            <label>Order reconciliation
+              <select name="orderReconciliation">
+                <option value="false" ${!supplier.orderReconciliation ? "selected" : ""}>No</option>
+                <option value="true" ${supplier.orderReconciliation ? "selected" : ""}>Yes</option>
+              </select>
+            </label>
+            <label>Product ID field <input name="mapSupplierProductId" value="${escapeHtml(mapping.supplierProductId || "")}" placeholder="id" /></label>
+            <label>Name field <input name="mapName" value="${escapeHtml(mapping.name || "")}" placeholder="name" /></label>
+            <label>Price field <input name="mapSupplierCost" value="${escapeHtml(mapping.supplierCost || "")}" placeholder="reseller_price" /></label>
+            <label>Availability field <input name="mapAvailability" value="${escapeHtml(mapping.availability || "")}" placeholder="stock or status" /></label>
+            <label>Image field <input name="mapImage" value="${escapeHtml(mapping.image || "")}" placeholder="image_url" /></label>
+            <label>Category field <input name="mapCategory" value="${escapeHtml(mapping.category || "")}" placeholder="category" /></label>
+          </div>
+          <label>Custom headers JSON <textarea name="customHeaders" rows="3" placeholder='{"X-API-Key":"..."}'></textarea></label>
+          <div class="modal-actions inline-modal-actions">
+            <button class="button-secondary" data-admin-digital-supplier-form-test type="button">${icon("refresh")} Test Connection</button>
+            <button class="button-primary shimmer-button" type="submit">${icon("check")} Save Supplier</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminDigitalSupplierPreviewModal() {
+  const preview = state.actionModal?.preview || {};
+  const mapping = preview.mapping || {};
+  const products = preview.products || [];
+  const supplierId = state.actionModal?.supplierId || preview.supplier?.id || "";
+  const fieldOptions = Object.keys(products[0]?.raw || {}).sort((a, b) => a.localeCompare(b));
+  const renderFieldSelect = (name, label, value = "") => `
+    <label>${label}
+      <select name="${name}">
+        <option value="">Choose field</option>
+        ${fieldOptions.map((field) => `<option value="${escapeHtml(field)}" ${value === field ? "selected" : ""}>${escapeHtml(field)}</option>`).join("")}
+      </select>
+    </label>
+  `;
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card admin-digital-edit-modal">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Preview</p>
+        <h3>${Number(preview.productCount || 0).toLocaleString()} products found</h3>
+        <p class="modal-text">Available ${Number(preview.availableCount || 0).toLocaleString()} | Unavailable ${Number(preview.unavailableCount || 0).toLocaleString()}</p>
+        ${preview.missing?.length ? `<p class="warning-copy">Map required fields before import: ${preview.missing.map(escapeHtml).join(", ")}</p>` : ""}
+        <form data-admin-digital-supplier-import-form="${escapeHtml(supplierId)}" class="stack-form subtle-form">
+          <div class="admin-digital-product-grid">
+            ${renderFieldSelect("supplierProductId", "Product ID", mapping.supplierProductId || "")}
+            ${renderFieldSelect("name", "Product Name", mapping.name || "")}
+            ${renderFieldSelect("supplierCost", "Supplier Price", mapping.supplierCost || "")}
+            ${renderFieldSelect("availability", "Availability", mapping.availability || "")}
+            ${renderFieldSelect("image", "Image", mapping.image || "")}
+            ${renderFieldSelect("category", "Category", mapping.category || "")}
+          </div>
+          <div class="compact-list admin-digital-product-list">
+            ${products.slice(0, 12).map(renderAdminDigitalProductRow).join("") || `<p class="muted-copy">No products to preview.</p>`}
+          </div>
+          <div class="modal-actions inline-modal-actions">
+            <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+            <button class="button-primary shimmer-button" type="submit" ${preview.canImport ? "" : ""}>${icon("download")} Import Products</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
 }
 
 function renderAdminDigitalProductEditModal() {
@@ -12955,7 +13354,7 @@ function renderDigitalServicesPane() {
         <button class="store-refresh-btn" data-digital-services-page-refresh type="button" aria-label="Refresh store">${icon("refresh")}</button>
       </section>
       <section class="store-switcher" aria-label="Store">
-        ${STORE_OPTIONS.map((store) => `<button class="${activeStore === store.id ? "active" : ""}" data-store-switch="${store.id}" type="button">${escapeHtml(store.label)}</button>`).join("")}
+        ${getDigitalStoreOptions().map((store) => `<button class="${activeStore === store.id ? "active" : ""}" data-store-switch="${escapeHtml(store.id)}" type="button">${escapeHtml(store.label)}</button>`).join("")}
       </section>
       <section class="store-stat-strip">
         <div><span>Products</span><strong data-store-product-count>${Number(products.length || 0).toLocaleString()}</strong></div>
@@ -13742,6 +14141,56 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-admin-digital-product-refresh]").forEach((button) => {
     button.addEventListener("click", () => refreshAdminDigitalProductPrice(button.dataset.adminDigitalProductRefresh));
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-add]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = { type: "admin-digital-supplier" };
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-edit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = {
+        type: "admin-digital-supplier",
+        supplierId: button.dataset.adminDigitalSupplierEdit,
+      };
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-test]").forEach((button) => {
+    button.addEventListener("click", () => testAdminDigitalSupplier(button.dataset.adminDigitalSupplierTest));
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-preview]").forEach((button) => {
+    button.addEventListener("click", () => previewAdminDigitalSupplier(button.dataset.adminDigitalSupplierPreview));
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-import]").forEach((button) => {
+    button.addEventListener("click", () => importAdminDigitalSupplier(button.dataset.adminDigitalSupplierImport));
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-disable]").forEach((button) => {
+    button.addEventListener("click", () => disableAdminDigitalSupplier(button.dataset.adminDigitalSupplierDisable));
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminDigitalSupplier(form);
+    });
+    form.querySelectorAll("[data-admin-digital-supplier-form-test]").forEach((button) => {
+      button.addEventListener("click", () => testAdminDigitalSupplier(form.dataset.adminDigitalSupplierForm, form));
+    });
+  });
+
+  document.querySelectorAll("[data-admin-digital-supplier-import-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      importAdminDigitalSupplier(form.dataset.adminDigitalSupplierImportForm, form);
+    });
   });
 
   document.querySelectorAll("[data-admin-digital-order-requery]").forEach((button) => {
