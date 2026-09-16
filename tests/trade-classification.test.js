@@ -144,3 +144,16 @@ test("Admin store orders show action required for supplier configuration failure
   assert.match(app, /Error: \$\{escapeHtml\(order\.lastFulfillmentError\)\}/);
   assert.match(app, /canRetryFulfillment[\s\S]*&& !configurationFailure/);
 });
+
+test("Emma delivery receipts preserve raw items and admin can recover missing delivery", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /Array\.isArray\(delivery\.delivery_items\)/);
+  assert.match(app, /rawItem:\s*item\.trim\(\)/);
+  assert.match(app, /const match = item\.match/);
+  assert.match(app, /match\[3\]\.trim\(\)/);
+  assert.match(app, /Details", item\.value \|\| \(!item\.email && !item\.password \? item\.rawItem : ""\)/);
+  assert.match(app, /recoverAdminDigitalOrderDelivery/);
+  assert.match(app, /\/recover-delivery/);
+  assert.match(app, /data-admin-digital-order-recover-delivery/);
+  assert.match(app, /Recover Delivery/);
+});

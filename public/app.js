@@ -8190,6 +8190,29 @@ async function retryAdminDigitalOrderFulfillment(orderId) {
   }).catch((error) => showError(error.message));
 }
 
+async function recoverAdminDigitalOrderDelivery(orderId) {
+  if (!orderId) {
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/orders/${encodeURIComponent(orderId)}/recover-delivery`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (payload.order) {
+      state.digitalServices.admin = {
+        ...(state.digitalServices.admin || {}),
+        orders: (state.digitalServices.admin?.orders || []).map((order) => order.id === payload.order.id ? payload.order : order),
+        summary: payload.summary || state.digitalServices.admin?.summary || {},
+      };
+      state.digitalServices.orders = (state.digitalServices.orders || []).map((order) => order.id === payload.order.id ? payload.order : order);
+    }
+    await loadDigitalServicesSnapshot({ force: true });
+    render();
+    showNotice("Delivery recovered");
+  }).catch((error) => showError(error.message));
+}
+
 async function recoverAdminDigitalOrders() {
   await withLoading(async () => {
     const payload = await api("/api/admin/integrations/digital-services/recover-orders", {
@@ -9515,15 +9538,16 @@ function normalizeDeliveryItemsForDisplay(delivery = {}) {
   return rawItems
     .map((item, index) => {
       if (typeof item === "string") {
-        const separatorIndex = item.indexOf(":");
-        if (separatorIndex > 0) {
+        const match = item.match(/^\s*([^\s:@|]+@[^\s:@|]+\.[^\s:@|]+)\s*(:|\|)\s*(.+?)\s*$/);
+        if (match) {
           return {
             label: `Account ${index + 1}`,
-            email: item.slice(0, separatorIndex).trim(),
-            password: item.slice(separatorIndex + 1).trim(),
+            rawItem: item.trim(),
+            email: match[1].trim(),
+            password: match[3].trim(),
           };
         }
-        return { label: `Delivery ${index + 1}`, value: item };
+        return { label: `Delivery ${index + 1}`, rawItem: item.trim(), value: item };
       }
       if (item && typeof item === "object") {
         return { label: item.label || `Account ${index + 1}`, ...item };
@@ -9570,7 +9594,7 @@ function renderDigitalServiceDeliveryDetails(delivery = {}, link = "") {
       ${renderDeliveryField("PIN", item.pin)}
       ${renderDeliveryField("Code", item.code)}
       ${renderDeliveryField("License", item.license)}
-      ${renderDeliveryField("Details", item.value)}
+      ${renderDeliveryField("Details", item.value || (!item.email && !item.password ? item.rawItem : ""))}
       ${renderDeliveryField("Instructions", item.instructions || item.instruction)}
     </div>
   `).join("");
@@ -11628,6 +11652,10 @@ function renderAdminDigitalOrderRow(order = {}) {
     && !configurationFailure
     && status !== "DELIVERED";
   const deliveryLink = getDigitalDeliveryLink(order.delivery);
+  const hasDelivery = !!order.delivery;
+  const canRecoverDelivery = String(order.provider || "").toLowerCase() === "emma"
+    && String(order.paymentStatus || "").toLowerCase() === "paid"
+    && !hasDelivery;
   return `
     <div class="asset-card admin-finance-card admin-store-order-row">
       <div>
@@ -11647,6 +11675,7 @@ function renderAdminDigitalOrderRow(order = {}) {
         ${canRequery ? `<button class="micro-btn" data-admin-digital-order-requery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Requery</button>` : ""}
         ${configurationFailure && status !== "DELIVERED" ? `<span class="wallet-status-badge warning">Action required</span>` : ""}
         ${canRetryFulfillment ? `<button class="micro-btn" data-admin-digital-order-retry="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Retry Fulfillment</button>` : ""}
+        ${canRecoverDelivery ? `<button class="micro-btn" data-admin-digital-order-recover-delivery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Recover Delivery</button>` : ""}
       </div>
     </div>
   `;
@@ -14301,6 +14330,10 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-admin-digital-order-retry]").forEach((button) => {
     button.addEventListener("click", () => retryAdminDigitalOrderFulfillment(button.dataset.adminDigitalOrderRetry));
+  });
+
+  document.querySelectorAll("[data-admin-digital-order-recover-delivery]").forEach((button) => {
+    button.addEventListener("click", () => recoverAdminDigitalOrderDelivery(button.dataset.adminDigitalOrderRecoverDelivery));
   });
 
   document.querySelectorAll("[data-admin-digital-orders-recover]").forEach((button) => {
