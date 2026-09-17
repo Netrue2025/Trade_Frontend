@@ -310,6 +310,8 @@ let signalAudioUnlockHandler = null;
 let questCountdownTimer = null;
 let homePromoTimer = null;
 let depositStatusTimer = null;
+let digitalOtpPollTimer = null;
+let digitalOtpCountdownTimer = null;
 const seenSignalIds = new Set();
 
 function getAuthSessionToken() {
@@ -5473,6 +5475,10 @@ function renderActionModal() {
     return renderDigitalServiceReceiptModal();
   }
 
+  if (state.actionModal.type === "digital-otp-waiting") return renderDigitalOtpWaitingModal();
+  if (state.actionModal.type === "digital-otp-ready") return renderDigitalOtpReadyModal();
+  if (state.actionModal.type === "admin-digital-otp-response") return renderAdminDigitalOtpResponseModal();
+
   if (state.actionModal.type === "admin-digital-product-edit") {
     return renderAdminDigitalProductEditModal();
   }
@@ -8241,6 +8247,8 @@ function readAdminDigitalProductCreateStep(form) {
     ...data,
     available: data.available === undefined ? getAdminDigitalProductDraft().available : data.available === "true",
     unlimitedStock: data.unlimitedStock === undefined ? getAdminDigitalProductDraft().unlimitedStock : data.unlimitedStock !== "false",
+    otpEnabled: data.otpEnabled === undefined ? getAdminDigitalProductDraft().otpEnabled : data.otpEnabled === "true",
+    whatsappFallbackEnabled: data.whatsappFallbackEnabled === undefined ? getAdminDigitalProductDraft().whatsappFallbackEnabled : data.whatsappFallbackEnabled === "true",
     fulfillmentMode: "manual",
   };
 }
@@ -8303,6 +8311,12 @@ async function submitAdminDigitalProductCreate(form) {
         available: draft.available !== false,
         unlimitedStock: draft.unlimitedStock !== false,
         stock: draft.stock || "",
+        otpMode: draft.otpMode,
+        otpEnabled: draft.otpEnabled,
+        otpWaitSeconds: draft.otpWaitSeconds,
+        whatsappFallbackEnabled: draft.whatsappFallbackEnabled,
+        whatsappUrl: draft.whatsappUrl,
+        whatsappLabel: draft.whatsappLabel,
       }),
     });
     state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || [], payload.product);
@@ -8340,6 +8354,12 @@ async function submitAdminManualProductEdit(form) {
         unlimitedStock: data.unlimitedStock !== "false",
         stock: data.stock || "",
         fulfillmentMode: "manual",
+        otpMode: data.otpMode,
+        otpEnabled: data.otpEnabled === "true",
+        otpWaitSeconds: data.otpWaitSeconds,
+        whatsappFallbackEnabled: data.whatsappFallbackEnabled === "true",
+        whatsappUrl: data.whatsappUrl,
+        whatsappLabel: data.whatsappLabel,
       }),
     });
     state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || [], payload.product);
@@ -9150,6 +9170,7 @@ async function loadDigitalServicesSnapshot({ force = false } = {}) {
   ]);
   state.digitalServices.settings = statusPayload.settings || null;
   state.digitalServices.orders = ordersPayload.orders || [];
+  syncDigitalOtpExperience();
 }
 
 async function loadDigitalServiceProducts({ force = false } = {}) {
@@ -9173,6 +9194,11 @@ async function loadDigitalServiceProducts({ force = false } = {}) {
       ...(payload.status?.settings || payload.status || {}),
     };
     applyDigitalServiceProductFilters();
+    const sharedProductId = new URLSearchParams(window.location.search).get("product");
+    const sharedProduct = sharedProductId ? getDigitalServiceProductById(sharedProductId) : null;
+    if (sharedProduct && !state.actionModal) {
+      state.actionModal = { type: "digital-service-detail", productId: sharedProduct.id, product: sharedProduct, quantity: 1, returnTo: "store" };
+    }
     return state.digitalServices.products;
   } finally {
     state.digitalServices.loading = false;
@@ -9741,6 +9767,8 @@ function renderDigitalServiceOrderRow(order = {}) {
         <p class="muted-copy">${escapeHtml(order.paymentMethod === "paystack" ? "Paystack" : "Wallet")}</p>
         <p class="muted-copy">${escapeHtml(order.requestId || "")}</p>
         <button class="text-link compact-link" data-digital-service-order-receipt="${escapeHtml(orderId)}" type="button">View</button>
+        ${order.otpRequest ? `<span class="wallet-status-badge ${order.otpRequest.status === "responded" ? "wallet-status-success" : "wallet-status-pending"}">OTP ${escapeHtml(String(order.otpRequest.status || "").toUpperCase())}</span>` : ""}
+        ${order.otpRequest?.status === "responded" ? `<button class="micro-btn primary" data-digital-otp-view="${escapeHtml(orderId)}" type="button">View OTP</button>` : ""}
         ${canCheckDelivery ? `<button class="micro-btn" data-digital-service-order-requery="${escapeHtml(orderId)}" type="button">${icon("refresh")} Check</button>` : ""}
       </div>
     </div>
@@ -9843,7 +9871,8 @@ function renderDeliveryField(label, value, { secret = false } = {}) {
   return `
     <div class="digital-delivery-field">
       <span>${escapeHtml(label)}</span>
-      <strong class="${secret ? "delivery-secret" : ""}">${escapeHtml(text)}</strong>
+      <strong class="${secret ? "delivery-secret" : ""}" ${secret ? `data-delivery-secret data-secret-value="${escapeHtml(text)}"` : ""}>${escapeHtml(secret ? "********" : text)}</strong>
+      ${secret ? `<button class="micro-btn" data-delivery-secret-toggle type="button">Show</button>` : ""}
       ${renderDeliveryCopyButton(text)}
     </div>
   `;
@@ -9909,7 +9938,7 @@ function extractFirstUrl(value) {
   return "";
 }
 
-function renderDigitalServiceDelivery(delivery) {
+function renderDigitalServiceDelivery(delivery, order = {}) {
   const link = getDigitalDeliveryLink(delivery);
   if (!delivery) {
     return `<p class="muted-copy">Delivery is processing. You will get a notification when it is ready.</p>`;
@@ -9917,7 +9946,7 @@ function renderDigitalServiceDelivery(delivery) {
   const details = renderDigitalServiceDeliveryDetails(delivery, link);
   return `
     <section class="digital-delivery-card">
-      <p class="modal-eyebrow neutral">Order ready</p>
+      <p class="modal-eyebrow neutral">Fulfillment successful</p>
       ${link ? `
         <a class="digital-delivery-link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link)}</a>
         <div class="modal-actions inline-modal-actions">
@@ -9931,8 +9960,125 @@ function renderDigitalServiceDelivery(delivery) {
         </ol>
       ` : ""}
       ${details || `<pre class="digital-delivery-box">${escapeHtml(JSON.stringify(delivery, null, 2))}</pre>`}
+      ${order.otpSupport?.mode === "admin_request" && order.otpSupport?.enabled !== false ? `
+        <section class="digital-otp-section">
+          <strong>Verification</strong>
+          <button class="button-primary" data-digital-otp-request="${escapeHtml(order.id || "")}" type="button">Get OTP</button>
+          <ol class="digital-delivery-steps"><li>Login with the details above.</li><li>If verification is requested, tap Get OTP.</li><li>Enter the OTP when it arrives.</li><li>Enjoy.</li></ol>
+        </section>` : ""}
     </section>
   `;
+}
+
+function replaceDigitalOrder(order) {
+  if (!order) return;
+  state.digitalServices.orders = (state.digitalServices.orders || []).map((item) => item.id === order.id ? order : item);
+  if (!(state.digitalServices.orders || []).some((item) => item.id === order.id)) state.digitalServices.orders.unshift(order);
+  if (state.digitalServices.admin?.orders) {
+    state.digitalServices.admin.orders = state.digitalServices.admin.orders.map((item) => item.id === order.id ? order : item);
+  }
+}
+
+function getSafeWhatsappOtpUrl(order = {}) {
+  const raw = String(order.otpSupport?.whatsappUrl || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    url.searchParams.set("text", `Hello, I need an OTP for order ${order.requestId || order.id}.`);
+    return url.toString();
+  } catch { return ""; }
+}
+
+function getOtpWaitRemaining(order = {}) {
+  const requested = Date.parse(order.otpRequest?.requestedAt || "");
+  const waitMs = Number(order.otpSupport?.waitSeconds || 60) * 1000;
+  return Number.isFinite(requested) ? Math.max(0, Math.ceil((requested + waitMs - Date.now()) / 1000)) : 0;
+}
+
+async function requestDigitalServiceOtp(orderId) {
+  await withLoading(async () => {
+    const payload = await api(`/api/digital-services/orders/${encodeURIComponent(orderId)}/otp-request`, { method: "POST", body: "{}" });
+    replaceDigitalOrder(payload.order);
+    state.actionModal = { type: "digital-otp-waiting", orderId: payload.order.id };
+    syncDigitalOtpExperience();
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function shareDigitalServiceProduct(productId) {
+  const product = getDigitalServiceProductById(productId);
+  if (!product) return;
+  const url = new URL(window.location.href);
+  url.pathname = "/shop";
+  url.search = "";
+  url.searchParams.set("product", product.id);
+  const shareData = { title: getDigitalProductDisplayName(product), text: product.description || "View this product on NetrueFi", url: url.toString() };
+  if (navigator.share) await navigator.share(shareData).catch(() => undefined);
+  else {
+    await navigator.clipboard.writeText(shareData.url);
+    showNotice("Product link copied");
+  }
+}
+
+async function acknowledgeDigitalServiceOtp(orderId) {
+  await api(`/api/digital-services/orders/${encodeURIComponent(orderId)}/otp-acknowledge`, { method: "POST", body: "{}" }).catch(() => undefined);
+}
+
+async function submitAdminDigitalOtp(orderId, input) {
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/orders/${encodeURIComponent(orderId)}/otp-response`, { method: "POST", body: JSON.stringify(input) });
+    replaceDigitalOrder(payload.order);
+    state.actionModal = null;
+    render();
+    showNotice(input.action === "cancel" ? "OTP request cancelled" : "OTP sent securely");
+  }).catch((error) => showError(error.message));
+}
+
+function syncDigitalOtpExperience() {
+  clearInterval(digitalOtpPollTimer);
+  clearInterval(digitalOtpCountdownTimer);
+  digitalOtpPollTimer = null;
+  digitalOtpCountdownTimer = null;
+  if (!state.user || state.user.role === "admin") return;
+  const waiting = (state.digitalServices.orders || []).some((order) => order.otpRequest?.status === "waiting");
+  const ready = (state.digitalServices.orders || []).find((order) => order.otpRequest?.status === "responded" && !order.otpRequest.acknowledgedAt);
+  if (ready && (!state.actionModal || state.actionModal.type === "digital-otp-waiting")) state.actionModal = { type: "digital-otp-ready", orderId: ready.id };
+  if (waiting) digitalOtpPollTimer = setInterval(() => loadDigitalServicesSnapshot({ force: true }).then(render).catch(() => undefined), 7000);
+  if (state.actionModal?.type === "digital-otp-waiting") digitalOtpCountdownTimer = setInterval(render, 1000);
+}
+
+function renderDigitalOtpWaitingModal() {
+  const order = getDigitalServiceOrderById(state.actionModal.orderId) || {};
+  const remaining = getOtpWaitRemaining(order);
+  const whatsappUrl = remaining === 0 && order.otpSupport?.whatsappFallbackEnabled ? getSafeWhatsappOtpUrl(order) : "";
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card digital-otp-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><p class="modal-eyebrow neutral">OTP requested</p>
+    <h3>Waiting for verification code</h3><p class="modal-text">Admin has been notified. This screen updates automatically.</p>
+    <strong class="digital-otp-countdown">${remaining ? `${remaining}s` : "Still waiting"}</strong>
+    ${whatsappUrl ? `<a class="button-secondary" href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(order.otpSupport.whatsappLabel || "Get OTP Here")}</a>` : ""}
+  </div></div>`;
+}
+
+function renderDigitalOtpReadyModal() {
+  const order = getDigitalServiceOrderById(state.actionModal.orderId) || {};
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card digital-otp-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><p class="modal-eyebrow neutral">OTP ready</p>
+    <h3>${escapeHtml(order.productName || "Verification code")}</h3><div class="digital-otp-code">${escapeHtml(order.otpRequest?.code || "")}</div>
+    ${renderDeliveryCopyButton(order.otpRequest?.code, "Copy OTP")}
+    <div class="modal-actions single"><button class="button-primary" data-digital-otp-done="${escapeHtml(order.id || "")}" type="button">Done</button></div>
+  </div></div>`;
+}
+
+function renderAdminDigitalOtpResponseModal() {
+  const order = getAdminDigitalOrderById(state.actionModal.orderId) || {};
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card digital-otp-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><p class="modal-eyebrow neutral">OTP request</p>
+    <h3>${escapeHtml(order.productName || "Digital product")}</h3><p class="modal-text">Order ${escapeHtml(order.requestId || order.id || "")}</p>
+    <form data-admin-digital-otp-form="${escapeHtml(order.id || "")}" class="stack-form"><label>OTP code<input name="code" minlength="4" maxlength="32" autocomplete="off" required /></label>
+    <label>Expires in minutes<input name="expiresInMinutes" type="number" min="1" max="60" value="5" /></label>
+    <div class="modal-actions"><button class="button-secondary" data-admin-digital-otp-cancel="${escapeHtml(order.id || "")}" type="button">Cancel request</button><button class="button-primary" type="submit">Send OTP</button></div></form>
+  </div></div>`;
 }
 
 function renderDigitalServiceDetailModal() {
@@ -9965,6 +10111,7 @@ function renderDigitalServiceDetailModal() {
         <p class="muted-copy" id="digital-service-balance-preview">${state.user ? `Wallet balance ${formatNaira(available)}` : "Login or signup to complete checkout."}</p>
         <div class="modal-actions">
           <button class="button-secondary" data-digital-services-back type="button">Back</button>
+          <button class="button-secondary" data-digital-product-share="${escapeHtml(product.id || "")}" type="button">${icon("send")} Share</button>
           <button class="button-primary shimmer-button" id="digital-service-review-btn" type="button" ${total > 0 && purchasable ? "" : "disabled"}>${icon("check")} ${purchasable ? (state.user ? "Buy now" : "Login to buy") : "Unavailable"}</button>
         </div>
       </div>
@@ -10039,7 +10186,7 @@ function renderDigitalServiceReceiptModal() {
           <div class="action-metric"><span>Payment</span><strong>${escapeHtml(order.paymentMethod === "paystack" ? "Paystack" : "NetrueFi Wallet")}</strong></div>
           <div class="action-metric"><span>Ref</span><strong>${escapeHtml(order.requestId || "")}</strong></div>
         </div>
-        ${renderDigitalServiceDelivery(delivery)}
+        ${renderDigitalServiceDelivery(delivery, order)}
         <div class="modal-actions single">
           <button class="button-primary shimmer-button" id="action-modal-cancel-btn" type="button">Done</button>
         </div>
@@ -11766,6 +11913,12 @@ function getAdminDigitalProductDraft() {
     available: true,
     unlimitedStock: true,
     stock: "",
+    otpMode: "none",
+    otpEnabled: true,
+    otpWaitSeconds: "60",
+    whatsappFallbackEnabled: false,
+    whatsappUrl: "",
+    whatsappLabel: "Get OTP Here",
     ...(state.actionModal?.draft || {}),
   };
 }
@@ -11829,6 +11982,12 @@ function renderAdminDigitalProductCreateModal() {
           </select>
         </label>
         <label>Stock quantity <input name="stock" type="number" min="0" step="1" value="${escapeHtml(draft.stock)}" placeholder="Leave blank for unlimited" /></label>
+        <label>OTP support<select name="otpMode"><option value="none" ${draft.otpMode !== "admin_request" ? "selected" : ""}>None</option><option value="admin_request" ${draft.otpMode === "admin_request" ? "selected" : ""}>Admin request</option></select></label>
+        <label>OTP requests<select name="otpEnabled"><option value="true" ${draft.otpEnabled !== false ? "selected" : ""}>Enabled</option><option value="false" ${draft.otpEnabled === false ? "selected" : ""}>Disabled</option></select></label>
+        <label>Wait seconds <input name="otpWaitSeconds" type="number" min="10" max="600" value="${escapeHtml(draft.otpWaitSeconds || 60)}" /></label>
+        <label>WhatsApp fallback<select name="whatsappFallbackEnabled"><option value="false" ${!draft.whatsappFallbackEnabled ? "selected" : ""}>Disabled</option><option value="true" ${draft.whatsappFallbackEnabled ? "selected" : ""}>Enabled</option></select></label>
+        <label>WhatsApp URL <input name="whatsappUrl" value="${escapeHtml(draft.whatsappUrl || "")}" placeholder="https://wa.me/..." /></label>
+        <label>Fallback label <input name="whatsappLabel" value="${escapeHtml(draft.whatsappLabel || "Get OTP Here")}" /></label>
       `;
     }
     return `
@@ -12076,6 +12235,12 @@ function renderAdminManualProductForm(product = {}) {
           <label>Status <select name="available"><option value="true" ${product.available !== false ? "selected" : ""}>Available</option><option value="false" ${product.available === false ? "selected" : ""}>Unavailable</option></select></label>
           <label>Stock mode <select name="unlimitedStock"><option value="true" ${product.unlimitedStock !== false ? "selected" : ""}>Unlimited</option><option value="false" ${product.unlimitedStock === false ? "selected" : ""}>Track quantity</option></select></label>
           <label>Stock <input name="stock" type="number" min="0" step="1" value="${escapeHtml(product.stock ?? "")}" /></label>
+          <label>OTP support<select name="otpMode"><option value="none" ${product.otpSupport?.mode !== "admin_request" ? "selected" : ""}>None</option><option value="admin_request" ${product.otpSupport?.mode === "admin_request" ? "selected" : ""}>Admin request</option></select></label>
+          <label>OTP requests<select name="otpEnabled"><option value="true" ${product.otpSupport?.enabled !== false ? "selected" : ""}>Enabled</option><option value="false" ${product.otpSupport?.enabled === false ? "selected" : ""}>Disabled</option></select></label>
+          <label>Wait seconds <input name="otpWaitSeconds" type="number" min="10" max="600" value="${escapeHtml(product.otpSupport?.waitSeconds || 60)}" /></label>
+          <label>WhatsApp fallback<select name="whatsappFallbackEnabled"><option value="false" ${!product.otpSupport?.whatsappFallbackEnabled ? "selected" : ""}>Disabled</option><option value="true" ${product.otpSupport?.whatsappFallbackEnabled ? "selected" : ""}>Enabled</option></select></label>
+          <label>WhatsApp URL <input name="whatsappUrl" value="${escapeHtml(product.otpSupport?.whatsappUrl || "")}" placeholder="https://wa.me/..." /></label>
+          <label>Fallback label <input name="whatsappLabel" value="${escapeHtml(product.otpSupport?.whatsappLabel || "Get OTP Here")}" /></label>
         </div>
         <p class="muted-copy">Fulfillment remains manual regardless of storefront.</p>
         <div class="modal-actions inline-modal-actions"><button class="button-primary shimmer-button" type="submit">${icon("check")} Save Product</button></div>
@@ -12179,6 +12344,7 @@ function renderAdminDigitalOrderRow(order = {}) {
         ${configurationFailure && status !== "DELIVERED" ? `<span class="wallet-status-badge warning">Action required</span>` : ""}
         ${canRetryFulfillment && !isManual ? `<button class="micro-btn" data-admin-digital-order-retry="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Retry Fulfillment</button>` : ""}
         ${canManualFulfill ? `<button class="micro-btn primary" data-admin-digital-order-manual-fulfill="${escapeHtml(order.id || "")}" type="button">${icon("check")} Fulfill Order</button>` : ""}
+        ${order.otpRequest?.status === "waiting" ? `<button class="micro-btn primary" data-admin-digital-otp-respond="${escapeHtml(order.id || "")}" type="button">Respond OTP</button>` : ""}
         ${canRecoverDelivery ? `<button class="micro-btn" data-admin-digital-order-recover-delivery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Recover Delivery</button>` : ""}
       </div>
     </div>
@@ -14586,6 +14752,14 @@ function bindDashboardActions() {
     });
   });
 
+  document.querySelectorAll("[data-delivery-secret-toggle]").forEach((button) => button.addEventListener("click", () => {
+    const field = button.parentElement?.querySelector("[data-delivery-secret]");
+    if (!field) return;
+    const hidden = field.textContent === "********";
+    field.textContent = hidden ? field.dataset.secretValue : "********";
+    button.textContent = hidden ? "Hide" : "Show";
+  }));
+
   const referralShareButton = document.getElementById("referral-share-btn");
   if (referralShareButton) {
     referralShareButton.addEventListener("click", async () => {
@@ -15148,6 +15322,14 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-digital-service-order-requery]").forEach((button) => {
     button.addEventListener("click", () => requeryDigitalServiceOrder(button.dataset.digitalServiceOrderRequery));
   });
+
+  document.querySelectorAll("[data-digital-otp-request]").forEach((button) => button.addEventListener("click", () => requestDigitalServiceOtp(button.dataset.digitalOtpRequest)));
+  document.querySelectorAll("[data-digital-otp-view]").forEach((button) => button.addEventListener("click", () => { state.actionModal = { type: "digital-otp-ready", orderId: button.dataset.digitalOtpView }; render(); }));
+  document.querySelectorAll("[data-digital-otp-done]").forEach((button) => button.addEventListener("click", () => { acknowledgeDigitalServiceOtp(button.dataset.digitalOtpDone); state.actionModal = null; render(); }));
+  document.querySelectorAll("[data-digital-product-share]").forEach((button) => button.addEventListener("click", () => shareDigitalServiceProduct(button.dataset.digitalProductShare)));
+  document.querySelectorAll("[data-admin-digital-otp-respond]").forEach((button) => button.addEventListener("click", () => { state.actionModal = { type: "admin-digital-otp-response", orderId: button.dataset.adminDigitalOtpRespond }; render(); }));
+  document.querySelectorAll("[data-admin-digital-otp-form]").forEach((form) => form.addEventListener("submit", (event) => { event.preventDefault(); submitAdminDigitalOtp(form.dataset.adminDigitalOtpForm, Object.fromEntries(new FormData(form).entries())); }));
+  document.querySelectorAll("[data-admin-digital-otp-cancel]").forEach((button) => button.addEventListener("click", () => submitAdminDigitalOtp(button.dataset.adminDigitalOtpCancel, { action: "cancel" })));
 
   bindDigitalProductButtons();
 
