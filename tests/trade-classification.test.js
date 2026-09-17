@@ -191,3 +191,26 @@ test("Emma delivery receipts preserve raw items and admin can recover missing de
   assert.match(app, /data-admin-digital-order-recover-delivery/);
   assert.match(app, /Recover Delivery/);
 });
+
+test("Efem and manual store admin workflows are fully wired", () => {
+  const app = readPublicFile("app.js");
+  const styles = readPublicFile("styles.css");
+  assert.match(app, /return "Efem Store"/);
+  assert.match(app, /return product\.storefrontLabel \|\| product\.storeName \|\| "Manual Store"/);
+  assert.match(app, /data-admin-digital-product-add/);
+  assert.match(app, /type: "admin-digital-product-create"/);
+  assert.match(app, /data-admin-digital-product-create-form/);
+  assert.match(app, /Automatic API products must be imported from a supplier/);
+  assert.match(app, /function isSafeProductImageUrl/);
+  assert.match(app, /\["http:", "https:"\]\.includes\(parsed\.protocol\)/);
+  assert.match(app, /data-admin-manual-product-form/);
+  assert.match(app, /data-admin-digital-order-manual-fulfill/);
+  assert.match(app, /data-admin-manual-fulfill-form/);
+  assert.match(app, /data-admin-manual-item-add/);
+  assert.match(app, /data-admin-manual-item-remove/);
+  assert.match(app, /\["emma", "efem"\]\.includes\(provider\)/);
+  assert.match(app, /provider === "emma" \|\| !!order\.supplierOrderId/);
+  assert.match(app, /selectedProductIds/);
+  assert.match(styles, /\.admin-digital-edit-modal\s*{[^}]*100dvh[^}]*safe-area-inset-bottom/s);
+  assert.match(styles, /\.admin-digital-edit-modal \.modal-actions\s*{[^}]*position:\s*sticky/s);
+});

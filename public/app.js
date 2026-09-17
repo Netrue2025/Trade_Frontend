@@ -37,6 +37,8 @@ const STORE_OPTIONS = [
   { id: "", label: "All Products" },
   { id: "alaba", label: "Alaba Store" },
   { id: "emma", label: "Emma Store" },
+  { id: "efem", label: "Efem Store" },
+  { id: "manual", label: "Manual Store" },
 ];
 const FORM_DRAFT_EXCLUDED_FIELD_KEYS = new Set([
   "trade-symbol",
@@ -2163,11 +2165,30 @@ function isEmmaStoreProduct(product = {}) {
   return storeKey === "emma" || storeKey.includes("emma");
 }
 
+function getDigitalProductStoreKey(product = {}) {
+  const value = String(product.storeKey || product.provider || product.storeName || product.storefrontLabel || "").trim().toLowerCase();
+  if (value.includes("emma")) return "emma";
+  if (value.includes("efem")) return "efem";
+  if (value.includes("manual")) return "manual";
+  if (value.includes("alaba") || value.includes("akunding")) return "alaba";
+  return value || "alaba";
+}
+
 function getDigitalProductStoreBadgeLabel(product = {}) {
-  if (isEmmaStoreProduct(product)) {
+  const storeKey = getDigitalProductStoreKey(product);
+  if (storeKey === "emma") {
     return "Emma Store";
   }
-  return getDigitalProductDisplayCategory(product);
+  if (storeKey === "efem") {
+    return "Efem Store";
+  }
+  if (storeKey === "manual") {
+    return product.storefrontLabel || product.storeName || "Manual Store";
+  }
+  if (storeKey === "alaba") {
+    return "Alaba Store";
+  }
+  return product.storefrontLabel || product.storeName || getDigitalProductDisplayCategory(product);
 }
 
 function getUsdtToNgnRate() {
@@ -3301,11 +3322,13 @@ function applyDigitalServiceProductFilters() {
     : state.digitalServices.products || [];
   const query = String(state.digitalServices.query || "").trim().toLowerCase();
   const category = String(state.digitalServices.category || "").trim().toLowerCase();
+  const store = String(state.digitalServices.store || "").trim().toLowerCase();
   state.digitalServices.products = source.filter((product) => {
     const categoryValue = String(product.category || "").trim().toLowerCase();
     const categoryMatches = !category || categoryValue === category;
+    const storeMatches = !store || getDigitalProductStoreKey(product) === store;
     const queryMatches = !query || getDigitalProductSearchText(product).includes(query);
-    return categoryMatches && queryMatches;
+    return categoryMatches && storeMatches && queryMatches;
   });
   state.digitalServices.products = sortDigitalProductsForDisplay(state.digitalServices.products);
   return state.digitalServices.products;
@@ -5452,6 +5475,12 @@ function renderActionModal() {
 
   if (state.actionModal.type === "admin-digital-product-edit") {
     return renderAdminDigitalProductEditModal();
+  }
+  if (state.actionModal.type === "admin-digital-product-create") {
+    return renderAdminDigitalProductCreateModal();
+  }
+  if (state.actionModal.type === "admin-digital-manual-fulfill") {
+    return renderAdminDigitalManualFulfillModal();
   }
 
   if (state.actionModal.type === "admin-digital-supplier") {
@@ -8085,7 +8114,13 @@ async function previewAdminDigitalSupplier(supplierId) {
 }
 
 async function importAdminDigitalSupplier(supplierId, form = null) {
-  const mapping = form ? Object.fromEntries(new FormData(form).entries()) : {};
+  const formData = form ? new FormData(form) : null;
+  const mapping = formData ? Object.fromEntries(formData.entries()) : {};
+  const selectedProductIds = formData ? formData.getAll("selectedProductIds").map(String) : [];
+  if (form && !selectedProductIds.length) {
+    showError("Select at least one product to import.");
+    return;
+  }
   const normalizedMapping = {
     supplierProductId: mapping.supplierProductId || "",
     name: mapping.name || "",
@@ -8098,7 +8133,7 @@ async function importAdminDigitalSupplier(supplierId, form = null) {
   await withLoading(async () => {
     const payload = await api(`/api/admin/integrations/digital-services/suppliers/${encodeURIComponent(supplierId)}/import`, {
       method: "POST",
-      body: JSON.stringify({ mapping: normalizedMapping }),
+      body: JSON.stringify({ mapping: normalizedMapping, selectedProductIds }),
     });
     state.digitalServices.admin = {
       ...(state.digitalServices.admin || {}),
@@ -8196,6 +8231,189 @@ async function refreshAdminDigitalProductPrice(productId) {
     }
     render();
     showNotice(`API price updated: ${formatNaira(payload.product?.providerCostNgn || 0)}`);
+  }).catch((error) => showError(error.message));
+}
+
+function readAdminDigitalProductCreateStep(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  return {
+    ...getAdminDigitalProductDraft(),
+    ...data,
+    available: data.available === undefined ? getAdminDigitalProductDraft().available : data.available === "true",
+    unlimitedStock: data.unlimitedStock === undefined ? getAdminDigitalProductDraft().unlimitedStock : data.unlimitedStock !== "false",
+    fulfillmentMode: "manual",
+  };
+}
+
+function isSafeProductImageUrl(value = "") {
+  const input = String(value || "").trim();
+  if (!input) return true;
+  try {
+    const parsed = new URL(input, window.location.origin);
+    return ["http:", "https:"].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function stepAdminDigitalProductCreate(form, direction) {
+  const step = Math.max(1, Math.min(5, Number(form.dataset.step || state.actionModal?.step || 1)));
+  const draft = readAdminDigitalProductCreateStep(form);
+  if (direction > 0 && step === 1) {
+    if (!String(draft.name || "").trim() || !String(draft.description || "").trim()) {
+      showError("Product name and description are required.");
+      return;
+    }
+    if (!isSafeProductImageUrl(draft.imageUrl)) {
+      showError("Use a valid HTTP or HTTPS product image URL.");
+      return;
+    }
+  }
+  if (direction > 0 && step === 3 && (!Number.isFinite(Number(draft.sellingPrice)) || Number(draft.sellingPrice) <= 0)) {
+    showError("Enter a valid selling price greater than zero.");
+    return;
+  }
+  state.actionModal = {
+    ...(state.actionModal || {}),
+    type: "admin-digital-product-create",
+    step: Math.max(1, Math.min(5, step + direction)),
+    draft,
+  };
+  render();
+}
+
+async function submitAdminDigitalProductCreate(form) {
+  const draft = readAdminDigitalProductCreateStep(form);
+  if (!isSafeProductImageUrl(draft.imageUrl)) {
+    showError("Use a valid HTTP or HTTPS product image URL.");
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api("/api/admin/integrations/digital-services/products", {
+      method: "POST",
+      body: JSON.stringify({
+        name: draft.name,
+        description: draft.description,
+        imageUrl: draft.imageUrl,
+        storeKey: draft.storeKey || "manual",
+        storefrontLabel: draft.storefrontLabel || "Manual Store",
+        fulfillmentMode: "manual",
+        sellingPrice: draft.sellingPrice,
+        currency: "NGN",
+        available: draft.available !== false,
+        unlimitedStock: draft.unlimitedStock !== false,
+        stock: draft.stock || "",
+      }),
+    });
+    state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || [], payload.product);
+    state.digitalServices.products = mergeDigitalProductList(state.digitalServices.products || [], payload.product);
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      products: payload.products || mergeDigitalProductList(state.digitalServices.admin?.products || [], payload.product),
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    state.actionModal = null;
+    render();
+    showNotice("Product Created");
+  }).catch((error) => showError(error.message));
+}
+
+async function submitAdminManualProductEdit(form) {
+  const productId = form.dataset.adminManualProductForm;
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (!productId || !isSafeProductImageUrl(data.imageUrl)) {
+    showError(productId ? "Use a valid HTTP or HTTPS product image URL." : "Product not found.");
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/products/${encodeURIComponent(productId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: data.name,
+        description: data.description,
+        imageUrl: data.imageUrl,
+        storeKey: data.storeKey,
+        storefrontLabel: data.storefrontLabel,
+        sellingPrice: data.sellingPrice,
+        currency: "NGN",
+        available: data.available === "true",
+        unlimitedStock: data.unlimitedStock !== "false",
+        stock: data.stock || "",
+        fulfillmentMode: "manual",
+      }),
+    });
+    state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || [], payload.product);
+    state.digitalServices.products = mergeDigitalProductList(state.digitalServices.products || [], payload.product);
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      products: payload.products || mergeDigitalProductList(state.digitalServices.admin?.products || [], payload.product),
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    state.actionModal = null;
+    render();
+    showNotice("Product Updated");
+  }).catch((error) => showError(error.message));
+}
+
+function readAdminManualFulfillDraft(form) {
+  const rows = [...form.querySelectorAll("[data-delivery-item-row]")];
+  const items = rows.map((row) => ({
+    type: row.querySelector("select")?.value || "Text",
+    value: row.querySelector("input, textarea")?.value || "",
+  }));
+  return {
+    ...(state.actionModal?.draft || {}),
+    ...(rows.length ? { items } : {}),
+  };
+}
+
+function updateAdminManualDeliveryItems(form, action, index = -1) {
+  const draft = readAdminManualFulfillDraft(form);
+  if (action === "add") draft.items.push({ type: "Text", value: "" });
+  if (action === "remove" && draft.items.length > 1) draft.items.splice(index, 1);
+  state.actionModal = { ...(state.actionModal || {}), draft };
+  render();
+}
+
+function stepAdminManualFulfill(form, direction) {
+  const step = Math.max(1, Math.min(3, Number(form.dataset.step || state.actionModal?.step || 1)));
+  const draft = readAdminManualFulfillDraft(form);
+  if (direction > 0 && step === 2 && !(draft.items || []).some((item) => String(item.value || "").trim())) {
+    showError("Add at least one delivery item.");
+    return;
+  }
+  state.actionModal = {
+    ...(state.actionModal || {}),
+    type: "admin-digital-manual-fulfill",
+    step: Math.max(1, Math.min(3, step + direction)),
+    draft,
+  };
+  render();
+}
+
+async function submitAdminManualFulfill(form) {
+  const orderId = form.dataset.adminManualFulfillForm;
+  const draft = readAdminManualFulfillDraft(form);
+  const deliveryItems = (draft.items || []).filter((item) => String(item.value || "").trim());
+  if (!deliveryItems.length) {
+    showError("Add at least one delivery item.");
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/integrations/digital-services/orders/${encodeURIComponent(orderId)}/manual-fulfill`, {
+      method: "POST",
+      body: JSON.stringify({ deliveryItems }),
+    });
+    state.digitalServices.admin = {
+      ...(state.digitalServices.admin || {}),
+      orders: (state.digitalServices.admin?.orders || []).map((order) => order.id === payload.order.id ? payload.order : order),
+      summary: payload.summary || state.digitalServices.admin?.summary,
+    };
+    state.digitalServices.orders = (state.digitalServices.orders || []).map((order) => order.id === payload.order.id ? payload.order : order);
+    state.actionModal = null;
+    await loadDigitalServicesSnapshot({ force: true }).catch(() => undefined);
+    render();
+    showNotice("Order delivered");
   }).catch((error) => showError(error.message));
 }
 
@@ -9495,10 +9713,18 @@ function renderDigitalServiceBrowserModal() {
 function renderDigitalServiceOrderRow(order = {}) {
   const deliveryLink = getDigitalDeliveryLink(order.delivery);
   const rawStatus = String(order.status || "processing").toUpperCase();
-  const status = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING", "PAID"].includes(rawStatus)
+  const fulfillmentStatus = String(order.fulfillmentStatus || "").toLowerCase();
+  const isManual = String(order.fulfillmentMode || "").toLowerCase() === "manual" || String(order.provider || "").toLowerCase() === "manual";
+  const status = order.delivery
     ? "DELIVERED"
-    : rawStatus;
-  const canCheckDelivery = !deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING", "PAID"].includes(rawStatus);
+    : isManual && String(order.paymentStatus || "").toLowerCase() === "paid"
+      ? "AWAITING FULFILLMENT"
+      : ["manual_review", "fulfillment_unknown"].includes(fulfillmentStatus)
+        ? "ACTION REQUIRED"
+        : rawStatus;
+  const canCheckDelivery = !order.delivery
+    && !isManual
+    && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING", "PAID"].includes(rawStatus);
   const orderId = order.id || order.requestId || "";
   return `
     <div class="asset-card digital-order-row">
@@ -11373,8 +11599,11 @@ function renderAdminDigitalServicesPanel() {
   const products = adminPayload.products || state.digitalServices.products || [];
   const orders = adminPayload.orders || state.digitalServices.orders || [];
   const supplier = adminPayload.supplier || {};
-  const alabaProducts = products.filter((product) => String(product.storeKey || product.provider || "").toLowerCase() !== "emma");
-  const emmaProducts = products.filter((product) => String(product.storeKey || product.provider || "").toLowerCase() === "emma");
+  const groupedProducts = products.reduce((groups, product) => {
+    const key = getDigitalProductStoreKey(product) || "alaba";
+    (groups[key] ||= []).push(product);
+    return groups;
+  }, {});
   return `
     <div class="admin-digital-panel">
       <form id="admin-digital-services-settings-form" class="stack-form subtle-form progressive-settings-form">
@@ -11390,7 +11619,7 @@ function renderAdminDigitalServicesPanel() {
           </select>
         </label>
         <label>Global markup % <input name="globalMarkupPercent" type="number" min="0" step="0.01" value="${escapeHtml(settings.globalMarkupPercent || "0")}" /></label>
-        <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop", "ssondigitalworks.online"]).join(", "))}" placeholder="akunding.shop, ssondigitalworks.online" /></label>
+        <label>Allowed image domains <input name="allowedImageDomains" value="${escapeHtml((settings.allowedImageDomains || ["akunding.shop", "ssondigitalworks.online", "api-geminipro.ignorelist.com"]).join(", "))}" placeholder="akunding.shop, ssondigitalworks.online" /></label>
         <div class="modal-actions inline-modal-actions">
           <button class="button-secondary" id="admin-digital-services-sync-btn" type="button">${icon("refresh")} Sync products</button>
           <button class="button-secondary" data-admin-digital-orders-recover type="button">${icon("refresh")} Recover histories</button>
@@ -11405,9 +11634,16 @@ function renderAdminDigitalServicesPanel() {
       ${renderAdminDigitalSuppliersSection()}
       <details class="settings-disclosure nested-disclosure" open>
         <summary><span>${icon("gift")}</span><strong>Products</strong></summary>
+        <div class="admin-product-toolbar">
+          <p class="muted-copy">Manage API-synced and manually fulfilled products.</p>
+          <button class="micro-btn primary" data-admin-digital-product-add type="button">${icon("plus")} Add Product</button>
+        </div>
         <div class="admin-digital-store-groups">
-          ${renderAdminDigitalProductGroup("Alaba Store", alabaProducts)}
-          ${renderAdminDigitalProductGroup("Emma Store", emmaProducts)}
+          ${renderAdminDigitalProductGroup("Alaba Store", groupedProducts.alaba || [], "alaba")}
+          ${renderAdminDigitalProductGroup("Emma Store", groupedProducts.emma || [], "emma")}
+          ${renderAdminDigitalProductGroup("Efem Store", groupedProducts.efem || [], "efem")}
+          ${renderAdminDigitalProductGroup("Manual Store", groupedProducts.manual || [], "manual")}
+          ${Object.entries(groupedProducts).filter(([key]) => !["alaba", "emma", "efem", "manual"].includes(key)).map(([key, rows]) => renderAdminDigitalProductGroup(rows[0]?.storeName || rows[0]?.storefrontLabel || key, rows, key)).join("")}
         </div>
       </details>
       <details class="settings-disclosure nested-disclosure">
@@ -11462,15 +11698,16 @@ function renderAdminDigitalSupplierCard(supplier = {}) {
         ${isBuiltIn ? "" : `<button class="micro-btn" data-admin-digital-supplier-test="${escapeHtml(supplier.id || "")}" type="button">${icon("refresh")} Test</button>`}
         ${isBuiltIn ? "" : `<button class="micro-btn" data-admin-digital-supplier-preview="${escapeHtml(supplier.id || "")}" type="button">${icon("signals")} Fetch</button>`}
         ${isBuiltIn ? "" : `<button class="micro-btn primary" data-admin-digital-supplier-import="${escapeHtml(supplier.id || "")}" type="button">${icon("download")} Sync</button>`}
+        <button class="micro-btn" data-admin-digital-supplier-products="${escapeHtml(String(supplier.id || "").toLowerCase() === "akunding" ? "alaba" : supplier.id || "")}" type="button">${icon("gift")} View Products</button>
         ${isBuiltIn ? "" : `<button class="micro-btn danger" data-admin-digital-supplier-disable="${escapeHtml(supplier.id || "")}" type="button">${icon("trash")} Disable</button>`}
       </div>
     </article>
   `;
 }
 
-function renderAdminDigitalProductGroup(title, products = []) {
+function renderAdminDigitalProductGroup(title, products = [], storeKey = "") {
   return `
-    <section class="admin-digital-store-section">
+    <section class="admin-digital-store-section" data-admin-product-store-group="${escapeHtml(storeKey)}">
       <div class="admin-digital-store-head">
         <div>
           <strong>${escapeHtml(title)}</strong>
@@ -11493,7 +11730,8 @@ function renderAdminDigitalProductRow(product = {}) {
       ${renderDigitalServiceImage(product)}
       <div class="admin-digital-row-main">
         <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
-        <p class="muted-copy">${escapeHtml(getDigitalProductDisplayCategory(product))} | ${escapeHtml(product.storeName || "")}</p>
+        <p class="muted-copy">${escapeHtml(getDigitalProductDisplayCategory(product))} | ${escapeHtml(getDigitalProductStoreBadgeLabel(product))}</p>
+        <span class="admin-fulfillment-badge">${String(product.fulfillmentMode || "automatic").toLowerCase() === "manual" ? "MANUAL" : "AUTO"}</span>
       </div>
       <div class="admin-digital-row-price">
         <strong>${escapeHtml(storeDisplayPrice.equivalent ? `${storeDisplayPrice.primary} / ${storeDisplayPrice.equivalent}` : storeDisplayPrice.primary)}</strong>
@@ -11508,6 +11746,173 @@ function getAdminDigitalProductById(productId) {
   const id = String(productId || "");
   const adminProducts = state.digitalServices.admin?.products || [];
   return [...adminProducts, ...(state.digitalServices.products || [])].find((product) => String(product.id) === id) || null;
+}
+
+function getAdminDigitalOrderById(orderId) {
+  const id = String(orderId || "");
+  return [...(state.digitalServices.admin?.orders || []), ...(state.digitalServices.orders || [])].find((order) => String(order.id) === id) || null;
+}
+
+function getAdminDigitalProductDraft() {
+  return {
+    name: "",
+    description: "",
+    imageUrl: "",
+    storeKey: "manual",
+    storefrontLabel: "Manual Store",
+    fulfillmentMode: "manual",
+    sellingPrice: "",
+    currency: "NGN",
+    available: true,
+    unlimitedStock: true,
+    stock: "",
+    ...(state.actionModal?.draft || {}),
+  };
+}
+
+function renderAdminDigitalProductCreateModal() {
+  const step = Math.max(1, Math.min(5, Number(state.actionModal?.step || 1)));
+  const draft = getAdminDigitalProductDraft();
+  const stepTitles = ["Product Details", "Store & Fulfillment", "Pricing", "Availability", "Review"];
+  const imagePreview = draft.imageUrl || "/services/default-digital-service.png";
+  const renderStep = () => {
+    if (step === 1) {
+      return `
+        <label>Product Name * <input name="name" value="${escapeHtml(draft.name)}" required /></label>
+        <label>Description * <textarea name="description" rows="4" required>${escapeHtml(draft.description)}</textarea></label>
+        <label>Product Image URL <input name="imageUrl" value="${escapeHtml(draft.imageUrl)}" placeholder="https://example.com/product.png" /></label>
+        <div class="admin-product-preview">${renderDigitalServiceImage({ imageUrl: imagePreview, name: draft.name || "Product" })}</div>
+      `;
+    }
+    if (step === 2) {
+      return `
+        <label>Store
+          <select name="storeKey">
+            <option value="manual" ${draft.storeKey === "manual" ? "selected" : ""}>Manual Store</option>
+            <option value="efem" ${draft.storeKey === "efem" ? "selected" : ""}>Efem Store</option>
+            <option value="emma" ${draft.storeKey === "emma" ? "selected" : ""}>Emma Store</option>
+            <option value="alaba" ${draft.storeKey === "alaba" ? "selected" : ""}>Alaba Store</option>
+          </select>
+        </label>
+        <label>Storefront label <input name="storefrontLabel" value="${escapeHtml(draft.storefrontLabel)}" placeholder="Manual Store" /></label>
+        <label>Fulfillment
+          <select name="fulfillmentMode">
+            <option value="manual" selected>Manual Fulfillment</option>
+            <option value="automatic" disabled>Automatic API products must be imported from a supplier</option>
+          </select>
+        </label>
+        <p class="muted-copy">Manual products never call Emma, Efem, or Akunding, even when displayed under a store label.</p>
+      `;
+    }
+    if (step === 3) {
+      return `
+        <label>Selling Price * <input name="sellingPrice" type="number" min="1" step="1" value="${escapeHtml(draft.sellingPrice)}" required /></label>
+        <label>Currency
+          <select name="currency">
+            <option value="NGN" selected>NGN</option>
+          </select>
+        </label>
+      `;
+    }
+    if (step === 4) {
+      return `
+        <label>Status
+          <select name="available">
+            <option value="true" ${draft.available !== false ? "selected" : ""}>Available</option>
+            <option value="false" ${draft.available === false ? "selected" : ""}>Unavailable</option>
+          </select>
+        </label>
+        <label>Stock mode
+          <select name="unlimitedStock">
+            <option value="true" ${draft.unlimitedStock !== false ? "selected" : ""}>Unlimited / Managed manually</option>
+            <option value="false" ${draft.unlimitedStock === false ? "selected" : ""}>Track stock quantity</option>
+          </select>
+        </label>
+        <label>Stock quantity <input name="stock" type="number" min="0" step="1" value="${escapeHtml(draft.stock)}" placeholder="Leave blank for unlimited" /></label>
+      `;
+    }
+    return `
+      <div class="admin-review-card">
+        ${renderDigitalServiceImage({ imageUrl: imagePreview, name: draft.name || "Product" })}
+        <strong>${escapeHtml(draft.name || "New product")}</strong>
+        <p>${escapeHtml(draft.description || "No description")}</p>
+        <span>${escapeHtml(draft.storefrontLabel || "Manual Store")} | Manual Fulfillment</span>
+        <b>${formatNaira(draft.sellingPrice || 0)}</b>
+        <em>${draft.available === false ? "Unavailable" : "Available"}</em>
+      </div>
+    `;
+  };
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card admin-digital-edit-modal">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Add Product</p>
+        <h3>${escapeHtml(stepTitles[step - 1])}</h3>
+        <div class="progressive-stepper">${stepTitles.map((title, index) => `<span class="${index + 1 === step ? "active" : ""}">${index + 1}</span>`).join("")}</div>
+        <form class="stack-form subtle-form" data-admin-digital-product-create-form data-step="${step}">
+          ${renderStep()}
+          <div class="modal-actions inline-modal-actions">
+            <button class="button-secondary" data-admin-product-create-back type="button" ${step === 1 ? "disabled" : ""}>Back</button>
+            ${step < 5
+              ? `<button class="button-primary shimmer-button" data-admin-product-create-next type="button">Next</button>`
+              : `<button class="button-primary shimmer-button" type="submit">${icon("check")} Save Product</button>`}
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminDigitalManualFulfillModal() {
+  const order = getAdminDigitalOrderById(state.actionModal?.orderId) || {};
+  const step = Math.max(1, Math.min(3, Number(state.actionModal?.step || 1)));
+  const draft = { items: [{ type: "Email", value: "" }], ...(state.actionModal?.draft || {}) };
+  const itemTypeOptions = ["Account", "Password", "Email", "Link", "Code", "License", "PIN", "Text", "Instructions"];
+  const renderItem = (item, index) => `
+    <div class="admin-delivery-item-row" data-delivery-item-row>
+      <select aria-label="Delivery item type">
+        ${itemTypeOptions.map((type) => `<option value="${type}" ${item.type === type ? "selected" : ""}>${type}</option>`).join("")}
+      </select>
+      <input value="${escapeHtml(item.value || "")}" placeholder="Delivery value" autocomplete="off" />
+      <button class="icon-action" data-admin-manual-item-remove="${index}" type="button" aria-label="Remove delivery item" title="Remove">${icon("trash")}</button>
+    </div>
+  `;
+  return `
+    <div class="modal-backdrop">
+      <div class="modal-card action-modal-card admin-digital-edit-modal">
+        <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+        <p class="modal-eyebrow neutral">Manual Fulfillment</p>
+        <h3>${step === 1 ? "Order Summary" : step === 2 ? "Delivery Details" : "Review Delivery"}</h3>
+        <form class="stack-form subtle-form" data-admin-manual-fulfill-form="${escapeHtml(order.id || "")}" data-step="${step}">
+          ${step === 1 ? `
+            <div class="admin-review-card">
+              <strong>${escapeHtml(stripLeadingSupplierMetadata(order.productName || "Manual product"))}</strong>
+              <span>${escapeHtml(order.user?.name || "Customer")} | ${escapeHtml(order.user?.email || "")}</span>
+              <span>Payment ${escapeHtml(String(order.paymentStatus || "").toUpperCase())}</span>
+              <b>${formatNaira(order.amountCharged || 0)}</b>
+              <small>Reference ${escapeHtml(order.requestId || "")}</small>
+            </div>
+          ` : step === 2 ? `
+            <div class="admin-delivery-items">${draft.items.map(renderItem).join("")}</div>
+            <button class="micro-btn" data-admin-manual-item-add type="button">${icon("plus")} Add Delivery Item</button>
+          ` : `
+            <div class="admin-review-card">
+              <strong>Confirm delivery of this product to the customer?</strong>
+              ${(draft.items || []).filter((item) => item.value).map((item) => `<span><b>${escapeHtml(item.type)}:</b> ${escapeHtml(item.value)}</span>`).join("")}
+              <p>Delivery details will be encrypted. Push notifications will not include credentials.</p>
+              <label class="confirm-row"><input name="confirmDelivery" type="checkbox" required /> Confirm delivery of this product to the customer.</label>
+            </div>
+          `}
+          <div class="modal-actions inline-modal-actions">
+            <button class="button-secondary" data-admin-manual-fulfill-back type="button" ${step === 1 ? "disabled" : ""}>Back</button>
+            ${step < 3
+              ? `<button class="button-primary shimmer-button" data-admin-manual-fulfill-next type="button">Next</button>`
+              : `<button class="button-primary shimmer-button" type="submit">${icon("check")} Deliver to Customer</button>`}
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
 }
 
 function renderAdminDigitalSupplierModal() {
@@ -11544,7 +11949,7 @@ function renderAdminDigitalSupplierModal() {
                 ].map(([value, label]) => `<option value="${value}" ${String(supplier.authType || "api_key") === value ? "selected" : ""}>${label}</option>`).join("")}
               </select>
             </label>
-            <label>API key <input name="apiKey" value="" placeholder="${escapeHtml(supplier.secrets?.apiKey || "Leave blank to keep saved key")}" autocomplete="off" /></label>
+            <label>API key <input name="apiKey" type="password" value="" placeholder="${escapeHtml(supplier.secrets?.apiKey || "Leave blank to keep saved key")}" autocomplete="new-password" /></label>
             <label>Bearer token <input name="bearerToken" value="" placeholder="${escapeHtml(supplier.secrets?.bearerToken || "Leave blank to keep saved token")}" autocomplete="off" /></label>
             <label>Username <input name="username" value="" placeholder="${escapeHtml(supplier.secrets?.username || "Basic auth username")}" autocomplete="off" /></label>
             <label>Password <input name="password" type="password" value="" placeholder="${escapeHtml(supplier.secrets?.password || "Leave blank to keep saved password")}" autocomplete="new-password" /></label>
@@ -11609,12 +12014,23 @@ function renderAdminDigitalSupplierPreviewModal() {
             ${renderFieldSelect("image", "Image", mapping.image || "")}
             ${renderFieldSelect("category", "Category", mapping.category || "")}
           </div>
+          <div class="admin-preview-toolbar">
+            <label class="confirm-row"><input data-admin-supplier-select-all type="checkbox" checked /> Select All</label>
+            <span class="muted-copy">Supplier cost is visible only to admins. Selling prices remain backend-calculated.</span>
+          </div>
           <div class="compact-list admin-digital-product-list">
-            ${products.slice(0, 12).map(renderAdminDigitalProductRow).join("") || `<p class="muted-copy">No products to preview.</p>`}
+            ${products.map((product) => `
+              <label class="admin-supplier-preview-row">
+                <input name="selectedProductIds" type="checkbox" value="${escapeHtml(product.supplierProductId || product.id || "")}" checked />
+                ${renderDigitalServiceImage(product)}
+                <span><strong>${escapeHtml(product.name || "Product")}</strong><small>${escapeHtml(product.description || "")}</small><small>${escapeHtml(product.currency || product.supplierCurrency || "")} ${escapeHtml(product.providerCost ?? product.supplierCost ?? "-")} | Stock ${escapeHtml(product.stock ?? "-")}</small></span>
+                <b>${escapeHtml(getDigitalProductDisplayPrice(product).primary)}</b>
+              </label>
+            `).join("") || `<p class="muted-copy">No products to preview.</p>`}
           </div>
           <div class="modal-actions inline-modal-actions">
             <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
-            <button class="button-primary shimmer-button" type="submit" ${preview.canImport ? "" : ""}>${icon("download")} Import Products</button>
+            <button class="button-primary shimmer-button" type="submit" ${preview.canImport ? "" : "disabled"}>${icon("download")} Import Products</button>
           </div>
         </form>
       </div>
@@ -11633,9 +12049,38 @@ function renderAdminDigitalProductEditModal() {
         <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
         <p class="modal-eyebrow neutral">${escapeHtml(product.storeName || "Store")}</p>
         <h3>Edit product</h3>
-        ${renderAdminDigitalProductForm(product)}
+        ${String(product.fulfillmentMode || "").toLowerCase() === "manual" || String(product.provider || "").toLowerCase() === "manual"
+          ? renderAdminManualProductForm(product)
+          : renderAdminDigitalProductForm(product)}
       </div>
     </div>
+  `;
+}
+
+function renderAdminManualProductForm(product = {}) {
+  return `
+    <form class="admin-digital-product-card" data-admin-manual-product-form="${escapeHtml(product.id || "")}">
+      ${renderDigitalServiceImage(product)}
+      <div class="admin-digital-product-main">
+        <div class="admin-digital-product-grid">
+          <label>Name <input name="name" value="${escapeHtml(product.name || "")}" required /></label>
+          <label>Description <textarea name="description" rows="3" required>${escapeHtml(product.description || "")}</textarea></label>
+          <label>Image URL <input name="imageUrl" value="${escapeHtml(product.imageUrl || "")}" placeholder="https://..." /></label>
+          <label>Store
+            <select name="storeKey">
+              ${[["manual", "Manual Store"], ["emma", "Emma Store"], ["efem", "Efem Store"], ["alaba", "Alaba Store"]].map(([key, label]) => `<option value="${key}" ${getDigitalProductStoreKey(product) === key ? "selected" : ""}>${label}</option>`).join("")}
+            </select>
+          </label>
+          <label>Storefront label <input name="storefrontLabel" value="${escapeHtml(product.storefrontLabel || product.storeName || "Manual Store")}" /></label>
+          <label>Selling Price <input name="sellingPrice" type="number" min="1" step="1" value="${escapeHtml(product.priceNgn || product.sellingPrice || product.price || "")}" required /></label>
+          <label>Status <select name="available"><option value="true" ${product.available !== false ? "selected" : ""}>Available</option><option value="false" ${product.available === false ? "selected" : ""}>Unavailable</option></select></label>
+          <label>Stock mode <select name="unlimitedStock"><option value="true" ${product.unlimitedStock !== false ? "selected" : ""}>Unlimited</option><option value="false" ${product.unlimitedStock === false ? "selected" : ""}>Track quantity</option></select></label>
+          <label>Stock <input name="stock" type="number" min="0" step="1" value="${escapeHtml(product.stock ?? "")}" /></label>
+        </div>
+        <p class="muted-copy">Fulfillment remains manual regardless of storefront.</p>
+        <div class="modal-actions inline-modal-actions"><button class="button-primary shimmer-button" type="submit">${icon("check")} Save Product</button></div>
+      </div>
+    </form>
   `;
 }
 
@@ -11705,9 +12150,14 @@ function renderAdminDigitalOrderRow(order = {}) {
     && status !== "DELIVERED";
   const deliveryLink = getDigitalDeliveryLink(order.delivery);
   const hasDelivery = !!order.delivery;
-  const canRecoverDelivery = String(order.provider || "").toLowerCase() === "emma"
+  const provider = String(order.provider || "").toLowerCase();
+  const isManual = String(order.fulfillmentMode || "").toLowerCase() === "manual" || provider === "manual";
+  const paymentPaid = String(order.paymentStatus || "").toLowerCase() === "paid";
+  const canManualFulfill = isManual && paymentPaid && !hasDelivery && status !== "DELIVERED";
+  const canRecoverDelivery = ["emma", "efem"].includes(provider)
     && String(order.paymentStatus || "").toLowerCase() === "paid"
-    && !hasDelivery;
+    && !hasDelivery
+    && (provider === "emma" || !!order.supplierOrderId);
   return `
     <div class="asset-card admin-finance-card admin-store-order-row">
       <div>
@@ -11715,6 +12165,7 @@ function renderAdminDigitalOrderRow(order = {}) {
         <p class="muted-copy">${escapeHtml(order.user?.name || "User")} | ${escapeHtml(order.user?.email || "")}</p>
         <p class="muted-copy">Ref: ${escapeHtml(order.requestId || "")}</p>
         <p class="muted-copy">Payment: ${escapeHtml(String(order.paymentStatus || "").toUpperCase() || "PENDING")} | Fulfillment: ${escapeHtml((order.fulfillmentStatus || "pending").replace(/_/g, " ").toUpperCase())}</p>
+        <span class="admin-fulfillment-badge">${isManual ? "MANUAL" : "AUTO"}</span>
         ${order.supplierStatus ? `<p class="muted-copy">Supplier: ${escapeHtml(order.provider || "supplier")} | ${escapeHtml(String(order.supplierStatus || "").replace(/_/g, " "))}</p>` : ""}
         ${order.lastFulfillmentAttemptAt ? `<p class="muted-copy">Last attempt: ${escapeHtml(new Date(order.lastFulfillmentAttemptAt).toLocaleString())}</p>` : ""}
         ${order.lastFulfillmentError ? `<p class="warning-copy compact-copy">Error: ${escapeHtml(order.lastFulfillmentError)}</p>` : ""}
@@ -11726,7 +12177,8 @@ function renderAdminDigitalOrderRow(order = {}) {
         ${deliveryLink ? `<button class="micro-btn" data-copy-text="${escapeHtml(deliveryLink)}" type="button">${icon("copy")} Copy</button>` : ""}
         ${canRequery ? `<button class="micro-btn" data-admin-digital-order-requery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Requery</button>` : ""}
         ${configurationFailure && status !== "DELIVERED" ? `<span class="wallet-status-badge warning">Action required</span>` : ""}
-        ${canRetryFulfillment ? `<button class="micro-btn" data-admin-digital-order-retry="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Retry Fulfillment</button>` : ""}
+        ${canRetryFulfillment && !isManual ? `<button class="micro-btn" data-admin-digital-order-retry="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Retry Fulfillment</button>` : ""}
+        ${canManualFulfill ? `<button class="micro-btn primary" data-admin-digital-order-manual-fulfill="${escapeHtml(order.id || "")}" type="button">${icon("check")} Fulfill Order</button>` : ""}
         ${canRecoverDelivery ? `<button class="micro-btn" data-admin-digital-order-recover-delivery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Recover Delivery</button>` : ""}
       </div>
     </div>
@@ -14352,11 +14804,34 @@ function bindDashboardActions() {
     });
   });
 
+  document.querySelectorAll("[data-admin-digital-product-add]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = { type: "admin-digital-product-create", step: 1, draft: {} };
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-admin-digital-product-form]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       submitAdminDigitalProductOverride(form);
     });
+  });
+
+  document.querySelectorAll("[data-admin-manual-product-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminManualProductEdit(form);
+    });
+  });
+
+  document.querySelectorAll("[data-admin-digital-product-create-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminDigitalProductCreate(form);
+    });
+    form.querySelectorAll("[data-admin-product-create-next]").forEach((button) => button.addEventListener("click", () => stepAdminDigitalProductCreate(form, 1)));
+    form.querySelectorAll("[data-admin-product-create-back]").forEach((button) => button.addEventListener("click", () => stepAdminDigitalProductCreate(form, -1)));
   });
 
   document.querySelectorAll("[data-admin-digital-product-refresh]").forEach((button) => {
@@ -14396,6 +14871,14 @@ function bindDashboardActions() {
     button.addEventListener("click", () => disableAdminDigitalSupplier(button.dataset.adminDigitalSupplierDisable));
   });
 
+  document.querySelectorAll("[data-admin-digital-supplier-products]").forEach((button) => {
+    button.addEventListener("click", () => {
+      [...document.querySelectorAll("[data-admin-product-store-group]")]
+        .find((section) => section.dataset.adminProductStoreGroup === (button.dataset.adminDigitalSupplierProducts || ""))
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
   document.querySelectorAll("[data-admin-digital-supplier-form]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -14411,6 +14894,11 @@ function bindDashboardActions() {
       event.preventDefault();
       importAdminDigitalSupplier(form.dataset.adminDigitalSupplierImportForm, form);
     });
+    form.querySelectorAll("[data-admin-supplier-select-all]").forEach((toggle) => {
+      toggle.addEventListener("change", () => {
+        form.querySelectorAll('input[name="selectedProductIds"]').forEach((input) => { input.checked = toggle.checked; });
+      });
+    });
   });
 
   document.querySelectorAll("[data-admin-digital-order-requery]").forEach((button) => {
@@ -14423,6 +14911,29 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-admin-digital-order-recover-delivery]").forEach((button) => {
     button.addEventListener("click", () => recoverAdminDigitalOrderDelivery(button.dataset.adminDigitalOrderRecoverDelivery));
+  });
+
+  document.querySelectorAll("[data-admin-digital-order-manual-fulfill]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.actionModal = {
+        type: "admin-digital-manual-fulfill",
+        orderId: button.dataset.adminDigitalOrderManualFulfill,
+        step: 1,
+        draft: { items: [{ type: "Email", value: "" }] },
+      };
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-admin-manual-fulfill-form]").forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminManualFulfill(form);
+    });
+    form.querySelectorAll("[data-admin-manual-fulfill-next]").forEach((button) => button.addEventListener("click", () => stepAdminManualFulfill(form, 1)));
+    form.querySelectorAll("[data-admin-manual-fulfill-back]").forEach((button) => button.addEventListener("click", () => stepAdminManualFulfill(form, -1)));
+    form.querySelectorAll("[data-admin-manual-item-add]").forEach((button) => button.addEventListener("click", () => updateAdminManualDeliveryItems(form, "add")));
+    form.querySelectorAll("[data-admin-manual-item-remove]").forEach((button) => button.addEventListener("click", () => updateAdminManualDeliveryItems(form, "remove", Number(button.dataset.adminManualItemRemove))));
   });
 
   document.querySelectorAll("[data-admin-digital-orders-recover]").forEach((button) => {
