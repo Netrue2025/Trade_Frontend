@@ -214,3 +214,36 @@ test("Efem and manual store admin workflows are fully wired", () => {
   assert.match(styles, /\.admin-digital-edit-modal\s*{[^}]*100dvh[^}]*safe-area-inset-bottom/s);
   assert.match(styles, /\.admin-digital-edit-modal \.modal-actions\s*{[^}]*position:\s*sticky/s);
 });
+
+test("Shop summary shortcuts reuse filtered My Orders history", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /data-store-orders-open="all"/);
+  assert.match(app, /data-store-orders-open="pending"/);
+  assert.match(app, /data-store-orders-open="ready"/);
+  assert.match(app, /function renderDigitalOrderHistoryModal/);
+  assert.match(app, /state\.digitalServices\.orderFilter/);
+  assert.match(app, /orders\.map\(renderDigitalServiceOrderRow\)/);
+});
+
+test("Structured post-payment and global Order Ready flows remain separate from fulfillment", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /function readPostPaymentExperience/);
+  assert.match(app, /function renderPostPaymentBlocks/);
+  assert.match(app, /\^https\?:\\\/\\\//);
+  assert.match(app, /type: "digital-post-payment"/);
+  assert.match(app, /type: "digital-order-ready"/);
+  assert.match(app, /readyNotificationPending === true/);
+  assert.match(app, /ready-acknowledge/);
+  assert.match(app, /data-admin-digital-order-view-delivery/);
+  assert.match(app, /data-delivery-secret-toggle/);
+});
+
+test("Responsive shop histories forms and transactional modals support narrow phones", () => {
+  const styles = readPublicFile("styles.css");
+  assert.match(styles, /\.store-stat-strip\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.digital-order-row, \.admin-store-order-row\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(styles, /max-height:\s*calc\(100dvh - 16px\)/);
+  assert.match(styles, /\.post-payment-builder\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  assert.match(styles, /@media \(max-width: 339px\)[\s\S]*\.store-product-grid\s*\{\s*grid-template-columns:\s*1fr/);
+  assert.match(styles, /overflow-wrap:\s*anywhere/);
+});

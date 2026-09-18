@@ -184,6 +184,7 @@ const state = {
     store: "",
     loading: false,
     admin: null,
+    orderFilter: "all",
   },
   notifications: [],
   showNotifications: false,
@@ -1827,6 +1828,7 @@ function clearActionModal() {
   }
   const returnModal = state.actionModal?.returnModal || null;
   state.actionModal = returnModal;
+  if (!returnModal) syncDigitalOtpExperience();
   render();
 }
 
@@ -5474,6 +5476,9 @@ function renderActionModal() {
   if (state.actionModal.type === "digital-service-receipt") {
     return renderDigitalServiceReceiptModal();
   }
+  if (state.actionModal.type === "digital-orders") return renderDigitalOrderHistoryModal();
+  if (state.actionModal.type === "digital-post-payment") return renderDigitalPostPaymentModal();
+  if (state.actionModal.type === "digital-order-ready") return renderDigitalOrderReadyModal();
 
   if (state.actionModal.type === "digital-otp-waiting") return renderDigitalOtpWaitingModal();
   if (state.actionModal.type === "digital-otp-ready") return renderDigitalOtpReadyModal();
@@ -6188,7 +6193,10 @@ function bindModalActions() {
 
   const actionCloseButton = document.getElementById("action-modal-close-btn");
   if (actionCloseButton) {
-    actionCloseButton.addEventListener("click", clearActionModal);
+    actionCloseButton.addEventListener("click", async () => {
+      if (state.actionModal?.type === "digital-order-ready") await acknowledgeDigitalOrderReady(state.actionModal.orderId);
+      clearActionModal();
+    });
   }
 
   const actionCancelButton = document.getElementById("action-modal-cancel-btn");
@@ -8249,8 +8257,25 @@ function readAdminDigitalProductCreateStep(form) {
     unlimitedStock: data.unlimitedStock === undefined ? getAdminDigitalProductDraft().unlimitedStock : data.unlimitedStock !== "false",
     otpEnabled: data.otpEnabled === undefined ? getAdminDigitalProductDraft().otpEnabled : data.otpEnabled === "true",
     whatsappFallbackEnabled: data.whatsappFallbackEnabled === undefined ? getAdminDigitalProductDraft().whatsappFallbackEnabled : data.whatsappFallbackEnabled === "true",
+    postPaymentExperience: data.postHeading === undefined ? getAdminDigitalProductDraft().postPaymentExperience : readPostPaymentExperience(data),
     fulfillmentMode: "manual",
   };
+}
+
+function readPostPaymentExperience(data = {}) {
+  const blocks = [];
+  if (String(data.postHeading || "").trim()) blocks.push({ type: "heading", text: data.postHeading });
+  if (String(data.postText || "").trim()) blocks.push({ type: "text", text: data.postText });
+  if (String(data.postInstructions || "").trim()) blocks.push({ type: "instructions", text: data.postInstructions });
+  if (String(data.postCode || "").trim()) blocks.push({ type: "code", text: data.postCode });
+  if (data.postDivider === "true") blocks.push({ type: "divider" });
+  if (String(data.postLinkUrl || "").trim()) blocks.push({ type: "link", label: data.postLinkLabel || "Open link", url: data.postLinkUrl });
+  return blocks;
+}
+
+function postPaymentDraftFields(blocks = []) {
+  const find = (type) => blocks.find((block) => block.type === type) || {};
+  return { postHeading: find("heading").text || "", postText: find("text").text || "", postInstructions: find("instructions").text || "", postCode: find("code").text || "", postDivider: !!find("divider").type, postLinkLabel: find("link").label || "", postLinkUrl: find("link").url || "" };
 }
 
 function isSafeProductImageUrl(value = "") {
@@ -8262,6 +8287,12 @@ function isSafeProductImageUrl(value = "") {
   } catch {
     return false;
   }
+}
+
+function isSafeHttpLink(value = "") {
+  const input = String(value || "").trim();
+  if (!input) return true;
+  try { return ["http:", "https:"].includes(new URL(input).protocol); } catch { return false; }
 }
 
 function stepAdminDigitalProductCreate(form, direction) {
@@ -8296,6 +8327,8 @@ async function submitAdminDigitalProductCreate(form) {
     showError("Use a valid HTTP or HTTPS product image URL.");
     return;
   }
+  const postLink = draft.postPaymentExperience?.find((block) => block.type === "link")?.url || "";
+  if (!isSafeHttpLink(postLink)) { showError("Post-payment button URL must use HTTP or HTTPS."); return; }
   await withLoading(async () => {
     const payload = await api("/api/admin/integrations/digital-services/products", {
       method: "POST",
@@ -8317,6 +8350,7 @@ async function submitAdminDigitalProductCreate(form) {
         whatsappFallbackEnabled: draft.whatsappFallbackEnabled,
         whatsappUrl: draft.whatsappUrl,
         whatsappLabel: draft.whatsappLabel,
+        postPaymentExperience: draft.postPaymentExperience || [],
       }),
     });
     state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || [], payload.product);
@@ -8339,6 +8373,7 @@ async function submitAdminManualProductEdit(form) {
     showError(productId ? "Use a valid HTTP or HTTPS product image URL." : "Product not found.");
     return;
   }
+  if (!isSafeHttpLink(data.postLinkUrl)) { showError("Post-payment button URL must use HTTP or HTTPS."); return; }
   await withLoading(async () => {
     const payload = await api(`/api/admin/integrations/digital-services/products/${encodeURIComponent(productId)}`, {
       method: "PATCH",
@@ -8360,6 +8395,7 @@ async function submitAdminManualProductEdit(form) {
         whatsappFallbackEnabled: data.whatsappFallbackEnabled === "true",
         whatsappUrl: data.whatsappUrl,
         whatsappLabel: data.whatsappLabel,
+        postPaymentExperience: readPostPaymentExperience(data),
       }),
     });
     state.digitalServices.allProducts = mergeDigitalProductList(state.digitalServices.allProducts || [], payload.product);
@@ -9480,10 +9516,9 @@ async function submitDigitalServicePurchase() {
       window.location.assign(response.payment.authorizationUrl);
       return;
     }
-    state.actionModal = {
-      type: "digital-service-receipt",
-      order: response.order,
-    };
+    state.actionModal = String(response.order?.fulfillmentMode || "").toLowerCase() === "manual" && response.order?.status !== "delivered"
+      ? { type: "digital-post-payment", order: response.order }
+      : { type: "digital-service-receipt", order: response.order };
     await Promise.all([loadFinancialDashboard(), loadDigitalServicesSnapshot()]);
     render();
     showNotice("Digital service order submitted.");
@@ -9515,10 +9550,9 @@ async function verifyPaystackDigitalPaymentFromUrl() {
       body: JSON.stringify({ reference }),
     });
     state.activeTab = "store";
-    state.actionModal = {
-      type: "digital-service-receipt",
-      order: payload.order,
-    };
+    state.actionModal = String(payload.order?.fulfillmentMode || "").toLowerCase() === "manual" && payload.order?.status !== "delivered"
+      ? { type: "digital-post-payment", order: payload.order }
+      : { type: "digital-service-receipt", order: payload.order };
     await Promise.all([loadFinancialDashboard(), loadDigitalServicesSnapshot()]);
     if (window.history?.replaceState) {
       window.history.replaceState({}, "", getTabRoute("store"));
@@ -9775,6 +9809,23 @@ function renderDigitalServiceOrderRow(order = {}) {
   `;
 }
 
+function getDigitalOrderFilter(order = {}) {
+  if (order.status === "delivered" || order.fulfillmentStatus === "fulfilled" || order.delivery) return "ready";
+  if (["failed", "refunded", "cancelled"].includes(String(order.status || "").toLowerCase())) return "completed";
+  return "pending";
+}
+
+function renderDigitalOrderHistoryModal() {
+  const active = state.digitalServices.orderFilter || "all";
+  const orders = (state.digitalServices.orders || []).filter((order) => active === "all" || getDigitalOrderFilter(order) === active);
+  const labels = { all: "All", pending: "Pending", ready: "Ready", completed: "Completed" };
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card order-history-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><p class="modal-eyebrow neutral">Shop</p><h3>My Orders</h3>
+    <div class="order-filter-tabs" role="tablist">${Object.entries(labels).map(([key,label]) => `<button class="${active === key ? "active" : ""}" data-store-orders-open="${key}" type="button">${label}</button>`).join("")}</div>
+    <div class="compact-list order-history-list">${orders.map(renderDigitalServiceOrderRow).join("") || `<p class="vtu-empty-state">No ${escapeHtml(labels[active].toLowerCase())} orders.</p>`}</div>
+  </div></div>`;
+}
+
 function getDigitalServiceOrderById(orderId) {
   const id = String(orderId || "");
   return (state.digitalServices.orders || []).find((order) => String(order.id || order.requestId || "") === id || String(order.requestId || "") === id) || null;
@@ -9970,6 +10021,52 @@ function renderDigitalServiceDelivery(delivery, order = {}) {
   `;
 }
 
+function renderPostPaymentBlocks(order = {}) {
+  const blocks = Array.isArray(order.postPaymentExperience) ? order.postPaymentExperience : [];
+  const safeBlocks = blocks.length ? blocks : [
+    { type: "heading", text: "Payment successful" },
+    { type: "text", text: "Your order has been received and is being prepared. We'll notify you when it is ready." },
+  ];
+  return safeBlocks.map((block) => {
+    const text = String(block.text || "").replaceAll("{{orderReference}}", order.requestId || order.id || "");
+    if (block.type === "heading") return `<h4>${escapeHtml(text)}</h4>`;
+    if (block.type === "text") return `<p class="post-payment-text">${escapeHtml(text).replace(/\n/g, "<br>")}</p>`;
+    if (block.type === "instructions") return `<ol class="digital-delivery-steps">${text.split(/\r?\n/).filter(Boolean).map((line) => `<li>${escapeHtml(line.replace(/^\s*\d+[.)]\s*/, ""))}</li>`).join("")}</ol>`;
+    if (block.type === "code") return `<div class="post-payment-code"><code>${escapeHtml(text)}</code>${renderDeliveryCopyButton(text)}</div>`;
+    if (block.type === "link" && /^https?:\/\//i.test(block.url || "")) return `<a class="button-secondary" href="${escapeHtml(block.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(block.label || "Open link")}</a>`;
+    if (block.type === "divider") return `<hr class="post-payment-divider">`;
+    return "";
+  }).join("");
+}
+
+function renderDigitalPostPaymentModal() {
+  const order = state.actionModal.order || {};
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card post-payment-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+    <div class="order-success-mark">${icon("check")}</div><p class="modal-eyebrow neutral">Payment successful</p>
+    ${order.imageUrl ? `<img class="post-payment-product-image" src="${escapeHtml(order.imageUrl)}" alt="">` : ""}
+    <h3>${escapeHtml(order.productName || "Order received")}</h3>
+    <div class="action-metric-stack"><div class="action-metric"><span>Status</span><strong>Awaiting fulfillment</strong></div><div class="action-metric"><span>Reference</span><strong>${escapeHtml(order.requestId || order.id || "")}</strong></div></div>
+    <section class="post-payment-blocks">${renderPostPaymentBlocks(order)}</section>
+    <div class="modal-actions"><button class="button-secondary" data-store-orders-open="all" type="button">View Order</button><button class="button-primary" data-post-payment-continue type="button">Continue Shopping</button></div>
+  </div></div>`;
+}
+
+async function acknowledgeDigitalOrderReady(orderId) {
+  const payload = await api(`/api/digital-services/orders/${encodeURIComponent(orderId)}/ready-acknowledge`, { method: "POST", body: "{}" }).catch(() => null);
+  if (payload?.order) replaceDigitalOrder(payload.order);
+}
+
+function renderDigitalOrderReadyModal() {
+  const order = getDigitalServiceOrderById(state.actionModal.orderId) || state.actionModal.order || {};
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card digital-service-receipt-modal order-ready-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><div class="order-success-mark">${icon("check")}</div>
+    <p class="modal-eyebrow neutral">Order ready</p><h3>${escapeHtml(order.productName || "Your order")}</h3>
+    <p class="modal-text">Your order has been fulfilled.</p>${renderDigitalServiceDelivery(order.delivery, order)}
+    <div class="modal-actions"><button class="button-secondary" data-order-ready-done="${escapeHtml(order.id || "")}" type="button">Done</button><button class="button-primary" data-order-ready-view="${escapeHtml(order.id || "")}" type="button">View in My Orders</button></div>
+  </div></div>`;
+}
+
 function replaceDigitalOrder(order) {
   if (!order) return;
   state.digitalServices.orders = (state.digitalServices.orders || []).map((item) => item.id === order.id ? order : item);
@@ -10042,9 +10139,13 @@ function syncDigitalOtpExperience() {
   digitalOtpCountdownTimer = null;
   if (!state.user || state.user.role === "admin") return;
   const waiting = (state.digitalServices.orders || []).some((order) => order.otpRequest?.status === "waiting");
-  const ready = (state.digitalServices.orders || []).find((order) => order.otpRequest?.status === "responded" && !order.otpRequest.acknowledgedAt);
-  if (ready && (!state.actionModal || state.actionModal.type === "digital-otp-waiting")) state.actionModal = { type: "digital-otp-ready", orderId: ready.id };
-  if (waiting) digitalOtpPollTimer = setInterval(() => loadDigitalServicesSnapshot({ force: true }).then(render).catch(() => undefined), 7000);
+  const otpReady = (state.digitalServices.orders || []).find((order) => order.otpRequest?.status === "responded" && !order.otpRequest.acknowledgedAt);
+  const orderReady = (state.digitalServices.orders || []).find((order) => order.readyNotificationPending === true && order.status === "delivered" && order.fulfillmentStatus === "fulfilled" && order.delivery && !order.readyAcknowledgedAt);
+  const awaiting = (state.digitalServices.orders || []).some((order) => order.paymentStatus === "paid" && !["delivered", "refunded", "failed"].includes(String(order.status || "").toLowerCase()));
+  const replaceable = !state.actionModal || ["digital-otp-waiting", "digital-order-ready"].includes(state.actionModal.type);
+  if (otpReady && replaceable) state.actionModal = { type: "digital-otp-ready", orderId: otpReady.id };
+  else if (orderReady && !state.actionModal) state.actionModal = { type: "digital-order-ready", orderId: orderReady.id };
+  if (waiting || awaiting) digitalOtpPollTimer = setInterval(() => loadDigitalServicesSnapshot({ force: true }).then(render).catch(() => undefined), waiting ? 7000 : 15000);
   if (state.actionModal?.type === "digital-otp-waiting") digitalOtpCountdownTimer = setInterval(render, 1000);
 }
 
@@ -11919,6 +12020,7 @@ function getAdminDigitalProductDraft() {
     whatsappFallbackEnabled: false,
     whatsappUrl: "",
     whatsappLabel: "Get OTP Here",
+    postPaymentExperience: [],
     ...(state.actionModal?.draft || {}),
   };
 }
@@ -11928,6 +12030,7 @@ function renderAdminDigitalProductCreateModal() {
   const draft = getAdminDigitalProductDraft();
   const stepTitles = ["Product Details", "Store & Fulfillment", "Pricing", "Availability", "Review"];
   const imagePreview = draft.imageUrl || "/services/default-digital-service.png";
+  const postFields = postPaymentDraftFields(draft.postPaymentExperience || []);
   const renderStep = () => {
     if (step === 1) {
       return `
@@ -11988,6 +12091,15 @@ function renderAdminDigitalProductCreateModal() {
         <label>WhatsApp fallback<select name="whatsappFallbackEnabled"><option value="false" ${!draft.whatsappFallbackEnabled ? "selected" : ""}>Disabled</option><option value="true" ${draft.whatsappFallbackEnabled ? "selected" : ""}>Enabled</option></select></label>
         <label>WhatsApp URL <input name="whatsappUrl" value="${escapeHtml(draft.whatsappUrl || "")}" placeholder="https://wa.me/..." /></label>
         <label>Fallback label <input name="whatsappLabel" value="${escapeHtml(draft.whatsappLabel || "Get OTP Here")}" /></label>
+        <fieldset class="post-payment-builder"><legend>Post-payment experience</legend>
+          <label>Heading <input name="postHeading" value="${escapeHtml(postFields.postHeading)}" placeholder="Payment received" /></label>
+          <label>Text <textarea name="postText" rows="3" placeholder="Your order is being prepared.">${escapeHtml(postFields.postText)}</textarea></label>
+          <label>Instructions <textarea name="postInstructions" rows="4" placeholder="One instruction per line">${escapeHtml(postFields.postInstructions)}</textarea></label>
+          <label>Reference / code <input name="postCode" value="${escapeHtml(postFields.postCode)}" placeholder="Use {{orderReference}} for the order reference" /></label>
+          <label>Divider <select name="postDivider"><option value="false" ${!postFields.postDivider ? "selected" : ""}>No</option><option value="true" ${postFields.postDivider ? "selected" : ""}>Yes</option></select></label>
+          <label>Button label <input name="postLinkLabel" value="${escapeHtml(postFields.postLinkLabel)}" placeholder="Contact Support" /></label>
+          <label>Button URL <input name="postLinkUrl" value="${escapeHtml(postFields.postLinkUrl)}" placeholder="https://..." /></label>
+        </fieldset>
       `;
     }
     return `
@@ -11998,6 +12110,7 @@ function renderAdminDigitalProductCreateModal() {
         <span>${escapeHtml(draft.storefrontLabel || "Manual Store")} | Manual Fulfillment</span>
         <b>${formatNaira(draft.sellingPrice || 0)}</b>
         <em>${draft.available === false ? "Unavailable" : "Available"}</em>
+        <div class="post-payment-preview"><small>Customer preview</small>${renderPostPaymentBlocks({ productName: draft.name, requestId: "ORDER-XXXX", postPaymentExperience: draft.postPaymentExperience })}</div>
       </div>
     `;
   };
@@ -12217,6 +12330,7 @@ function renderAdminDigitalProductEditModal() {
 }
 
 function renderAdminManualProductForm(product = {}) {
+  const postFields = postPaymentDraftFields(product.postPaymentExperience || []);
   return `
     <form class="admin-digital-product-card" data-admin-manual-product-form="${escapeHtml(product.id || "")}">
       ${renderDigitalServiceImage(product)}
@@ -12241,8 +12355,18 @@ function renderAdminManualProductForm(product = {}) {
           <label>WhatsApp fallback<select name="whatsappFallbackEnabled"><option value="false" ${!product.otpSupport?.whatsappFallbackEnabled ? "selected" : ""}>Disabled</option><option value="true" ${product.otpSupport?.whatsappFallbackEnabled ? "selected" : ""}>Enabled</option></select></label>
           <label>WhatsApp URL <input name="whatsappUrl" value="${escapeHtml(product.otpSupport?.whatsappUrl || "")}" placeholder="https://wa.me/..." /></label>
           <label>Fallback label <input name="whatsappLabel" value="${escapeHtml(product.otpSupport?.whatsappLabel || "Get OTP Here")}" /></label>
+          <fieldset class="post-payment-builder"><legend>Post-payment experience</legend>
+            <label>Heading <input name="postHeading" value="${escapeHtml(postFields.postHeading)}" /></label>
+            <label>Text <textarea name="postText" rows="3">${escapeHtml(postFields.postText)}</textarea></label>
+            <label>Instructions <textarea name="postInstructions" rows="4">${escapeHtml(postFields.postInstructions)}</textarea></label>
+            <label>Reference / code <input name="postCode" value="${escapeHtml(postFields.postCode)}" placeholder="{{orderReference}}" /></label>
+            <label>Divider <select name="postDivider"><option value="false" ${!postFields.postDivider ? "selected" : ""}>No</option><option value="true" ${postFields.postDivider ? "selected" : ""}>Yes</option></select></label>
+            <label>Button label <input name="postLinkLabel" value="${escapeHtml(postFields.postLinkLabel)}" /></label>
+            <label>Button URL <input name="postLinkUrl" value="${escapeHtml(postFields.postLinkUrl)}" placeholder="https://..." /></label>
+          </fieldset>
         </div>
         <p class="muted-copy">Fulfillment remains manual regardless of storefront.</p>
+        <div class="post-payment-preview"><small>Customer preview</small>${renderPostPaymentBlocks({ productName: product.name, requestId: "ORDER-XXXX", postPaymentExperience: product.postPaymentExperience })}</div>
         <div class="modal-actions inline-modal-actions"><button class="button-primary shimmer-button" type="submit">${icon("check")} Save Product</button></div>
       </div>
     </form>
@@ -12340,6 +12464,7 @@ function renderAdminDigitalOrderRow(order = {}) {
         <span class="wallet-status-badge ${walletStatusClass(status)}">${escapeHtml(formatWalletRequestStatus(status))}</span>
         <strong>${formatNaira(order.amountCharged || 0)}</strong>
         ${deliveryLink ? `<button class="micro-btn" data-copy-text="${escapeHtml(deliveryLink)}" type="button">${icon("copy")} Copy</button>` : ""}
+        ${hasDelivery ? `<button class="micro-btn" data-admin-digital-order-view-delivery="${escapeHtml(order.id || "")}" type="button">View Delivery</button>` : ""}
         ${canRequery ? `<button class="micro-btn" data-admin-digital-order-requery="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Requery</button>` : ""}
         ${configurationFailure && status !== "DELIVERED" ? `<span class="wallet-status-badge warning">Action required</span>` : ""}
         ${canRetryFulfillment && !isManual ? `<button class="micro-btn" data-admin-digital-order-retry="${escapeHtml(order.id || "")}" type="button">${icon("refresh")} Retry Fulfillment</button>` : ""}
@@ -14162,6 +14287,7 @@ function renderDigitalServicesPane() {
   const activeStore = state.digitalServices.store || "";
   const balance = Number(getFinancialWallet("NGN")?.availableBalance || 0);
   const readyOrders = orders.filter((order) => String(order.status || "").toLowerCase() === "delivered" || getDigitalDeliveryLink(order.delivery)).length;
+  const pendingOrders = orders.filter((order) => getDigitalOrderFilter(order) === "pending").length;
   const featuredProducts = products.filter((product) => product.featured).slice(0, 4);
   return `
     <section class="store-page" data-section="store">
@@ -14177,9 +14303,10 @@ function renderDigitalServicesPane() {
         ${getDigitalStoreOptions().map((store) => `<button class="${activeStore === store.id ? "active" : ""}" data-store-switch="${escapeHtml(store.id)}" type="button">${escapeHtml(store.label)}</button>`).join("")}
       </section>
       <section class="store-stat-strip">
-        <div><span>Products</span><strong data-store-product-count>${Number(products.length || 0).toLocaleString()}</strong></div>
-        <div><span>Orders</span><strong>${Number(orders.length || 0).toLocaleString()}</strong></div>
-        <div><span>Ready</span><strong>${Number(readyOrders || 0).toLocaleString()}</strong></div>
+        <button data-store-catalog-open type="button"><span>Products</span><strong data-store-product-count>${Number(products.length || 0).toLocaleString()}</strong><i aria-hidden="true">›</i></button>
+        <button data-store-orders-open="all" type="button"><span>Orders</span><strong>${Number(orders.length || 0).toLocaleString()}</strong><i aria-hidden="true">›</i></button>
+        <button data-store-orders-open="pending" type="button"><span>Pending</span><strong>${Number(pendingOrders || 0).toLocaleString()}</strong><i aria-hidden="true">›</i></button>
+        <button data-store-orders-open="ready" type="button"><span>Ready</span><strong>${Number(readyOrders || 0).toLocaleString()}</strong><i aria-hidden="true">›</i></button>
       </section>
     ${
       settings.enabled === false
@@ -14222,7 +14349,8 @@ function renderDigitalServicesPane() {
 function renderStoreProductCard(product = {}, featured = false) {
   const purchasable = isDigitalProductPurchasable(product);
   return `
-    <button class="digital-product-card store-product-card ${featured ? "featured" : ""} ${purchasable ? "" : "is-unavailable"}" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${purchasable ? "" : "disabled"}>
+    <article class="digital-product-card store-product-card ${featured ? "featured" : ""} ${purchasable ? "" : "is-unavailable"}">
+      <button class="store-product-open" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${purchasable ? "" : "disabled"} aria-label="View ${escapeHtml(getDigitalProductDisplayName(product))}">
       <span class="store-product-media">${renderDigitalServiceImage(product)}</span>
       <span class="store-product-body">
         <small class="store-origin-badge">${escapeHtml(getDigitalProductStoreBadgeLabel(product))}</small>
@@ -14234,7 +14362,9 @@ function renderStoreProductCard(product = {}, featured = false) {
         ${renderDigitalProductPrice(product, 1, { compact: true })}
         <em>${purchasable ? (state.user ? "Buy" : "Login") : "Unavailable"}</em>
       </span>
-    </button>
+      </button>
+      <button class="store-product-share" data-digital-product-share="${escapeHtml(product.id)}" type="button" aria-label="Share ${escapeHtml(getDigitalProductDisplayName(product))}" title="Share">${icon("send")}</button>
+    </article>
   `;
 }
 
@@ -15099,6 +15229,11 @@ function bindDashboardActions() {
     });
   });
 
+  document.querySelectorAll("[data-admin-digital-order-view-delivery]").forEach((button) => button.addEventListener("click", () => {
+    const order = getAdminDigitalOrderById(button.dataset.adminDigitalOrderViewDelivery);
+    if (order) { state.actionModal = { type: "digital-service-receipt", order }; render(); }
+  }));
+
   document.querySelectorAll("[data-admin-manual-fulfill-form]").forEach((form) => {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -15322,6 +15457,16 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-digital-service-order-requery]").forEach((button) => {
     button.addEventListener("click", () => requeryDigitalServiceOrder(button.dataset.digitalServiceOrderRequery));
   });
+
+  document.querySelectorAll("[data-store-orders-open]").forEach((button) => button.addEventListener("click", () => {
+    state.digitalServices.orderFilter = button.dataset.storeOrdersOpen || "all";
+    state.actionModal = { type: "digital-orders" };
+    render();
+  }));
+  document.querySelectorAll("[data-store-catalog-open]").forEach((button) => button.addEventListener("click", () => document.querySelector(".store-catalog-card")?.scrollIntoView({ behavior: "smooth", block: "start" })));
+  document.querySelectorAll("[data-post-payment-continue]").forEach((button) => button.addEventListener("click", () => { state.actionModal = null; render(); }));
+  document.querySelectorAll("[data-order-ready-done]").forEach((button) => button.addEventListener("click", async () => { await acknowledgeDigitalOrderReady(button.dataset.orderReadyDone); state.actionModal = null; syncDigitalOtpExperience(); render(); }));
+  document.querySelectorAll("[data-order-ready-view]").forEach((button) => button.addEventListener("click", async () => { await acknowledgeDigitalOrderReady(button.dataset.orderReadyView); state.digitalServices.orderFilter = "ready"; state.actionModal = { type: "digital-orders" }; render(); }));
 
   document.querySelectorAll("[data-digital-otp-request]").forEach((button) => button.addEventListener("click", () => requestDigitalServiceOtp(button.dataset.digitalOtpRequest)));
   document.querySelectorAll("[data-digital-otp-view]").forEach((button) => button.addEventListener("click", () => { state.actionModal = { type: "digital-otp-ready", orderId: button.dataset.digitalOtpView }; render(); }));
