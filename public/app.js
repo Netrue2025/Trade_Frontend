@@ -5479,6 +5479,7 @@ function renderActionModal() {
   if (state.actionModal.type === "digital-orders") return renderDigitalOrderHistoryModal();
   if (state.actionModal.type === "digital-post-payment") return renderDigitalPostPaymentModal();
   if (state.actionModal.type === "digital-order-ready") return renderDigitalOrderReadyModal();
+  if (state.actionModal.type === "digital-manual-order-success") return renderDigitalManualOrderSuccessModal();
 
   if (state.actionModal.type === "digital-otp-waiting") return renderDigitalOtpWaitingModal();
   if (state.actionModal.type === "digital-otp-ready") return renderDigitalOtpReadyModal();
@@ -10064,6 +10065,21 @@ function renderDigitalOrderReadyModal() {
     <p class="modal-eyebrow neutral">Order ready</p><h3>${escapeHtml(order.productName || "Your order")}</h3>
     <p class="modal-text">Your order has been fulfilled.</p>${renderDigitalServiceDelivery(order.delivery, order)}
     <div class="modal-actions"><button class="button-secondary" data-order-ready-done="${escapeHtml(order.id || "")}" type="button">Done</button><button class="button-primary" data-order-ready-view="${escapeHtml(order.id || "")}" type="button">View in My Orders</button></div>
+  </div></div>`;
+}
+
+function isManualDigitalServiceOrder(order = {}) {
+  return String(order.fulfillmentMode || "").toLowerCase() === "manual"
+    || String(order.provider || "").toLowerCase() === "manual";
+}
+
+function renderDigitalManualOrderSuccessModal() {
+  const order = state.actionModal.order || {};
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card digital-service-receipt-modal order-ready-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><div class="order-success-mark">${icon("check")}</div>
+    <p class="modal-eyebrow neutral">Successful</p><h3>${escapeHtml(order.productName || "Your order")}</h3>
+    <p class="modal-text">Your manual order was completed successfully.</p>${renderDigitalServiceDelivery(order.delivery, order)}
+    <div class="modal-actions single"><button class="button-primary" id="action-modal-cancel-btn" type="button">Done</button></div>
   </div></div>`;
 }
 
@@ -15446,10 +15462,9 @@ function bindDashboardActions() {
         showError("Purchase receipt is not available yet.");
         return;
       }
-      state.actionModal = {
-        type: "digital-service-receipt",
-        order,
-      };
+      state.actionModal = isManualDigitalServiceOrder(order)
+        ? { type: "digital-manual-order-success", order }
+        : { type: "digital-service-receipt", order };
       render();
     });
   });

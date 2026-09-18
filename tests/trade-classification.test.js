@@ -238,6 +238,15 @@ test("Structured post-payment and global Order Ready flows remain separate from 
   assert.match(app, /data-delivery-secret-toggle/);
 });
 
+test("Manual order history opens the successful delivery and OTP experience", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /function renderDigitalManualOrderSuccessModal/);
+  assert.match(app, /isManualDigitalServiceOrder\(order\)/);
+  assert.match(app, /type: "digital-manual-order-success"/);
+  assert.match(app, /renderDigitalServiceDelivery\(order\.delivery, order\)/);
+  assert.match(app, /data-digital-otp-request/);
+});
+
 test("Responsive shop histories forms and transactional modals support narrow phones", () => {
   const styles = readPublicFile("styles.css");
   assert.match(styles, /\.store-stat-strip\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
