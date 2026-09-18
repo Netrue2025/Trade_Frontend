@@ -168,6 +168,7 @@ const state = {
   paymentBanksLoadedAt: 0,
   resolvedBankAccount: null,
   financialDashboard: null,
+  membership: { plans: null, summary: null },
   vtuSettings: null,
   vtuDataPlans: [],
   vtuDataPlansNetwork: "",
@@ -373,7 +374,7 @@ function shouldRefreshTradeLive() {
   if (state.user.role === "admin") {
     return ["home", "history", "settings", "signals", "store", "referral", "adminQuests"].includes(state.activeTab);
   }
-  return ["home", "history", "signals", "store", "referral", "quest"].includes(state.activeTab);
+  return ["home", "history", "signals", "store", "referral", "quest", "plans"].includes(state.activeTab);
 }
 
 function getExchangeLabel(exchange) {
@@ -4676,7 +4677,7 @@ function renderDashboardTopBar() {
     <header class="dashboard-topbar">
       <div>
         <strong>${escapeHtml(state.user.name || "Dashboard")}</strong>
-        <p class="muted-copy">${state.user.role === "admin" ? "Admin" : "Wallet"}</p>
+        <p class="muted-copy">${state.user.role === "admin" ? "Admin" : "Wallet"} ${state.user.role === "user" && state.membership.summary?.plan === "PRO" ? `<button class="pro-membership-badge" data-tab="plans" type="button">${icon("star")} PRO</button>` : ""}</p>
       </div>
       <div class="notification-wrap">
         <button class="icon-action notification-button" id="notification-toggle-btn" type="button" aria-label="Notifications" title="Notifications">
@@ -5364,6 +5365,7 @@ function renderActionModal() {
           <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
           <p class="modal-eyebrow neutral">User</p>
           <h3>Edit profile</h3>
+          <div class="action-metric-stack"><div class="action-metric"><span>Plan</span><strong>${escapeHtml(user.membership?.plan === "PRO" ? "Pro" : "Basic")}</strong></div><div class="action-metric"><span>Status</span><strong>${escapeHtml(user.membership?.status || "ACTIVE")}</strong></div>${user.membership?.expiresAt ? `<div class="action-metric"><span>Pro expires</span><strong>${escapeHtml(formatMembershipDate(user.membership.expiresAt))}</strong></div>` : ""}</div>
           <form id="admin-user-profile-form" class="stack-form admin-profile-form" data-admin-profile-form="${escapeHtml(user.id)}">
             <label class="stack-label">
               <span>First name</span>
@@ -5480,6 +5482,9 @@ function renderActionModal() {
   if (state.actionModal.type === "digital-post-payment") return renderDigitalPostPaymentModal();
   if (state.actionModal.type === "digital-order-ready") return renderDigitalOrderReadyModal();
   if (state.actionModal.type === "digital-manual-order-success") return renderDigitalManualOrderSuccessModal();
+  if (state.actionModal.type === "membership-limit") return renderMembershipLimitModal();
+  if (state.actionModal.type === "membership-checkout") return renderMembershipCheckoutModal();
+  if (state.actionModal.type === "membership-success") return renderMembershipSuccessModal();
 
   if (state.actionModal.type === "digital-otp-waiting") return renderDigitalOtpWaitingModal();
   if (state.actionModal.type === "digital-otp-ready") return renderDigitalOtpReadyModal();
@@ -6692,6 +6697,7 @@ function applyUserFinancePayloadToState(payload = {}) {
     id: payload.profile.user.id,
     ledgerWallets: payload.profile.wallets || [],
     recentTransactions: payload.profile.recentTransactions || [],
+    membership: payload.profile.user.membership || undefined,
     ...(payload.financeSummary ? { financeSummary: payload.financeSummary } : {}),
   });
 }
@@ -7163,6 +7169,7 @@ async function loadDashboardData() {
 
   updateSignalNotificationPermission();
   void loadPushSettings().catch(() => undefined);
+  if (state.user.role === "user") void loadMembership().then(() => render()).catch(() => undefined);
   ensureSignalAudioAutoUnlock();
   scheduleInstallPrompt();
   scheduleNotificationPrompt();
@@ -7867,6 +7874,20 @@ async function submitAdminDepositSettings(form) {
     clearFormDraft(form);
     render();
     showNotice("Deposit accounts saved");
+  }).catch((error) => showError(error.message));
+}
+
+async function submitAdminMembershipSettings(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  await withLoading(async () => {
+    const payload = await api("/api/admin/settings", { method: "PUT", body: JSON.stringify({ membership: {
+      basic: { name: data.basicName, dailyTradeLimit: data.dailyTradeLimit, targetLabel: data.targetLabel },
+      pro: { name: data.proName, price: data.proPrice, currency: "NGN", durationDays: data.durationDays, enabled: data.enabled === "true", benefits: String(data.benefits || "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean) },
+    } }) });
+    state.financialDashboard = { ...(state.financialDashboard || {}), settings: { ...(state.financialDashboard?.settings || {}), membership: payload.settings.membership } };
+    state.membership.plans = payload.settings.membership;
+    render();
+    showNotice("Membership plans updated");
   }).catch((error) => showError(error.message));
 }
 
@@ -8706,16 +8727,103 @@ async function resolveSelectedBankAccount() {
   }).catch((error) => showError(error.message));
 }
 
+async function loadMembership() {
+  const payload = await api("/api/membership/plans");
+  state.membership.plans = payload.plans || state.membership.plans;
+  state.membership.summary = payload.membership || state.user?.membership || state.membership.summary;
+  if (state.user && state.membership.summary) state.user.membership = state.membership.summary;
+  return payload;
+}
+
+function formatMembershipDate(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("en-NG", { dateStyle: "medium" }).format(new Date(value));
+}
+
+function renderMembershipLimitModal() {
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card membership-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+    <div class="membership-pro-mark">${icon("star")}</div><p class="modal-eyebrow neutral">Basic limit reached</p>
+    <h3>You've reached today's Basic limit</h3><p class="modal-text">Your Basic plan includes one trade join per day. Upgrade to Pro to unlock unlimited eligible trade joins while your subscription is active.</p>
+    <ul class="membership-benefits"><li>Unlimited daily trade joins</li><li>Access to multiple available trades</li><li>Premium PRO badge</li><li>All Basic features</li></ul>
+    <div class="modal-actions"><button class="button-secondary" id="action-modal-cancel-btn" type="button">Maybe Later</button><button class="button-primary" data-membership-view-plans type="button">Upgrade to Pro</button></div>
+  </div></div>`;
+}
+
+function renderMembershipCheckoutModal() {
+  const pro = state.membership.plans?.pro || {};
+  const method = state.actionModal.paymentMethod || "wallet";
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card membership-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><p class="modal-eyebrow neutral">Upgrade securely</p>
+    <h3>NetrueFi ${escapeHtml(pro.name || "Pro")}</h3><div class="membership-checkout-price">${formatNaira(pro.price || 0)} <small>/ ${Number(pro.durationDays || 30)} days</small></div>
+    <div class="checkout-payment-options"><button class="checkout-payment-card ${method === "wallet" ? "active" : ""}" data-membership-payment="wallet" type="button">NetrueFi Wallet</button><button class="checkout-payment-card ${method === "paystack" ? "active" : ""}" data-membership-payment="paystack" type="button">Paystack</button></div>
+    <p class="muted-copy">The current backend price and duration will be verified before payment.</p>
+    <div class="modal-actions"><button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button><button class="button-primary" data-membership-confirm type="button">Confirm Upgrade</button></div>
+  </div></div>`;
+}
+
+function renderMembershipSuccessModal() {
+  const membership = state.membership.summary || {};
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card membership-modal membership-success-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><div class="order-success-mark">${icon("check")}</div>
+    <p class="modal-eyebrow neutral">Welcome to NetrueFi Pro</p><h3>Your Pro plan is now active</h3>
+    <p class="modal-text">You now have unlimited eligible trade joins while your membership is active.</p>
+    <div class="action-metric-stack"><div class="action-metric"><span>Plan</span><strong>Pro</strong></div><div class="action-metric"><span>Valid until</span><strong>${escapeHtml(formatMembershipDate(membership.expiresAt))}</strong></div></div>
+    <div class="modal-actions"><button class="button-secondary" id="action-modal-cancel-btn" type="button">Done</button><button class="button-primary" data-membership-start-trading type="button">Start Trading</button></div>
+  </div></div>`;
+}
+
+async function purchaseProMembership() {
+  const paymentMethod = state.actionModal?.paymentMethod === "paystack" ? "paystack" : "wallet";
+  const endpoint = paymentMethod === "paystack" ? "/api/membership/pro/paystack/initialize" : "/api/membership/pro/wallet";
+  const idempotencyKey = state.actionModal.idempotencyKey || createIdempotencyKey(`membership-${paymentMethod}`);
+  state.actionModal.idempotencyKey = idempotencyKey;
+  await withLoading(async () => {
+    const payload = await api(endpoint, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: "{}" });
+    if (paymentMethod === "paystack") { window.location.assign(payload.payment.authorizationUrl); return; }
+    state.user = normalizeUserPayload(payload.user || state.user);
+    state.membership.summary = payload.membership;
+    await Promise.all([loadMembership(), loadFinancialDashboard()]);
+    state.actionModal = { type: "membership-success" };
+    render();
+  }).catch((error) => showError(error.message));
+}
+
+async function verifyMembershipPaystackReturn() {
+  const params = new URLSearchParams(window.location.search || "");
+  const reference = String(params.get("membership_reference") || "").trim();
+  if (!reference || !state.user || state.user.role !== "user") return false;
+  await withLoading(async () => {
+    const payload = await api("/api/membership/pro/paystack/verify", { method: "POST", body: JSON.stringify({ reference }) });
+    state.user = normalizeUserPayload(payload.user || state.user);
+    state.membership.summary = payload.membership;
+    await Promise.all([loadMembership(), loadFinancialDashboard()]);
+    state.activeTab = "plans";
+    state.actionModal = { type: "membership-success" };
+    window.history.replaceState({}, "", getTabRoute("plans"));
+    render();
+  }).catch((error) => showError(error.message));
+  return true;
+}
+
 async function joinTradeNow(tradeId) {
   await withLoading(async () => {
-    await api(`/api/trades/${encodeURIComponent(tradeId)}/join`, {
+    const payload = await api(`/api/trades/${encodeURIComponent(tradeId)}/join`, {
       method: "POST",
       body: JSON.stringify({}),
     });
+    if (payload.membership) state.membership.summary = payload.membership;
     state.actionModal = null;
     await loadDashboardData();
     showNotice("Trade joined");
-  }).catch((error) => showError(error.message));
+  }).catch((error) => {
+    if (error.payload?.code === "PLAN_TRADE_LIMIT_REACHED") {
+      state.actionModal = { type: "membership-limit", membership: error.payload };
+      render();
+      return;
+    }
+    showError(error.message);
+  });
 }
 
 async function stopJoinedTrade(tradeId) {
@@ -8988,7 +9096,7 @@ function getTabRoute(tab) {
   if (tab === "adminQuests") {
     return "/?tab=adminQuests";
   }
-  if (["home", "settings", "signals", "store", "history"].includes(tab)) {
+  if (["home", "settings", "signals", "store", "history", "plans"].includes(tab)) {
     return `/?tab=${encodeURIComponent(tab)}`;
   }
   return "/?tab=home";
@@ -9436,6 +9544,7 @@ function getMenuSheetItems() {
     { id: "history", label: "History", iconName: "profile", tab: "history" },
     { id: "referral", label: "Refer", iconName: "gift", tab: "referral" },
     { id: "quest", label: "Quest", iconName: "star", tab: "quest" },
+    { id: "plans", label: "Plans", iconName: "card", tab: "plans" },
     { id: "settings", label: "Settings", iconName: "settings", tab: "settings" },
     { id: "deposit", label: "Deposit", iconName: "bank", action: "deposit" },
     { id: "withdraw", label: "Withdraw", iconName: "send", action: "withdraw" },
@@ -13144,6 +13253,7 @@ function renderSettingsPane() {
   const telegramSettings = financeSettings.telegram || {};
   const vtuSettings = state.vtuSettings || financeSettings.vtu || {};
   const digitalServiceSettings = state.digitalServices.settings || financeSettings.digitalServices || {};
+  const membershipSettings = financeSettings.membership || state.membership.plans || {};
   const adminDepositSettingsDraft = state.adminDepositSettingsDraft || {};
   const savedBank = getSavedBankAccount();
   const settingsBankOptions = (state.paymentBanks || [])
@@ -13314,11 +13424,19 @@ function renderSettingsPane() {
         <button class="micro-btn danger" data-admin-history-cleanup-open type="button">${icon("trash")} Clear old history</button>
       </div>
     `;
+    const membershipPanel = `<form id="admin-membership-settings-form" class="stack-form subtle-form progressive-settings-form">
+      <div class="settings-field-grid"><label>Basic name<input name="basicName" value="${escapeHtml(membershipSettings.basic?.name || "Basic")}" /></label><label>Daily joins<input name="dailyTradeLimit" type="number" min="1" step="1" value="${Number(membershipSettings.basic?.dailyTradeLimit || 1)}" /></label></div>
+      <label>Basic target label<input name="targetLabel" value="${escapeHtml(membershipSettings.basic?.targetLabel || "Trade target up to 1.5%")}" /></label>
+      <div class="settings-field-grid"><label>Pro name<input name="proName" value="${escapeHtml(membershipSettings.pro?.name || "Pro")}" /></label><label>Price (NGN)<input name="proPrice" inputmode="decimal" value="${escapeHtml(membershipSettings.pro?.price || "")}" /></label><label>Duration (days)<input name="durationDays" type="number" min="1" value="${Number(membershipSettings.pro?.durationDays || 30)}" /></label><label>Availability<select name="enabled"><option value="true" ${membershipSettings.pro?.enabled !== false ? "selected" : ""}>Enabled</option><option value="false" ${membershipSettings.pro?.enabled === false ? "selected" : ""}>Disabled</option></select></label></div>
+      <label>Pro benefits<textarea name="benefits" rows="5">${escapeHtml((membershipSettings.pro?.benefits || []).join("\n"))}</textarea></label>
+      <button class="button-primary" type="submit">Save Membership Plans</button>
+    </form>`;
     return `
       ${renderAdminSettingsOverview()}
       ${renderSettingsDisclosure({ key: "appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel, category: "general" })}
       ${renderSettingsDisclosure({ key: "exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers), category: "general" })}
       ${renderSettingsDisclosure({ key: "deposit-channel", title: "Wallet Rules", subtitle: "Bank, fees, minimums", iconName: "bank", content: depositPanel, open: true, category: "finance" })}
+      ${renderSettingsDisclosure({ key: "membership", title: "Plans / Membership", subtitle: `${membershipSettings.basic?.name || "Basic"} and ${membershipSettings.pro?.name || "Pro"}`, iconName: "card", content: membershipPanel, category: "finance" })}
       ${renderSettingsDisclosure({ key: "vtu", title: "Airtime & Data", subtitle: vtuSettings.configured ? "VTU.ng" : "Setup", iconName: "wifi", content: vtuPanel, category: "services" })}
       ${renderSettingsDisclosure({ key: "digital-services", title: "Digital Services", subtitle: digitalServiceSettings.enabled ? "Multi-shop" : "Disabled", iconName: "gift", content: renderAdminDigitalServicesPanel(), category: "services" })}
       ${renderSettingsDisclosure({ key: "signal-auto-trade", title: "Signal Auto Trade", subtitle: signalAutoTradeSettings.enabled ? "Enabled" : "Disabled", iconName: "signals", content: signalPanel, category: "finance" })}
@@ -13396,6 +13514,7 @@ function renderSettingsPane() {
         ${renderCurrentUserWalletSummary()}
       </div>
       <p class="muted-copy">${escapeHtml(settingsLiveLabel)}</p>
+      <button class="button-secondary" data-tab="plans" type="button">${state.membership.summary?.plan === "PRO" ? "Manage Pro Plan" : "View Membership Plans"}</button>
     `;
     const supportPanel = `
       <form id="user-password-form" class="stack-form subtle-form progressive-settings-form">
@@ -13916,7 +14035,7 @@ function applyRouteTarget() {
     state.activeTab = "store";
     return;
   }
-  if (["home", "settings", "history", "signals", "store"].includes(params.get("tab"))) {
+  if (["home", "settings", "history", "signals", "store", "plans"].includes(params.get("tab"))) {
     state.activeTab = params.get("tab");
   }
 }
@@ -14463,6 +14582,27 @@ async function navigateToTab(nextTab) {
   if (nextTab === "adminQuests") {
     await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
   }
+  if (nextTab === "plans") {
+    await withLoading(loadMembership).then(() => render()).catch((error) => showError(error.message));
+  }
+}
+
+function renderPlansPane() {
+  const plans = state.membership.plans || {};
+  const basic = plans.basic || { name: "Basic", dailyTradeLimit: 1, targetLabel: "Trade target up to 1.5%" };
+  const pro = plans.pro || { name: "Pro", price: "0", durationDays: 30, benefits: [] };
+  const membership = state.membership.summary || state.user?.membership || { plan: "BASIC", tradesUsedToday: 0, dailyTradeLimit: 1 };
+  const isPro = membership.plan === "PRO" && membership.active;
+  const basicBenefits = ["Access to trading", `Join ${basic.dailyTradeLimit || 1} trade per day`, basic.targetLabel, "Wallet access", "Airtime & Data", "Digital Store", "Quest access"];
+  const proBenefits = pro.benefits?.length ? pro.benefits : ["Unlimited eligible trade joins", "Participate in multiple available trades", "Premium PRO badge", "All Basic features", "Existing trade tracking and P&L tools"];
+  return `<section class="plans-page">
+    <header class="plans-header"><p class="eyebrow">Membership</p><h2>Choose the plan that works for you</h2><p>Upgrade your trading access whenever you're ready.</p></header>
+    <div class="plans-grid">
+      <article class="plan-card"><span class="plan-label">${escapeHtml(basic.name)}</span><h3>Free</h3><p>Your current everyday plan.</p><ul class="membership-benefits">${basicBenefits.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><button class="button-secondary" type="button" disabled>${isPro ? "Included with Pro" : "Current Plan"}</button></article>
+      <article class="plan-card plan-card-pro"><div class="plan-card-head"><span class="plan-label">${icon("star")} ${escapeHtml(pro.name)}</span><span class="pro-membership-badge">PRO</span></div><h3>${formatNaira(pro.price || 0)} <small>/ ${Number(pro.durationDays || 30)} days</small></h3><p>Unlock more trading access.</p><ul class="membership-benefits">${proBenefits.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>${isPro ? `<button class="button-secondary" type="button" disabled>Pro Active Until ${escapeHtml(formatMembershipDate(membership.expiresAt))}</button>` : `<button class="button-primary" data-membership-upgrade type="button" ${pro.enabled === false ? "disabled" : ""}>${pro.enabled === false ? "Currently Unavailable" : "Upgrade to Pro"}</button>`}</article>
+    </div>
+    <section class="membership-access-strip"><strong>${isPro ? "PRO" : "Basic Plan"}</strong><span>Daily trade access: ${isPro ? "Unlimited" : `${Number(membership.tradesUsedToday || 0)} / ${Number(membership.dailyTradeLimit || basic.dailyTradeLimit || 1)} used`}</span></section>
+  </section>`;
 }
 
 function renderDashboardShell() {
@@ -14495,6 +14635,7 @@ function renderDashboardShell() {
     referral: renderReferralPane(),
     quest: renderQuestPane(),
     adminQuests: renderAdminQuestPane(),
+    plans: renderPlansPane(),
   };
 
   app.innerHTML = `
@@ -15064,6 +15205,9 @@ function bindDashboardActions() {
     });
   }
 
+  const adminMembershipSettingsForm = document.getElementById("admin-membership-settings-form");
+  if (adminMembershipSettingsForm) adminMembershipSettingsForm.addEventListener("submit", (event) => { event.preventDefault(); submitAdminMembershipSettings(adminMembershipSettingsForm); });
+
   const adminReferralSettingsForm = document.getElementById("admin-referral-settings-form");
   if (adminReferralSettingsForm) {
     adminReferralSettingsForm.addEventListener("submit", (event) => {
@@ -15484,6 +15628,11 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-order-ready-view]").forEach((button) => button.addEventListener("click", async () => { await acknowledgeDigitalOrderReady(button.dataset.orderReadyView); state.digitalServices.orderFilter = "ready"; state.actionModal = { type: "digital-orders" }; render(); }));
 
   document.querySelectorAll("[data-digital-otp-request]").forEach((button) => button.addEventListener("click", () => requestDigitalServiceOtp(button.dataset.digitalOtpRequest)));
+  document.querySelectorAll("[data-membership-view-plans]").forEach((button) => button.addEventListener("click", () => { state.actionModal = null; navigateToTab("plans"); }));
+  document.querySelectorAll("[data-membership-upgrade]").forEach((button) => button.addEventListener("click", () => { state.actionModal = { type: "membership-checkout", paymentMethod: "wallet", idempotencyKey: createIdempotencyKey("membership-wallet") }; render(); }));
+  document.querySelectorAll("[data-membership-payment]").forEach((button) => button.addEventListener("click", () => { state.actionModal.paymentMethod = button.dataset.membershipPayment; state.actionModal.idempotencyKey = createIdempotencyKey(`membership-${button.dataset.membershipPayment}`); render(); }));
+  document.querySelectorAll("[data-membership-confirm]").forEach((button) => button.addEventListener("click", purchaseProMembership));
+  document.querySelectorAll("[data-membership-start-trading]").forEach((button) => button.addEventListener("click", () => { state.actionModal = null; navigateToTab("signals"); }));
   document.querySelectorAll("[data-digital-otp-view]").forEach((button) => button.addEventListener("click", () => { state.actionModal = { type: "digital-otp-ready", orderId: button.dataset.digitalOtpView }; render(); }));
   document.querySelectorAll("[data-digital-otp-done]").forEach((button) => button.addEventListener("click", () => { acknowledgeDigitalServiceOtp(button.dataset.digitalOtpDone); state.actionModal = null; render(); }));
   document.querySelectorAll("[data-digital-product-share]").forEach((button) => button.addEventListener("click", () => shareDigitalServiceProduct(button.dataset.digitalProductShare)));
@@ -16794,6 +16943,7 @@ async function bootstrap() {
     if (state.user) {
       applyRouteTarget();
       await loadDashboardData();
+      await verifyMembershipPaystackReturn();
       await verifyPaystackDigitalPaymentFromUrl();
     } else {
       clearAuthSessionToken();

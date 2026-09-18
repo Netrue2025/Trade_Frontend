@@ -247,6 +247,26 @@ test("Manual order history opens the successful delivery and OTP experience", ()
   assert.match(app, /data-digital-otp-request/);
 });
 
+test("Basic and Pro membership UX uses backend plans and secure checkout flows", () => {
+  const app = readPublicFile("app.js");
+  const styles = readPublicFile("styles.css");
+  assert.match(app, /function renderPlansPane/);
+  assert.match(app, /Choose the plan that works for you/);
+  assert.match(app, /Upgrade your trading access whenever you're ready/);
+  assert.match(app, /PLAN_TRADE_LIMIT_REACHED/);
+  assert.match(app, /function renderMembershipLimitModal/);
+  assert.match(app, /data-membership-view-plans/);
+  assert.match(app, /\/api\/membership\/pro\/wallet/);
+  assert.match(app, /\/api\/membership\/pro\/paystack\/initialize/);
+  assert.match(app, /\/api\/membership\/pro\/paystack\/verify/);
+  assert.match(app, /Welcome to NetrueFi Pro/);
+  assert.match(app, /pro-membership-badge/);
+  assert.match(app, /Daily trade access:/);
+  assert.match(styles, /\.plans-grid\s*\{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
+  assert.match(styles, /@media \(max-width: 640px\)[\s\S]*\.plans-grid\s*\{[^}]*minmax\(0, 1fr\)/);
+  assert.match(styles, /\.membership-modal\s*\{[^}]*100dvh[^}]*overflow-y:\s*auto/s);
+});
+
 test("Responsive shop histories forms and transactional modals support narrow phones", () => {
   const styles = readPublicFile("styles.css");
   assert.match(styles, /\.store-stat-strip\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
