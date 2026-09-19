@@ -181,6 +181,7 @@ test("Admin store orders show action required for supplier configuration failure
 
 test("Emma delivery receipts preserve raw items and admin can recover missing delivery", () => {
   const app = readPublicFile("app.js");
+  const styles = readPublicFile("styles.css");
   assert.match(app, /Array\.isArray\(delivery\.delivery_items\)/);
   assert.match(app, /rawItem:\s*item\.trim\(\)/);
   assert.match(app, /const match = item\.match/);
@@ -190,6 +191,28 @@ test("Emma delivery receipts preserve raw items and admin can recover missing de
   assert.match(app, /\/recover-delivery/);
   assert.match(app, /data-admin-digital-order-recover-delivery/);
   assert.match(app, /Recover Delivery/);
+  assert.match(app, /function renderAutomaticDeliveryDetails/);
+  assert.match(app, /Copy Full Delivery/);
+  assert.match(app, /item\.rawItem \?\? item\.value \?\? item/);
+  assert.match(styles, /\.digital-auto-delivery-raw\s*{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/s);
+});
+
+test("Quest claim reconciliation and VTU recent number are authoritative", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /let questDataRequestVersion = 0/);
+  assert.match(app, /requestVersion !== questDataRequestVersion/);
+  assert.match(app, /activeSession:\s*null/);
+  assert.match(app, /Promise\.allSettled\(\[loadQuestData\(\), loadFinancialDashboard\(\)\]\)/);
+  assert.match(app, /\["successful", "success", "completed"\]\.includes/);
+  assert.match(app, /\.sort\(\(a, b\) => Date\.parse\(b\.completedAt/);
+  assert.match(app, /\.slice\(0, 1\)/);
+});
+
+test("Paystack receipt distinguishes paid fulfillment processing", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /const paymentConfirmed = String\(order\.paymentStatus/);
+  assert.match(app, /Your payment has been confirmed\. We will notify you when your order is ready\./);
+  assert.match(app, /\/api\/digital-services\/orders\/paystack\/verify/);
 });
 
 test("Efem and manual store admin workflows are fully wired", () => {

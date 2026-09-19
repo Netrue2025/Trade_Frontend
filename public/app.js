@@ -310,6 +310,7 @@ let tradeSymbolRefreshTimer = null;
 let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
 let questCountdownTimer = null;
+let questDataRequestVersion = 0;
 let homePromoTimer = null;
 let depositStatusTimer = null;
 let digitalOtpPollTimer = null;
@@ -3578,6 +3579,7 @@ async function loadAdminFinanceQueues() {
 }
 
 async function loadQuestData() {
+  const requestVersion = ++questDataRequestVersion;
   if (!state.user || state.user.role !== "user") {
     state.quest.status = null;
     state.quest.rewards = [];
@@ -3589,9 +3591,13 @@ async function loadQuestData() {
     api("/api/quest/rewards").catch(() => ({ rewards: [] })),
     api("/api/quest/history").catch(() => ({ history: [] })),
   ]);
+  if (requestVersion !== questDataRequestVersion) {
+    return false;
+  }
   state.quest.status = statusPayload;
   state.quest.rewards = rewardsPayload.rewards || [];
   state.quest.history = historyPayload.history || [];
+  return true;
 }
 
 async function loadAdminQuestData() {
@@ -4896,6 +4902,8 @@ function getVtuRecentTargets(productType) {
   const seen = new Set();
   return (state.vtuTransactions || [])
     .filter((transaction) => String(transaction.productType || "").trim().toLowerCase() === product && transaction.phone)
+    .filter((transaction) => ["successful", "success", "completed"].includes(String(transaction.status || "").trim().toLowerCase()))
+    .sort((a, b) => Date.parse(b.completedAt || b.updatedAt || b.createdAt || 0) - Date.parse(a.completedAt || a.updatedAt || a.createdAt || 0))
     .filter((transaction) => {
       const key = `${transaction.network}:${transaction.phone}:${transaction.planName || transaction.faceValue || ""}`;
       if (seen.has(key)) {
@@ -4904,7 +4912,7 @@ function getVtuRecentTargets(productType) {
       seen.add(key);
       return true;
     })
-    .slice(0, 3);
+    .slice(0, 1);
 }
 
 function getVtuPlanCategory(plan = {}) {
@@ -7745,11 +7753,23 @@ async function redeemQuestReward() {
     return;
   }
   await withLoading(async () => {
-    await api(`/api/quest/session/${encodeURIComponent(sessionId)}/redeem`, {
+    const payload = await api(`/api/quest/session/${encodeURIComponent(sessionId)}/redeem`, {
       method: "POST",
       body: JSON.stringify({}),
     });
-    await Promise.all([loadQuestData(), loadFinancialDashboard()]);
+    questDataRequestVersion += 1;
+    state.quest.status = {
+      ...(state.quest.status || {}),
+      activeSession: null,
+      reward: payload.reward || state.quest.status?.reward || null,
+    };
+    state.quest.rewards = (state.quest.rewards || []).map((reward) => reward.id === payload.reward?.id ? payload.reward : reward);
+    state.quest.feedback = null;
+    render();
+    const refreshes = await Promise.allSettled([loadQuestData(), loadFinancialDashboard()]);
+    if (refreshes[0].status === "rejected") {
+      window.setTimeout(() => void refreshQuestData(), 1500);
+    }
     showNotice("Reward added to wallet");
     render();
   }).catch((error) => showError(error.message));
@@ -10102,6 +10122,23 @@ function renderDigitalServiceDeliveryDetails(delivery = {}, link = "") {
   return [activationField, renderedFields, renderedItems].filter(Boolean).join("");
 }
 
+function renderAutomaticDeliveryDetails(delivery = {}) {
+  const items = normalizeDeliveryItemsForDisplay(delivery);
+  if (!items.length) {
+    return `<pre class="digital-delivery-box digital-auto-delivery-raw">${escapeHtml(formatDeliveryValue(delivery))}</pre>`;
+  }
+  return items.map((item, index) => {
+    const raw = formatDeliveryValue(item.rawItem ?? item.value ?? item);
+    return `
+      <div class="digital-delivery-account digital-auto-delivery-item">
+        <p class="modal-eyebrow neutral">Delivery ${index + 1}</p>
+        <pre class="digital-auto-delivery-raw">${escapeHtml(raw)}</pre>
+        ${renderDeliveryCopyButton(raw, "Copy Full Delivery")}
+      </div>
+    `;
+  }).join("");
+}
+
 function extractFirstUrl(value) {
   if (typeof value === "string") {
     const text = value.trim();
@@ -10136,7 +10173,10 @@ function renderDigitalServiceDelivery(delivery, order = {}) {
   if (!delivery) {
     return `<p class="muted-copy">Delivery is processing. You will get a notification when it is ready.</p>`;
   }
-  const details = renderDigitalServiceDeliveryDetails(delivery, link);
+  const automatic = String(order.fulfillmentMode || "automatic").toLowerCase() !== "manual";
+  const details = automatic
+    ? renderAutomaticDeliveryDetails(delivery)
+    : renderDigitalServiceDeliveryDetails(delivery, link);
   return `
     <section class="digital-delivery-card">
       <p class="modal-eyebrow neutral">Fulfillment successful</p>
@@ -10441,6 +10481,7 @@ function renderDigitalServiceReceiptModal() {
   const delivery = order.delivery || null;
   const deliveryLink = getDigitalDeliveryLink(delivery);
   const rawStatus = String(order.status || "processing").toUpperCase();
+  const paymentConfirmed = String(order.paymentStatus || "").toLowerCase() === "paid";
   const displayStatus = deliveryLink && ["CREATED", "PAYMENT_RESERVED", "SUBMITTED", "PROCESSING", "PENDING", "PAID"].includes(rawStatus)
     ? "delivered"
     : order.status || "processing";
@@ -10448,8 +10489,9 @@ function renderDigitalServiceReceiptModal() {
     <div class="modal-backdrop">
       <div class="modal-card action-modal-card digital-service-receipt-modal">
         <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
-        <p class="modal-eyebrow neutral">Receipt</p>
-        <h3>${escapeHtml(formatWalletRequestStatus(displayStatus))}</h3>
+        <p class="modal-eyebrow neutral">${paymentConfirmed ? "Payment successful" : "Receipt"}</p>
+        <h3>${escapeHtml(paymentConfirmed && !delivery ? "Your order is being processed" : formatWalletRequestStatus(displayStatus))}</h3>
+        ${paymentConfirmed && !delivery ? `<p class="modal-text">Your payment has been confirmed. We will notify you when your order is ready.</p>` : ""}
         <div class="action-metric-stack">
           <div class="action-metric"><span>Service</span><strong>${escapeHtml(stripLeadingSupplierMetadata(order.productName || ""))}</strong></div>
           <div class="action-metric"><span>Amount</span><strong>${formatNaira(order.amountCharged || 0)}</strong></div>

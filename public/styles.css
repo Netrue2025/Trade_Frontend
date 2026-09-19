@@ -3004,6 +3004,14 @@ body[data-theme="dark"] .digital-category-row button.active {
   overflow-wrap: anywhere;
 }
 
+.digital-auto-delivery-raw {
+  margin: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .digital-delivery-card {
   display: grid;
   gap: 10px;
