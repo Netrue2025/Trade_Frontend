@@ -238,12 +238,26 @@ test("Structured post-payment and global Order Ready flows remain separate from 
   assert.match(app, /data-delivery-secret-toggle/);
 });
 
-test("Manual order history opens the successful delivery and OTP experience", () => {
+test("Manual order history preserves fulfillment priority and saved post-payment instructions", () => {
   const app = readPublicFile("app.js");
   assert.match(app, /function renderDigitalManualOrderSuccessModal/);
-  assert.match(app, /isManualDigitalServiceOrder\(order\)/);
+  assert.match(app, /function isDigitalOrderFulfilled/);
+  assert.match(app, /function hasSavedPostPaymentExperience/);
+  assert.match(app, /function shouldShowManualPostPaymentHistory/);
+  assert.match(app, /function getDigitalOrderHistoryActionModal/);
+  assert.match(app, /isManualDigitalServiceOrder\(order\)[\s\S]*isPaidDigitalOrder\(order\)[\s\S]*!isDigitalOrderFulfilled\(order\)[\s\S]*hasSavedPostPaymentExperience\(order\)/);
   assert.match(app, /type: "digital-manual-order-success"/);
-  assert.match(app, /renderDigitalServiceDelivery\(order\.delivery, order\)/);
+  assert.match(app, /type: "digital-service-receipt"/);
+  assert.match(app, /renderPostPaymentBlocks\(order\)/);
+  assert.match(app, /Your payment is confirmed\. This manual order is awaiting fulfillment\./);
+  assert.doesNotMatch(app, /Your manual order was completed successfully\./);
+});
+
+test("Manual history OTP stays behind the fulfilled paid-order eligibility rule", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /function canRequestDigitalOtp/);
+  assert.match(app, /isPaidDigitalOrder\(order\)[\s\S]*isDigitalOrderFulfilled\(order\)[\s\S]*order\.otpSupport\?\.mode === "admin_request"/);
+  assert.match(app, /canRequestDigitalOtp\(order\) \?[\s\S]*data-digital-otp-request/);
   assert.match(app, /data-digital-otp-request/);
 });
 
@@ -269,10 +283,21 @@ test("Basic and Pro membership UX uses backend plans and secure checkout flows",
 
 test("Responsive shop histories forms and transactional modals support narrow phones", () => {
   const styles = readPublicFile("styles.css");
-  assert.match(styles, /\.store-stat-strip\s*\{[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /\.store-stat-strip\s*\{[\s\S]*grid-template-columns:\s*repeat\(auto-fit, minmax\(112px, 1fr\)\)/);
   assert.match(styles, /\.digital-order-row, \.admin-store-order-row\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(styles, /max-height:\s*calc\(100dvh - 16px\)/);
   assert.match(styles, /\.post-payment-builder\s*\{[^}]*grid-template-columns:\s*1fr/s);
   assert.match(styles, /@media \(max-width: 339px\)[\s\S]*\.store-product-grid\s*\{\s*grid-template-columns:\s*1fr/);
   assert.match(styles, /overflow-wrap:\s*anywhere/);
+});
+
+test("Store product cards keep content, price and share controls in normal responsive flow", () => {
+  const app = readPublicFile("app.js");
+  const styles = readPublicFile("styles.css");
+  assert.match(app, /store-product-media[\s\S]*store-product-badges[\s\S]*store-origin-badge[\s\S]*store-stock-badge[\s\S]*store-product-footer[\s\S]*renderDigitalProductPrice[\s\S]*store-product-actions/s);
+  assert.match(styles, /\.digital-product-card\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column/s);
+  assert.match(styles, /\.store-product-badges\s*\{[^}]*flex-wrap:\s*wrap/s);
+  assert.match(styles, /\.store-product-footer\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto[^}]*margin-top:\s*auto/s);
+  assert.match(styles, /\.store-product-share\s*\{(?![^}]*position:\s*absolute)[^}]*flex:\s*0 0 36px/s);
+  assert.match(styles, /@media \(max-width: 339px\)[\s\S]*\.store-product-grid\s*\{\s*grid-template-columns:\s*1fr/);
 });

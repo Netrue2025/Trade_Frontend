@@ -9719,10 +9719,7 @@ async function requeryDigitalServiceOrder(orderId) {
         ? payload.order
         : order
     );
-    state.actionModal = {
-      type: "digital-service-receipt",
-      order: payload.order,
-    };
+    state.actionModal = getDigitalOrderHistoryActionModal(payload.order);
     await loadFinancialDashboard();
     render();
     showNotice(payload.order?.status === "delivered" ? "Order delivery is ready." : "Order is still processing.");
@@ -9917,6 +9914,41 @@ function renderDigitalServiceOrderRow(order = {}) {
       </div>
     </div>
   `;
+}
+
+function isDigitalOrderFulfilled(order = {}) {
+  return String(order.status || "").toLowerCase() === "delivered"
+    || String(order.fulfillmentStatus || "").toLowerCase() === "fulfilled"
+    || !!order.delivery;
+}
+
+function hasSavedPostPaymentExperience(order = {}) {
+  return Array.isArray(order.postPaymentExperience) && order.postPaymentExperience.length > 0;
+}
+
+function isPaidDigitalOrder(order = {}) {
+  return String(order.paymentStatus || "").toLowerCase() === "paid";
+}
+
+function canRequestDigitalOtp(order = {}) {
+  return isPaidDigitalOrder(order)
+    && isDigitalOrderFulfilled(order)
+    && order.otpSupport?.mode === "admin_request"
+    && order.otpSupport?.enabled !== false;
+}
+
+function shouldShowManualPostPaymentHistory(order = {}) {
+  return isManualDigitalServiceOrder(order)
+    && isPaidDigitalOrder(order)
+    && !isDigitalOrderFulfilled(order)
+    && hasSavedPostPaymentExperience(order);
+}
+
+function getDigitalOrderHistoryActionModal(order = {}) {
+  if (shouldShowManualPostPaymentHistory(order)) {
+    return { type: "digital-manual-order-success", order };
+  }
+  return { type: "digital-service-receipt", order };
 }
 
 function getDigitalOrderFilter(order = {}) {
@@ -10184,10 +10216,22 @@ function isManualDigitalServiceOrder(order = {}) {
 
 function renderDigitalManualOrderSuccessModal() {
   const order = state.actionModal.order || {};
-  return `<div class="modal-backdrop"><div class="modal-card action-modal-card digital-service-receipt-modal order-ready-modal">
-    <button class="modal-close" id="action-modal-close-btn" type="button">x</button><div class="order-success-mark">${icon("check")}</div>
-    <p class="modal-eyebrow neutral">Successful</p><h3>${escapeHtml(order.productName || "Your order")}</h3>
-    <p class="modal-text">Your manual order was completed successfully.</p>${renderDigitalServiceDelivery(order.delivery, order)}
+  const reference = order.requestId || order.id || "";
+  return `<div class="modal-backdrop"><div class="modal-card action-modal-card post-payment-modal digital-service-receipt-modal order-ready-modal">
+    <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+    <div class="order-success-mark">${icon("check")}</div>
+    <p class="modal-eyebrow neutral">Payment successful</p>
+    ${order.imageUrl ? `<img class="post-payment-product-image" src="${escapeHtml(order.imageUrl)}" alt="">` : ""}
+    <h3>${escapeHtml(order.productName || "Your order")}</h3>
+    <p class="modal-text">Your payment is confirmed. This manual order is awaiting fulfillment.</p>
+    <div class="action-metric-stack">
+      <div class="action-metric"><span>Status</span><strong>Awaiting fulfillment</strong></div>
+      <div class="action-metric"><span>Amount</span><strong>${formatNaira(order.amountCharged || 0)}</strong></div>
+      <div class="action-metric"><span>Payment</span><strong>${escapeHtml(order.paymentMethod === "paystack" ? "Paystack" : "NetrueFi Wallet")}</strong></div>
+      <div class="action-metric"><span>Ref</span><strong>${escapeHtml(reference)}</strong></div>
+    </div>
+    <section class="post-payment-blocks">${renderPostPaymentBlocks(order)}</section>
+    ${canRequestDigitalOtp(order) ? `<section class="digital-otp-section"><strong>Verification</strong><button class="button-primary" data-digital-otp-request="${escapeHtml(order.id || "")}" type="button">Get OTP</button></section>` : ""}
     <div class="modal-actions single"><button class="button-primary" id="action-modal-cancel-btn" type="button">Done</button></div>
   </div></div>`;
 }
@@ -14486,19 +14530,23 @@ function renderStoreProductCard(product = {}, featured = false) {
   return `
     <article class="digital-product-card store-product-card ${featured ? "featured" : ""} ${purchasable ? "" : "is-unavailable"}">
       <button class="store-product-open" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${purchasable ? "" : "disabled"} aria-label="View ${escapeHtml(getDigitalProductDisplayName(product))}">
-      <span class="store-product-media">${renderDigitalServiceImage(product)}</span>
-      <span class="store-product-body">
-        <small class="store-origin-badge">${escapeHtml(getDigitalProductStoreBadgeLabel(product))}</small>
-        <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
-        <span>${escapeHtml(product.description || product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
-        ${!purchasable ? `<em class="store-stock-badge">${escapeHtml(getDigitalProductAvailabilityLabel(product))}</em>` : ""}
-      </span>
+        <span class="store-product-media">${renderDigitalServiceImage(product)}</span>
+        <span class="store-product-body">
+          <span class="store-product-badges">
+            <small class="store-origin-badge">${escapeHtml(getDigitalProductStoreBadgeLabel(product))}</small>
+            ${!purchasable ? `<em class="store-stock-badge">${escapeHtml(getDigitalProductAvailabilityLabel(product))}</em>` : ""}
+          </span>
+          <strong>${escapeHtml(getDigitalProductDisplayName(product))}</strong>
+          <span>${escapeHtml(product.description || product.planLabel || product.deliveryLabel || product.storeName || "Instant delivery")}</span>
+        </span>
+      </button>
       <span class="store-product-footer">
         ${renderDigitalProductPrice(product, 1, { compact: true })}
-        <em>${purchasable ? (state.user ? "Buy" : "Login") : "Unavailable"}</em>
+        <span class="store-product-actions">
+          <button class="store-product-buy" data-digital-service-product="${escapeHtml(product.id)}" type="button" ${purchasable ? "" : "disabled"}>${purchasable ? (state.user ? "Buy" : "Login") : "Unavailable"}</button>
+          <button class="store-product-share" data-digital-product-share="${escapeHtml(product.id)}" type="button" aria-label="Share ${escapeHtml(getDigitalProductDisplayName(product))}" title="Share">${icon("send")}</button>
+        </span>
       </span>
-      </button>
-      <button class="store-product-share" data-digital-product-share="${escapeHtml(product.id)}" type="button" aria-label="Share ${escapeHtml(getDigitalProductDisplayName(product))}" title="Share">${icon("send")}</button>
     </article>
   `;
 }
@@ -15606,9 +15654,7 @@ function bindDashboardActions() {
         showError("Purchase receipt is not available yet.");
         return;
       }
-      state.actionModal = isManualDigitalServiceOrder(order)
-        ? { type: "digital-manual-order-success", order }
-        : { type: "digital-service-receipt", order };
+      state.actionModal = getDigitalOrderHistoryActionModal(order);
       render();
     });
   });
