@@ -254,6 +254,8 @@ const state = {
     view: "play",
     loading: false,
     feedback: null,
+    result: null,
+    answerSubmitting: false,
     draft: null,
   },
   homePromoSlide: 0,
@@ -310,6 +312,7 @@ let tradeSymbolRefreshTimer = null;
 let signalAlertAudio = null;
 let signalAudioUnlockHandler = null;
 let questCountdownTimer = null;
+let questQuestionTimer = null;
 let questDataRequestVersion = 0;
 let homePromoTimer = null;
 let depositStatusTimer = null;
@@ -1671,8 +1674,40 @@ function syncQuestCountdownTimer() {
       void refreshQuestData();
       return;
     }
-    render();
+    const countdown = document.querySelector(".quest-countdown-ring span");
+    if (countdown) countdown.textContent = formatCountdownTime(nextMs);
   }, 1000);
+}
+
+function syncQuestQuestionTimer() {
+  const session = state.quest.status?.activeSession;
+  const shouldTick = !!(
+    state.user?.role === "user" &&
+    state.activeTab === "quest" &&
+    ["IN_PROGRESS", "STARTED"].includes(String(session?.status || "").toUpperCase()) &&
+    session?.stageDeadlineAt
+  );
+  if (!shouldTick) {
+    if (questQuestionTimer) window.clearInterval(questQuestionTimer);
+    questQuestionTimer = null;
+    return;
+  }
+  const update = () => {
+    const activeSession = state.quest.status?.activeSession;
+    const timer = document.getElementById("quest-question-timer");
+    if (!activeSession?.stageDeadlineAt || !timer) return;
+    const remainingMs = Math.max(0, Date.parse(activeSession.stageDeadlineAt) - Date.now());
+    timer.textContent = `${Math.ceil(remainingMs / 1000)}s`;
+    timer.classList.toggle("urgent", remainingMs <= 10000);
+    if (remainingMs <= 0 && !state.quest.answerSubmitting) {
+      window.clearInterval(questQuestionTimer);
+      questQuestionTimer = null;
+      void submitQuestAnswer({ timedOut: true });
+    }
+  };
+  if (questQuestionTimer) window.clearInterval(questQuestionTimer);
+  update();
+  questQuestionTimer = window.setInterval(update, 250);
 }
 
 function updateHomePromoDom() {
@@ -1722,19 +1757,19 @@ function playQuestWinSound() {
       return;
     }
     const context = new AudioContext();
-    const notes = [523.25, 659.25, 783.99, 1046.5];
+    const notes = [659.25, 783.99, 987.77, 1174.66, 1567.98];
     notes.forEach((frequency, index) => {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
-      const start = context.currentTime + index * 0.1;
-      oscillator.type = index % 2 ? "triangle" : "sine";
+      const start = context.currentTime + index * 0.075;
+      oscillator.type = index % 2 ? "sine" : "triangle";
       oscillator.frequency.setValueAtTime(frequency, start);
       gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.24);
+      gain.gain.exponentialRampToValueAtTime(0.1, start + 0.018);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.32);
       oscillator.connect(gain).connect(context.destination);
       oscillator.start(start);
-      oscillator.stop(start + 0.28);
+      oscillator.stop(start + 0.34);
     });
     window.setTimeout(() => context.close().catch(() => undefined), 900);
   } catch {
@@ -1760,6 +1795,7 @@ function normalizeQuestStage(stage = {}) {
     correctAnswer: stage.correctAnswer || options[0] || "",
     explanation: stage.explanation || "",
     hint: stage.hint || "",
+    timeLimitSeconds: Math.min(600, Math.max(5, Number(stage.timeLimitSeconds || 30))),
   };
 }
 
@@ -7656,41 +7692,68 @@ async function startQuest(questId) {
     };
     state.quest.selectedAnswer = "";
     state.quest.feedback = null;
+    state.quest.result = null;
     await loadQuestData();
     showNotice("Quest started");
     render();
   }).catch((error) => showError(error.message));
 }
 
-async function submitQuestAnswer() {
+async function finalizeQuestSession(sessionId) {
+  const payload = await api(`/api/quest/session/${encodeURIComponent(sessionId)}/complete`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  state.quest.result = {
+    passed: payload.passed !== false,
+    scorePercent: Number(payload.scorePercent ?? payload.session?.scorePercent ?? 0),
+  };
+  state.quest.status = {
+    ...(state.quest.status || {}),
+    activeSession: payload.passed === false ? null : payload.session,
+    reward: payload.reward || null,
+    cooldownRemainingMs: payload.nextQuestAvailableAt
+      ? Math.max(0, Date.parse(payload.nextQuestAvailableAt) - Date.now())
+      : Number(state.quest.status?.cooldownRemainingMs || 0),
+    nextQuestAvailableAt: payload.nextQuestAvailableAt || state.quest.status?.nextQuestAvailableAt,
+  };
+  if (payload.passed !== false) playQuestWinSound();
+  return payload;
+}
+
+async function submitQuestAnswer(options = {}) {
   const sessionId = state.quest.status?.activeSession?.id;
-  const answer = getQuestAnswerInput();
-  if (!sessionId || !answer) {
+  const timedOut = options?.timedOut === true;
+  const answer = timedOut ? null : getQuestAnswerInput();
+  if (!sessionId || (!timedOut && !answer)) {
     showError("Choose an answer.");
     return;
   }
-  await withLoading(async () => {
+  if (state.quest.answerSubmitting) return;
+  state.quest.answerSubmitting = true;
+  const submitButton = document.querySelector("[data-quest-submit-answer]");
+  if (submitButton) submitButton.disabled = true;
+  try {
     const payload = await api(`/api/quest/session/${encodeURIComponent(sessionId)}/answer`, {
       method: "POST",
-      body: JSON.stringify({ answer }),
+      body: JSON.stringify({ answer, timedOut }),
     });
-    if (!payload.correct) {
-      state.quest.feedback = { type: "wrong", text: payload.message || "Try again." };
-      state.quest.selectedAnswer = "";
-      render();
-      return;
-    }
     state.quest.selectedAnswer = "";
-    await loadQuestData();
     state.quest.feedback = {
-      type: "correct",
-      text: payload.completed ? "Complete" : "Correct",
+      type: payload.correct ? "correct" : "wrong",
+      text: payload.message || (payload.correct ? "Correct" : "Incorrect"),
     };
+    state.quest.status = { ...(state.quest.status || {}), activeSession: payload.session };
     if (payload.completed) {
-      showNotice("Quest complete. Unlock your reward.");
+      await finalizeQuestSession(sessionId);
     }
     render();
-  }).catch((error) => showError(error.message));
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    state.quest.answerSubmitting = false;
+    syncQuestQuestionTimer();
+  }
 }
 
 function getQuestAnswerInput() {
@@ -7719,13 +7782,7 @@ async function completeQuestReward() {
     return;
   }
   await withLoading(async () => {
-    await api(`/api/quest/session/${encodeURIComponent(sessionId)}/complete`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    await loadQuestData();
-    playQuestWinSound();
-    showNotice("Reward unlocked");
+    await finalizeQuestSession(sessionId);
     render();
   }).catch((error) => showError(error.message));
 }
@@ -7789,6 +7846,7 @@ function readAdminQuestStagesFromForm(form) {
       correctAnswer: row.querySelector(`[name="stageAnswer-${index}"]`)?.value.trim() || options[0] || "",
       explanation: row.querySelector(`[name="stageExplanation-${index}"]`)?.value.trim() || "",
       hint: row.querySelector(`[name="stageHint-${index}"]`)?.value.trim() || "",
+      timeLimitSeconds: Number(row.querySelector(`[name="stageTimeLimit-${index}"]`)?.value || 30),
     };
   }).filter((stage) => stage.prompt && (stage.options.length || stage.correctAnswer));
 }
@@ -12924,8 +12982,9 @@ function renderQuestStage(session) {
   return `
     <section class="mobile-card quest-card quest-game-card ${feedback ? `quest-feedback-${feedback.type}` : ""}">
       <div class="quest-stage-meta">
+        <span class="quest-points">${icon("wallet")} ${Number(session.correctAnswers || 0)} pts</span>
         <span>${session.currentStageIndex + 1}/${session.totalStages}</span>
-        <span>${escapeHtml(stage.type || "quiz")}</span>
+        <span id="quest-question-timer" class="quest-question-timer">${Math.max(0, Math.ceil((Date.parse(session.stageDeadlineAt || 0) - Date.now()) / 1000))}s</span>
       </div>
       <h3>${escapeHtml(stage.prompt || "Quest stage")}</h3>
       ${feedback ? `<div class="quest-feedback-label">${escapeHtml(feedback.text || "")}</div>` : ""}
@@ -13025,6 +13084,22 @@ function renderQuestHistoryList(view = "all") {
   `;
 }
 
+function renderQuestResult(result) {
+  const passed = result?.passed === true;
+  return `
+    <section class="quest-result-card ${passed ? "passed" : "failed"}">
+      <div class="quest-result-emoji" aria-hidden="true">${passed ? "&#127881;" : "&#128532;"}</div>
+      <p class="eyebrow">Your score</p>
+      <strong>${Number(result?.scorePercent || 0)}%</strong>
+      <h3>${passed ? "You qualify!" : "Keep learning"}</h3>
+      <p>${passed
+        ? "Great work. Your gift card has been picked at random."
+        : "Sorry you do not meet up with the minimum score to qualify for the gift card, try again after 12 hours."}</p>
+      <button class="button-primary shimmer-button" data-quest-result-continue type="button">${passed ? `${icon("gift")} View gift card` : "Done"}</button>
+    </section>
+  `;
+}
+
 function renderQuestPane() {
   const status = state.quest.status;
   const view = state.quest.view || "play";
@@ -13075,7 +13150,9 @@ function renderQuestPane() {
   const activeSession = status.activeSession;
   const reward = state.quest.rewards.find((item) => item.id === status.reward?.id) || status.reward;
   const cooldown = Number(status.cooldownRemainingMs || 0);
-  const mainContent = !activeSession && cooldown > 0
+  const mainContent = state.quest.result
+    ? renderQuestResult(state.quest.result)
+    : !activeSession && cooldown > 0
     ? renderQuestCountdownCard(cooldown)
     : !activeSession && !status.canStart && !cooldown
       ? renderQuestUnavailablePopup()
@@ -13094,7 +13171,7 @@ function renderQuestPane() {
         }
         ${activeSession && ["IN_PROGRESS", "STARTED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestStage(activeSession) : ""}
         ${activeSession && String(activeSession.status || "").toUpperCase() === "COMPLETED" ? renderQuestStage(activeSession) : ""}
-        ${activeSession && ["REWARD_ASSIGNED", "REVEALED", "REDEEMED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestRewardCard(reward || {}) : ""}
+        ${activeSession && ["REWARD_ASSIGNED", "REVEALED"].includes(String(activeSession.status || "").toUpperCase()) ? renderQuestRewardCard(reward || {}) : ""}
       `;
   return `
     <section class="quest-playfield quest-view-play">
@@ -13143,6 +13220,9 @@ function renderAdminQuestStageBuilder(stages = []) {
                 <select name="stageAnswer-${index}">
                   ${answerOptions.map((option) => `<option value="${escapeHtml(option)}" ${stage.correctAnswer === option ? "selected" : ""}>${escapeHtml(option)}</option>`).join("") || `<option value="">Add options first</option>`}
                 </select>
+              </label>
+              <label>Time (seconds)
+                <input name="stageTimeLimit-${index}" type="number" min="5" max="600" step="1" value="${escapeHtml(stage.timeLimitSeconds || 30)}" required />
               </label>
             </div>
             <div class="admin-quest-options-grid">
@@ -14973,7 +15053,9 @@ function bindDashboardActions() {
     button.addEventListener("click", () => {
       state.quest.selectedAnswer = button.dataset.questAnswer || "";
       state.quest.feedback = null;
-      render();
+      document.querySelectorAll("[data-quest-answer]").forEach((option) => option.classList.toggle("active", option === button));
+      const submit = document.querySelector("[data-quest-submit-answer]");
+      if (submit) submit.disabled = false;
     });
   });
 
@@ -15001,6 +15083,14 @@ function bindDashboardActions() {
     button.addEventListener("click", redeemQuestReward);
   });
 
+  document.querySelectorAll("[data-quest-result-continue]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.quest.result = null;
+      state.quest.feedback = null;
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-quest-view]").forEach((button) => {
     button.addEventListener("click", async () => {
       state.quest.view = button.dataset.questView || "play";
@@ -15023,7 +15113,7 @@ function bindDashboardActions() {
       event.preventDefault();
       submitAdminQuest(adminQuestForm);
     });
-    adminQuestForm.querySelectorAll("[data-admin-quest-option], [name^='stagePrompt-'], [name^='stageAnswer-'], [name^='stageExplanation-'], [name^='stageHint-']").forEach((field) => {
+    adminQuestForm.querySelectorAll("[data-admin-quest-option], [name^='stagePrompt-'], [name^='stageAnswer-'], [name^='stageExplanation-'], [name^='stageHint-'], [name^='stageTimeLimit-']").forEach((field) => {
       field.addEventListener("change", () => {
         setAdminQuestDraftFromForm(adminQuestForm);
         render();
@@ -17010,6 +17100,7 @@ function render() {
   }
   renderDashboardShell();
   syncQuestCountdownTimer();
+  syncQuestQuestionTimer();
   syncHomePromoSliderTimer();
   syncDepositStatusTimer();
   bindTradeTicketActions();

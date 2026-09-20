@@ -6257,6 +6257,8 @@ body[data-theme="dark"] .mirror-guide-pill {
 .quest-stage-meta {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 900;
@@ -6653,6 +6655,63 @@ body[data-theme="dark"] .mirror-guide-pill {
     transform: rotate(-360deg);
   }
 }
+
+.quest-points,
+.quest-question-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 64px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.quest-points svg {
+  width: 16px;
+  height: 16px;
+  color: #facc15;
+}
+
+.quest-question-timer {
+  justify-content: center;
+  color: #d1fae5;
+  font-variant-numeric: tabular-nums;
+}
+
+.quest-question-timer.urgent {
+  color: #ffffff;
+  background: #dc2626;
+  animation: questTimerPulse 700ms ease-in-out infinite alternate;
+}
+
+.quest-result-card {
+  width: min(100%, 440px);
+  min-height: 340px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 18px;
+  color: #ffffff;
+  background: rgba(8, 38, 49, 0.9);
+}
+
+.quest-result-card > * { margin: 0; }
+.quest-result-card > strong { font-size: 2.6rem; color: #facc15; }
+.quest-result-card > p:not(.eyebrow) { max-width: 34ch; line-height: 1.55; }
+.quest-result-emoji { font-size: 4.5rem; line-height: 1; }
+.quest-result-card.passed .quest-result-emoji { animation: questEmojiJump 850ms ease-in-out infinite; }
+.quest-result-card.failed .quest-result-emoji { animation: questEmojiSad 1.4s ease-in-out infinite; }
+
+@keyframes questTimerPulse { to { transform: scale(1.06); } }
+@keyframes questEmojiJump { 50% { transform: translateY(-16px) rotate(8deg); } }
+@keyframes questEmojiSad { 50% { transform: translateY(5px) rotate(-5deg); } }
 
 .app-screen-quest {
   width: 100%;
