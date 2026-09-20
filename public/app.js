@@ -3625,6 +3625,13 @@ async function loadQuestData() {
   if (requestVersion !== questDataRequestVersion) {
     return false;
   }
+  const rewardStatus = String(statusPayload.reward?.status || "").toUpperCase();
+  if (statusPayload.activeSession && ["USED", "REDEEMED"].includes(rewardStatus)) {
+    statusPayload.activeSession = null;
+    statusPayload.cooldownRemainingMs = statusPayload.nextQuestAvailableAt
+      ? Math.max(0, Date.parse(statusPayload.nextQuestAvailableAt) - Date.now())
+      : 0;
+  }
   state.quest.status = statusPayload;
   state.quest.rewards = rewardsPayload.rewards || [];
   state.quest.history = historyPayload.history || [];
