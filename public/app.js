@@ -376,9 +376,9 @@ function shouldRefreshTradeLive() {
     return false;
   }
   if (state.user.role === "admin") {
-    return ["home", "history", "settings", "signals", "store", "referral", "adminQuests"].includes(state.activeTab);
+    return ["home", "history", "signals"].includes(state.activeTab);
   }
-  return ["home", "history", "signals", "store", "referral", "quest", "plans"].includes(state.activeTab);
+  return ["home", "history", "signals"].includes(state.activeTab);
 }
 
 function getExchangeLabel(exchange) {
@@ -584,14 +584,9 @@ function refreshSettingsPaneDom() {
   if (!state.user || state.activeTab !== "settings") {
     return;
   }
-
-  if (shouldDeferSettingsRender()) {
-    state.settingsRenderDeferred = true;
-    return;
-  }
-
-  state.settingsRenderDeferred = false;
-  render();
+  document.querySelectorAll("[data-settings-live-status]").forEach((node) => {
+    node.textContent = state.settingsLive.connected ? "Live via websocket" : state.settingsLive.statusMessage;
+  });
 }
 
 function shouldDeferSettingsRender() {
@@ -6796,6 +6791,38 @@ function refreshTradeSectionsDom() {
   refreshTradeDom();
 }
 
+function bindLiveDashboardControls() {
+  document.querySelectorAll("[data-balance-privacy-toggle]").forEach((button) => {
+    button.onclick = () => {
+      state.hideBalanceAmounts = !state.hideBalanceAmounts;
+      localStorage.setItem(BALANCE_PRIVACY_STORAGE_KEY, state.hideBalanceAmounts ? "true" : "false");
+      refreshLiveDashboardDom();
+    };
+  });
+  const depositButton = document.getElementById("netrue-deposit-btn");
+  if (depositButton) depositButton.onclick = () => openWalletActionModal("deposit");
+  const withdrawButton = document.getElementById("netrue-withdraw-btn");
+  if (withdrawButton) withdrawButton.onclick = () => openWalletActionModal("withdraw");
+  const balancesToggle = document.getElementById("toggle-balances-btn");
+  if (balancesToggle) {
+    balancesToggle.onclick = () => {
+      state.showAllBalances = !state.showAllBalances;
+      refreshLiveDashboardDom();
+    };
+  }
+}
+
+function refreshLiveDashboardDom() {
+  if (!state.user || state.activeTab !== "home") return;
+  const summaryHost = document.querySelector("[data-live-summary-host]");
+  if (summaryHost) summaryHost.innerHTML = renderSummaryCard();
+  const balancesHost = document.querySelector("[data-live-balances-host]");
+  if (balancesHost) balancesHost.innerHTML = renderBalancesSection();
+  bindLiveDashboardControls();
+  refreshTradeDom();
+  refreshWatchlistDom();
+}
+
 async function refreshTradeMarketData() {
   if (!state.user) {
     return;
@@ -6821,7 +6848,8 @@ async function refreshTradeMarketData() {
         },
       ])
     );
-    render();
+    refreshTradeDom();
+    refreshWatchlistDom();
   } catch {
     // keep the current snapshot if the lightweight live refresh fails
   }
@@ -7039,11 +7067,7 @@ async function refreshDashboardLiveData() {
       : [refreshTradeMarketData(), refreshTradeStatusData(), loadFinancialDashboard()];
   tradeRefreshPromise = Promise.allSettled(refreshTasks).finally(() => {
     tradeRefreshPromise = null;
-    if (state.activeTab === "settings") {
-      refreshSettingsPaneDom();
-    } else {
-      render();
-    }
+    refreshLiveDashboardDom();
   });
 
   return tradeRefreshPromise;
@@ -10789,7 +10813,7 @@ function renderAdminHomeDashboard() {
             <p class="muted-copy">Live balances</p>
           </div>
         </div>
-        ${renderBalancesSection()}
+        <div data-live-balances-host>${renderBalancesSection()}</div>
       </section>
       <section class="admin-dashboard-section">
         <div class="section-head">
@@ -13679,7 +13703,7 @@ function renderSettingsPane() {
       <div class="card-list">
         ${renderCurrentUserWalletSummary()}
       </div>
-      <p class="muted-copy">${escapeHtml(settingsLiveLabel)}</p>
+      <p class="muted-copy" data-settings-live-status>${escapeHtml(settingsLiveLabel)}</p>
       <button class="button-secondary" data-tab="plans" type="button">${state.membership.summary?.plan === "PRO" ? "Manage Pro Plan" : "View Membership Plans"}</button>
     `;
     const supportPanel = `
@@ -13903,7 +13927,7 @@ function renderSettingsPane() {
                 <div>
                   <h3>Account Summary</h3>
                   <p class="muted-copy">Your linked account and mirror status.</p>
-                  <p class="muted-copy">${settingsLiveLabel}</p>
+                  <p class="muted-copy" data-settings-live-status>${settingsLiveLabel}</p>
                 </div>
               </div>
               <div class="card-list">
@@ -14564,7 +14588,7 @@ function renderHomePane() {
 
     return `
       ${renderMarketModeSwitch()}
-      ${renderSummaryCard()}
+      <div data-live-summary-host>${renderSummaryCard()}</div>
       ${
         state.user.role === "user"
           ? userHomeContent

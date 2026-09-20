@@ -324,3 +324,13 @@ test("Store product cards keep content, price and share controls in normal respo
   assert.match(styles, /\.store-product-share\s*\{(?![^}]*position:\s*absolute)[^}]*flex:\s*0 0 36px/s);
   assert.match(styles, /@media \(max-width: 339px\)[\s\S]*\.store-product-grid\s*\{\s*grid-template-columns:\s*1fr/);
 });
+
+test("live polling never rebuilds admin editors or unrelated pages", () => {
+  const app = readPublicFile("app.js");
+  assert.match(app, /return \["home", "history", "signals"\]\.includes\(state\.activeTab\)/);
+  assert.doesNotMatch(app, /\["home", "history", "settings", "signals", "store", "referral", "adminQuests"\]/);
+  assert.match(app, /function refreshLiveDashboardDom\(\)[\s\S]*state\.activeTab !== "home"/);
+  assert.match(app, /tradeRefreshPromise = Promise\.allSettled\(refreshTasks\)\.finally\(\(\) => \{[\s\S]*refreshLiveDashboardDom\(\)/);
+  assert.match(app, /function refreshSettingsPaneDom\(\)[\s\S]*data-settings-live-status/);
+  assert.doesNotMatch(app, /function refreshSettingsPaneDom\(\)[\s\S]{0,500}\brender\(\)/);
+});
