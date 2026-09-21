@@ -12,10 +12,8 @@ const EXCHANGE_OPTIONS = [
   { id: "bybit", label: "Bybit" },
   { id: "binance", label: "Binance" },
 ];
-const WATCHLIST_REFRESH_INTERVAL_MS = 30000;
-const TRADE_REFRESH_INTERVAL_MS = 30000;
+const LIVE_STATE_FALLBACK_INTERVAL_MS = 30000;
 const FUTURES_REFRESH_INTERVAL_MS = 180000;
-const SIGNAL_CHART_REFRESH_INTERVAL_MS = 5000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
@@ -138,6 +136,9 @@ const state = {
   isLoading: false,
   modalError: null,
   actionModal: null,
+  liveState: { version: 0, connected: false, updatedAt: null },
+  liveStateSocket: null,
+  liveStateRetry: null,
   menuSheetOpen: false,
   notice: null,
   balances: [],
@@ -985,7 +986,7 @@ function initPwaExperience() {
     void checkForPwaUpdate();
     render();
     if (state.user) {
-      void loadDashboardData();
+      void refreshLiveState();
     }
     window.setTimeout(() => {
       state.pwa.onlineNoticeVisible = false;
@@ -998,10 +999,12 @@ function initPwaExperience() {
   });
   window.addEventListener("focus", () => {
     void checkForPwaUpdate();
+    if (state.user) void refreshLiveState();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       void checkForPwaUpdate();
+      if (state.user) void refreshLiveState();
     }
   });
   void registerNetrueServiceWorker();
@@ -1604,7 +1607,7 @@ function syncDepositStatusTimer() {
     return;
   }
   depositStatusTimer = window.setInterval(() => {
-    void refreshDepositFlowStatus({ silent: true });
+    if (isDocumentVisible()) void refreshDepositFlowStatus({ silent: true });
   }, 15000);
 }
 
@@ -2597,12 +2600,6 @@ function stopSignalChartRefreshTimer() {
 
 function startSignalChartRefreshTimer() {
   stopSignalChartRefreshTimer();
-  if (state.actionModal?.type !== "signal-chart") {
-    return;
-  }
-  signalChartRefreshTimer = setInterval(() => {
-    void refreshSignalChartModal(true);
-  }, SIGNAL_CHART_REFRESH_INTERVAL_MS);
 }
 
 async function refreshSignalChartModal(silent = false) {
@@ -3491,7 +3488,7 @@ async function loadFinancialDashboard() {
   }
   const endpoint = state.user.role === "admin" ? "/api/admin/dashboard" : "/api/user/dashboard";
   const url = state.user.role === "admin"
-    ? `${endpoint}?exchange=${encodeURIComponent(getAdminDashboardExchange())}&refresh=1`
+    ? `${endpoint}?exchange=${encodeURIComponent(getAdminDashboardExchange())}`
     : endpoint;
   state.financialDashboard = await api(url);
   state.notifications = state.financialDashboard?.notifications || [];
@@ -3499,8 +3496,6 @@ async function loadFinancialDashboard() {
   if (state.user.role === "admin" && state.financialDashboard?.accountSnapshot) {
     applyAccountSnapshot(state.financialDashboard.accountSnapshot);
   }
-  await loadVtuSnapshot().catch(() => undefined);
-  await loadDigitalServicesSnapshot().catch(() => undefined);
 }
 
 async function refreshTradingAccountSnapshot({ force = false, silent = false } = {}) {
@@ -6937,12 +6932,6 @@ function connectWatchSocket() {
   disconnectWatchSocket();
   hydrateWatchlistFromSeed();
   refreshWatchlistDom();
-  state.socketRefreshTimer = setInterval(() => {
-    if (!shouldRefreshWatchlistLive()) {
-      return;
-    }
-    void refreshWatchlistFeed();
-  }, WATCHLIST_REFRESH_INTERVAL_MS);
 }
 
 function disconnectWatchSocket() {
@@ -6950,15 +6939,112 @@ function disconnectWatchSocket() {
   state.socketRefreshTimer = null;
 }
 
+function applyLiveState(payload = {}) {
+  const active = [...(payload.openTrades || []), ...(payload.queueTrades || [])];
+  const activeIds = new Set(active.map((trade) => trade.id));
+  state.trades = [...active, ...(state.trades || []).filter((trade) => !activeIds.has(trade.id) && !["OPEN", "PENDING"].includes(String(trade.lifecycleStatus || "")))];
+  state.liveState = {
+    ...state.liveState,
+    version: Number(payload.version || state.liveState.version || 0),
+    updatedAt: payload.updatedAt || new Date().toISOString(),
+  };
+  if (state.financialDashboard?.totalBalance && payload.balance) {
+    state.financialDashboard.totalBalance = {
+      ...state.financialDashboard.totalBalance,
+      usdt: String(payload.balance.totalUsdtEquivalent || "0"),
+      ngnEquivalent: String(payload.balance.totalNgnEquivalent || "0"),
+      lockedUsdt: String(payload.balance.lockedUsdtEquivalent || "0"),
+      lockedNgnEquivalent: String(payload.balance.lockedNgnEquivalent || "0"),
+      usdtToNgnRate: String(payload.balance.usdtToNgnRate || state.financialDashboard.totalBalance.usdtToNgnRate || "0"),
+    };
+    state.financialDashboard.wallets = (state.financialDashboard.wallets || []).map((wallet) => wallet.currency === "NGN"
+      ? { ...wallet, availableBalance: String(payload.balance.ngn || "0"), lockedBalance: String(payload.balance.ngnLocked || "0") }
+      : wallet.currency === "USDT"
+        ? { ...wallet, availableBalance: String(payload.balance.usdt || "0"), lockedBalance: String(payload.balance.usdtLocked || "0") }
+        : wallet);
+  }
+  state.loadingTrades = false;
+  refreshLiveDashboardDom();
+}
+
+async function refreshLiveState() {
+  if (!state.user || !isDocumentVisible()) return null;
+  if (tradeRefreshPromise) return tradeRefreshPromise;
+  tradeRefreshPromise = api("/api/live-state")
+    .then((payload) => {
+      applyLiveState(payload);
+      return payload;
+    })
+    .finally(() => { tradeRefreshPromise = null; });
+  return tradeRefreshPromise;
+}
+
+async function refreshPendingDigitalOrderEvents() {
+  if (!state.user || state.user.role !== "user" || !isDocumentVisible()) return;
+  const payload = await api("/api/digital-services/pending-status");
+  const currentById = new Map((state.digitalServices.orders || []).map((order) => [order.id, order]));
+  const changed = (payload.orders || []).filter((item) => {
+    const current = currentById.get(item.id);
+    return item.ready || item.otpStatus === "responded" || (current && current.updatedAt !== item.updatedAt);
+  });
+  await Promise.all(changed.map(async (item) => {
+    const result = await api(`/api/digital-services/orders/${encodeURIComponent(item.id)}/status`);
+    if (result.order) replaceDigitalOrder(result.order);
+  }));
+  if (changed.length) {
+    syncDigitalOtpExperience();
+    render();
+  }
+}
+
+function disconnectLiveState() {
+  clearTimeout(state.liveStateRetry);
+  state.liveStateRetry = null;
+  if (state.liveStateSocket) {
+    state.liveStateSocket._manualClose = true;
+    state.liveStateSocket.close();
+    state.liveStateSocket = null;
+  }
+  state.liveState.connected = false;
+  stopTradeRefreshTimer();
+}
+
+function connectLiveState() {
+  if (!state.user || typeof WebSocket === "undefined") return;
+  if (state.liveStateSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(state.liveStateSocket.readyState)) return;
+  const socket = new WebSocket(toWebSocketUrl("/ws/live-state"));
+  state.liveStateSocket = socket;
+  socket.onopen = () => {
+    state.liveState.connected = true;
+    stopTradeRefreshTimer();
+    void refreshLiveState();
+    void refreshPendingDigitalOrderEvents().catch(() => undefined);
+  };
+  socket.onmessage = (event) => {
+    try {
+      const message = JSON.parse(event.data || "{}");
+      if (message.type === "live_state_changed" && Number(message.version || 0) >= Number(state.liveState.version || 0)) {
+        void refreshLiveState();
+        void refreshPendingDigitalOrderEvents().catch(() => undefined);
+      }
+    } catch {}
+  };
+  socket.onclose = () => {
+    if (state.liveStateSocket === socket) state.liveStateSocket = null;
+    state.liveState.connected = false;
+    startTradeRefreshTimer();
+    if (!socket._manualClose && state.user) {
+      state.liveStateRetry = setTimeout(connectLiveState, 5000);
+    }
+  };
+  socket.onerror = () => socket.close();
+}
+
 function startTradeRefreshTimer() {
   clearInterval(state.tradeRefreshTimer);
-  const refreshIntervalMs = isFuturesMode() ? FUTURES_REFRESH_INTERVAL_MS : TRADE_REFRESH_INTERVAL_MS;
   state.tradeRefreshTimer = setInterval(() => {
-    if (!shouldRefreshTradeLive()) {
-      return;
-    }
-    void refreshDashboardLiveData();
-  }, refreshIntervalMs);
+    if (!state.liveState.connected && isDocumentVisible()) void refreshLiveState();
+  }, LIVE_STATE_FALLBACK_INTERVAL_MS);
 }
 
 function stopTradeRefreshTimer() {
@@ -7233,6 +7319,7 @@ async function loadFuturesDashboard(options = {}) {
 async function loadDashboardData() {
   if (!state.user) {
     disconnectWatchSocket();
+    disconnectLiveState();
     disconnectSignalStream();
     disconnectSettingsUsersSocket();
     stopSignalChartRefreshTimer();
@@ -7249,16 +7336,12 @@ async function loadDashboardData() {
   scheduleInstallPrompt();
   scheduleNotificationPrompt();
   connectSignalStream();
-  if (state.activeTab === "settings") {
-    connectSettingsUsersSocket();
-  } else {
-    disconnectSettingsUsersSocket();
-  }
-  void loadSignalsSnapshot({ silent: true }).catch(() => {
-    updateSignalFeed({
-      statusMessage: "Signal snapshot will appear as soon as the stream responds.",
+  disconnectSettingsUsersSocket();
+  if (state.activeTab === "signals") {
+    void loadSignalsSnapshot({ silent: true }).catch(() => {
+      updateSignalFeed({ statusMessage: "Signal snapshot will appear as soon as the stream responds." });
     });
-  });
+  }
 
   state.loadingWatchlist = !state.watchlistSeed.length;
   const accountConnected = state.user.role === "admin"
@@ -7280,7 +7363,7 @@ async function loadDashboardData() {
       state.loadingFinancial = false;
       render();
     });
-  const adminFinancePromise = loadAdminFinanceQueues()
+  const adminFinancePromise = state.user.role === "admin" && state.activeTab === "history" ? loadAdminFinanceQueues()
     .then(() => {
       state.loadingAdminFinance = false;
       render();
@@ -7288,33 +7371,33 @@ async function loadDashboardData() {
     .catch(() => {
       state.loadingAdminFinance = false;
       render();
-    });
-  const questPromise = (state.user.role === "admin" ? loadAdminQuestData() : loadQuestData())
+    }) : Promise.resolve();
+  const questPromise = state.activeTab === "quest" || state.activeTab === "adminQuests" ? (state.user.role === "admin" ? loadAdminQuestData() : loadQuestData())
     .then(() => {
       render();
     })
     .catch(() => {
       render();
-    });
-  const referralPromise = state.user.role === "user"
+    }) : Promise.resolve();
+  const referralPromise = state.activeTab === "referral" ? (state.user.role === "user"
     ? loadReferralProfile().then(() => render()).catch(() => render())
-    : loadAdminReferralData().then(() => render()).catch(() => render());
+    : loadAdminReferralData().then(() => render()).catch(() => render())) : Promise.resolve();
   const digitalStorePromise = state.activeTab === "store"
     ? (state.user.role === "user"
       ? loadDigitalServiceProducts({ force: true }).then(() => render()).catch(() => render())
       : loadDigitalServicesSnapshot({ force: true }).then(() => render()).catch(() => render()))
     : Promise.resolve();
-  const settingsPromise = loadSavedExchangeSettings(getActiveExchange()).then(() => {
+  const settingsPromise = state.activeTab === "settings" ? loadSavedExchangeSettings(getActiveExchange()).then(() => {
     render();
-  });
+  }) : Promise.resolve();
   const paymentBanksPromise = state.activeTab === "settings" || state.actionModal?.type === "withdraw"
     ? loadPaymentBanks().then(() => {
         render();
       }).catch(() => [])
     : Promise.resolve();
-  const signalAutoTradePromise = loadSignalAutoTradeSettings().then(() => {
+  const signalAutoTradePromise = state.user.role === "admin" && state.activeTab === "signals" ? loadSignalAutoTradeSettings().then(() => {
     render();
-  });
+  }) : Promise.resolve();
   const futuresPromise = isFuturesMode()
     ? loadFuturesDashboard()
         .then(() => {
@@ -7386,7 +7469,7 @@ async function loadDashboardData() {
         state.loadingAccount = false;
       });
   const tradesPromise = api(`/api/trades?exchange=${encodeURIComponent(getActiveExchange())}`);
-  const usersPromise = state.user.role === "admin"
+  const usersPromise = state.user.role === "admin" && state.activeTab === "settings"
     ? api("/api/admin/users")
     : Promise.resolve({ users: [] });
 
@@ -7407,7 +7490,9 @@ async function loadDashboardData() {
   if (shouldRefreshTradeLive()) {
     void refreshTradeMarketData();
   }
-  startTradeRefreshTimer();
+  await refreshLiveState().catch(() => undefined);
+  connectLiveState();
+  if (!state.liveState.connected) startTradeRefreshTimer();
   void accountPromise;
   void settingsPromise;
   void paymentBanksPromise;
@@ -9420,7 +9505,7 @@ async function loadDigitalServicesSnapshot({ force = false } = {}) {
   }
   const [statusPayload, ordersPayload] = await Promise.all([
     api("/api/digital-services/status").catch(() => ({ settings: null })),
-    api("/api/digital-services/orders?limit=300").catch(() => ({ orders: [] })),
+    api("/api/digital-services/orders?limit=50").catch(() => ({ orders: [] })),
   ]);
   state.digitalServices.settings = statusPayload.settings || null;
   state.digitalServices.orders = ordersPayload.orders || [];
@@ -10443,7 +10528,14 @@ function syncDigitalOtpExperience() {
   const replaceable = !state.actionModal || ["digital-otp-waiting", "digital-order-ready"].includes(state.actionModal.type);
   if (otpReady && replaceable) state.actionModal = { type: "digital-otp-ready", orderId: otpReady.id };
   else if (orderReady && !state.actionModal) state.actionModal = { type: "digital-order-ready", orderId: orderReady.id };
-  if (waiting || awaiting) digitalOtpPollTimer = setInterval(() => loadDigitalServicesSnapshot({ force: true }).then(render).catch(() => undefined), waiting ? 7000 : 15000);
+  const pendingOrder = (state.digitalServices.orders || []).find((order) => order.otpRequest?.status === "waiting")
+    || (state.digitalServices.orders || []).find((order) => order.paymentStatus === "paid" && !["delivered", "refunded", "failed"].includes(String(order.status || "").toLowerCase()));
+  if ((waiting || awaiting) && pendingOrder) digitalOtpPollTimer = setInterval(() => {
+    if (!isDocumentVisible()) return;
+    api(`/api/digital-services/orders/${encodeURIComponent(pendingOrder.id)}/status`)
+      .then((payload) => { if (payload.order) replaceDigitalOrder(payload.order); render(); })
+      .catch(() => undefined);
+  }, waiting ? 10000 : 15000);
   if (state.actionModal?.type === "digital-otp-waiting") digitalOtpCountdownTimer = setInterval(render, 1000);
 }
 
@@ -14762,9 +14854,27 @@ async function navigateToTab(nextTab) {
   state.activeTab = nextTab;
   render();
   if (nextTab === "settings") {
-    connectSettingsUsersSocket();
+    await withLoading(async () => {
+      await loadSavedExchangeSettings(getActiveExchange());
+      if (state.user?.role === "admin") {
+        const payload = await api("/api/admin/users");
+        state.users = payload.users || [];
+      }
+    }).catch((error) => showError(error.message));
   } else {
     disconnectSettingsUsersSocket();
+  }
+  if (nextTab === "history") {
+    await withLoading(async () => {
+      await Promise.all([
+        loadFinancialDashboard(),
+        api(`/api/trades?exchange=${encodeURIComponent(getActiveExchange())}`).then((payload) => { state.trades = payload.trades || []; }),
+        state.user?.role === "admin" ? loadAdminFinanceQueues() : Promise.resolve(),
+      ]);
+    }).catch((error) => showError(error.message));
+  }
+  if (nextTab === "signals") {
+    await withLoading(() => loadSignalsSnapshot({ silent: true })).catch((error) => showError(error.message));
   }
   if (nextTab === "quest") {
     await withLoading(loadQuestData).catch((error) => showError(error.message));
@@ -16519,6 +16629,7 @@ function bindDashboardActions() {
       await api("/api/auth/logout", { method: "POST", body: "{}" });
       clearAuthSessionToken();
       disconnectWatchSocket();
+      disconnectLiveState();
       disconnectSignalStream();
       disconnectSettingsUsersSocket();
       stopSignalChartRefreshTimer();
@@ -17158,6 +17269,7 @@ async function bootstrap() {
     } else {
       clearAuthSessionToken();
       disconnectWatchSocket();
+      disconnectLiveState();
       disconnectSignalStream();
       disconnectSettingsUsersSocket();
       stopSignalChartRefreshTimer();
@@ -17183,6 +17295,7 @@ async function bootstrap() {
     state.user = null;
     clearAuthSessionToken();
     disconnectWatchSocket();
+    disconnectLiveState();
     disconnectSignalStream();
     disconnectSettingsUsersSocket();
     stopSignalChartRefreshTimer();
