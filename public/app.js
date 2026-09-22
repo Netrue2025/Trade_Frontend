@@ -137,8 +137,6 @@ const state = {
   modalError: null,
   actionModal: null,
   liveState: { version: 0, connected: false, updatedAt: null },
-  liveStateSocket: null,
-  liveStateRetry: null,
   menuSheetOpen: false,
   notice: null,
   balances: [],
@@ -319,6 +317,7 @@ let homePromoTimer = null;
 let depositStatusTimer = null;
 let digitalOtpPollTimer = null;
 let digitalOtpCountdownTimer = null;
+let liveStateEventTimer = null;
 const seenSignalIds = new Set();
 
 function getAuthSessionToken() {
@@ -2404,6 +2403,9 @@ async function loadSignalsSnapshot(options = {}) {
 }
 
 function disconnectSignalStream() {
+  clearTimeout(liveStateEventTimer);
+  liveStateEventTimer = null;
+  stopTradeRefreshTimer();
   if (state.signalSocket) {
     state.signalSocket._manualClose = true;
     if (typeof state.signalSocket.removeAllListeners === "function") {
@@ -2415,94 +2417,29 @@ function disconnectSignalStream() {
   updateSignalFeed({
     streamConnected: false,
   });
+  state.liveState.connected = false;
+}
+
+function scheduleLiveStateRefresh(version = 0) {
+  if (Number(version || 0) < Number(state.liveState.version || 0)) return;
+  clearTimeout(liveStateEventTimer);
+  liveStateEventTimer = setTimeout(() => {
+    liveStateEventTimer = null;
+    void refreshLiveState();
+  }, 200);
+}
+
+async function refreshNotificationHistory() {
+  if (!state.user) return;
+  const payload = await api("/api/notifications").catch(() => null);
+  if (!payload) return;
+  state.notifications = payload.notifications || [];
+  updateAppBadge();
+  if (state.showNotifications) render();
 }
 
 function connectSettingsUsersSocket() {
-  if (!state.user || state.activeTab !== "settings" || typeof WebSocket === "undefined") {
-    return;
-  }
-
-  if (state.socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(state.socket.readyState)) {
-    return;
-  }
-
-  clearTimeout(state.socketRetry);
-  const socket = new WebSocket(toWebSocketUrl("/ws/settings-users"));
-  state.socket = socket;
-
-  socket.onopen = () => {
-    state.settingsLive = {
-      connected: true,
-      statusMessage: "Realtime settings sync is live.",
-    };
-    refreshSettingsPaneDom();
-  };
-
-  socket.onmessage = (event) => {
-    try {
-      const message = JSON.parse(event.data || "{}");
-      if (message.type === "settings-users" && message.payload) {
-        if (message.payload.scope === "admin") {
-          state.users = Array.isArray(message.payload.users) ? message.payload.users : state.users;
-          if (message.payload.signalAutoTrade) {
-            state.signalAutoTrade = normalizeSignalAutoTradePayload(message.payload.signalAutoTrade);
-          }
-        } else if (message.payload.scope === "user") {
-          if (message.payload.user) {
-            state.user = normalizeUserPayload(message.payload.user);
-          }
-          if (message.payload.accountSnapshot) {
-            applyAccountSnapshot(message.payload.accountSnapshot);
-          }
-        }
-        state.settingsLive = {
-          connected: true,
-          statusMessage: "Realtime settings sync is live.",
-        };
-        refreshSettingsPaneDom();
-        return;
-      }
-
-      if (message.type === "settings-users-error") {
-        state.settingsLive = {
-          connected: false,
-          statusMessage: message.error || "Realtime settings sync hit an error.",
-        };
-        refreshSettingsPaneDom();
-      }
-    } catch {
-      state.settingsLive = {
-        connected: false,
-        statusMessage: "Realtime settings sync payload could not be parsed.",
-      };
-      refreshSettingsPaneDom();
-    }
-  };
-
-  socket.onerror = () => {
-    state.settingsLive = {
-      connected: false,
-      statusMessage: "Realtime settings sync is reconnecting...",
-    };
-    refreshSettingsPaneDom();
-  };
-
-  socket.onclose = () => {
-    if (state.socket === socket) {
-      state.socket = null;
-    }
-    state.settingsLive = {
-      connected: false,
-      statusMessage: "Realtime settings sync is reconnecting...",
-    };
-    refreshSettingsPaneDom();
-    if (!socket._manualClose && state.user && state.activeTab === "settings") {
-      clearTimeout(state.socketRetry);
-      state.socketRetry = setTimeout(() => {
-        connectSettingsUsersSocket();
-      }, 3000);
-    }
-  };
+  disconnectSettingsUsersSocket();
 }
 
 function disconnectSettingsUsersSocket() {
@@ -2544,12 +2481,27 @@ function connectSignalStream() {
   state.signalSocket = socket;
 
   socket.on("connect", () => {
+    const isReconnect = socket._hasConnected === true;
+    socket._hasConnected = true;
     socket._manualClose = false;
+    state.liveState.connected = true;
+    stopTradeRefreshTimer();
     updateSignalFeed({
       streamConnected: true,
       statusMessage: "Live signal socket connected.",
     });
+    if (isReconnect) scheduleLiveStateRefresh();
   });
+
+  socket.on("live_state_changed", (payload = {}) => scheduleLiveStateRefresh(payload.version));
+  socket.on("order_ready", (payload = {}) => refreshDigitalOrderById(payload.orderId));
+  socket.on("otp_ready", (payload = {}) => refreshDigitalOrderById(payload.orderId));
+  socket.on("deposit_updated", () => {
+    if (state.actionModal?.type === "deposit") void refreshDepositFlowStatus({ silent: true });
+    scheduleLiveStateRefresh();
+  });
+  socket.on("withdrawal_updated", () => scheduleLiveStateRefresh());
+  socket.on("notification_created", () => { void refreshNotificationHistory(); });
 
   socket.on("signals:snapshot", (payload) => {
     applySignalSnapshot(payload || {}, { silent: true });
@@ -2575,6 +2527,8 @@ function connectSignalStream() {
 
   socket.on("disconnect", (reason) => {
     const manuallyClosed = socket._manualClose || reason === "io client disconnect";
+    state.liveState.connected = false;
+    if (!manuallyClosed) startTradeRefreshTimer();
     updateSignalFeed({
       streamConnected: false,
       statusMessage: manuallyClosed ? "Signal socket offline." : "Signal socket reconnecting...",
@@ -6997,47 +6951,13 @@ async function refreshPendingDigitalOrderEvents() {
   }
 }
 
-function disconnectLiveState() {
-  clearTimeout(state.liveStateRetry);
-  state.liveStateRetry = null;
-  if (state.liveStateSocket) {
-    state.liveStateSocket._manualClose = true;
-    state.liveStateSocket.close();
-    state.liveStateSocket = null;
-  }
-  state.liveState.connected = false;
-  stopTradeRefreshTimer();
-}
-
-function connectLiveState() {
-  if (!state.user || typeof WebSocket === "undefined") return;
-  if (state.liveStateSocket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(state.liveStateSocket.readyState)) return;
-  const socket = new WebSocket(toWebSocketUrl("/ws/live-state"));
-  state.liveStateSocket = socket;
-  socket.onopen = () => {
-    state.liveState.connected = true;
-    stopTradeRefreshTimer();
-    void refreshLiveState();
-    void refreshPendingDigitalOrderEvents().catch(() => undefined);
-  };
-  socket.onmessage = (event) => {
-    try {
-      const message = JSON.parse(event.data || "{}");
-      if (message.type === "live_state_changed" && Number(message.version || 0) >= Number(state.liveState.version || 0)) {
-        void refreshLiveState();
-        void refreshPendingDigitalOrderEvents().catch(() => undefined);
-      }
-    } catch {}
-  };
-  socket.onclose = () => {
-    if (state.liveStateSocket === socket) state.liveStateSocket = null;
-    state.liveState.connected = false;
-    startTradeRefreshTimer();
-    if (!socket._manualClose && state.user) {
-      state.liveStateRetry = setTimeout(connectLiveState, 5000);
-    }
-  };
-  socket.onerror = () => socket.close();
+async function refreshDigitalOrderById(orderId) {
+  if (!orderId || !state.user || state.user.role !== "user") return;
+  const payload = await api(`/api/digital-services/orders/${encodeURIComponent(orderId)}/status`).catch(() => null);
+  if (!payload?.order) return;
+  replaceDigitalOrder(payload.order);
+  syncDigitalOtpExperience();
+  render();
 }
 
 function startTradeRefreshTimer() {
@@ -7319,7 +7239,6 @@ async function loadFuturesDashboard(options = {}) {
 async function loadDashboardData() {
   if (!state.user) {
     disconnectWatchSocket();
-    disconnectLiveState();
     disconnectSignalStream();
     disconnectSettingsUsersSocket();
     stopSignalChartRefreshTimer();
@@ -7491,7 +7410,6 @@ async function loadDashboardData() {
     void refreshTradeMarketData();
   }
   await refreshLiveState().catch(() => undefined);
-  connectLiveState();
   if (!state.liveState.connected) startTradeRefreshTimer();
   void accountPromise;
   void settingsPromise;
@@ -16629,7 +16547,6 @@ function bindDashboardActions() {
       await api("/api/auth/logout", { method: "POST", body: "{}" });
       clearAuthSessionToken();
       disconnectWatchSocket();
-      disconnectLiveState();
       disconnectSignalStream();
       disconnectSettingsUsersSocket();
       stopSignalChartRefreshTimer();
@@ -17269,7 +17186,6 @@ async function bootstrap() {
     } else {
       clearAuthSessionToken();
       disconnectWatchSocket();
-      disconnectLiveState();
       disconnectSignalStream();
       disconnectSettingsUsersSocket();
       stopSignalChartRefreshTimer();
@@ -17295,7 +17211,6 @@ async function bootstrap() {
     state.user = null;
     clearAuthSessionToken();
     disconnectWatchSocket();
-    disconnectLiveState();
     disconnectSignalStream();
     disconnectSettingsUsersSocket();
     stopSignalChartRefreshTimer();
