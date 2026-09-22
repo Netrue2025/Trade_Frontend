@@ -46,3 +46,16 @@ test("live events coalesce and socket connectivity exclusively owns fallback pol
   assert.match(app, /socket\.on\("disconnect"[\s\S]*?startTradeRefreshTimer\(\)/);
   assert.match(app, /if \(state\.signalSocket\)[\s\S]*?return;/);
 });
+
+test("admin users and trade participants load explicitly without polling", () => {
+  assert.match(app, /async function loadAdminUsers/);
+  assert.match(app, /\/api\/admin\/users\?\$\{params\}/);
+  assert.match(app, /async function openAdminUsersModal/);
+  assert.match(app, /Loading users\.\.\./);
+  assert.match(app, /data-admin-users-retry/);
+  assert.match(app, /async function openTradeParticipantsModal/);
+  assert.match(app, /\/api\/admin\/trades\/\$\{encodeURIComponent\(tradeId\)\}\/participants/);
+  assert.match(app, /Loading participants\.\.\./);
+  assert.doesNotMatch(app, /setInterval\([^)]*loadAdminUsers/);
+  assert.doesNotMatch(app, /setInterval\([^)]*openTradeParticipantsModal/);
+});

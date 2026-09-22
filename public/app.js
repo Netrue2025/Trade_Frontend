@@ -153,6 +153,11 @@ const state = {
   reportPeriod: "days",
   users: [],
   adminUserSearch: "",
+  adminUsersPage: 1,
+  adminUsersLimit: 50,
+  adminUsersTotal: 0,
+  adminUsersHasMore: false,
+  adminUsersError: "",
   adminUsersModalScrollTop: 0,
   adminDepositSettingsDraft: null,
   adminDeposits: [],
@@ -1864,6 +1869,46 @@ function clearActionModal() {
   const returnModal = state.actionModal?.returnModal || null;
   state.actionModal = returnModal;
   if (!returnModal) syncDigitalOtpExperience();
+  render();
+}
+
+async function loadAdminUsers({ page = 1, search = state.adminUserSearch } = {}) {
+  state.loadingUsers = true;
+  state.adminUsersError = "";
+  render();
+  try {
+    const params = new URLSearchParams({ page: String(page), limit: String(state.adminUsersLimit || 50) });
+    if (String(search || "").trim()) params.set("search", String(search).trim());
+    const payload = await api(`/api/admin/users?${params}`);
+    state.users = Array.isArray(payload.users) ? payload.users : [];
+    state.adminUsersPage = Number(payload.page || page);
+    state.adminUsersLimit = Number(payload.limit || state.adminUsersLimit || 50);
+    state.adminUsersTotal = Number(payload.total ?? state.users.length);
+    state.adminUsersHasMore = !!payload.hasMore;
+  } catch (error) {
+    state.adminUsersError = error.message || "Unable to load users.";
+    throw error;
+  } finally {
+    state.loadingUsers = false;
+    render();
+  }
+}
+
+async function openAdminUsersModal() {
+  state.adminUserSearch = "";
+  state.adminUsersPage = 1;
+  showActionModal({ type: "admin-users" });
+  await loadAdminUsers({ page: 1, search: "" }).catch(() => undefined);
+}
+
+async function openTradeParticipantsModal(tradeId) {
+  showActionModal({ type: "trade-joined-users", tradeId, loading: true, participants: [], error: "" });
+  try {
+    const payload = await api(`/api/admin/trades/${encodeURIComponent(tradeId)}/participants`);
+    state.actionModal = { type: "trade-joined-users", tradeId, loading: false, participants: Array.isArray(payload.participants) ? payload.participants : [], total: Number(payload.total || 0), error: "" };
+  } catch (error) {
+    state.actionModal = { type: "trade-joined-users", tradeId, loading: false, participants: [], error: error.message || "Unable to load participants." };
+  }
   render();
 }
 
@@ -5205,8 +5250,8 @@ function renderActionModal() {
     if (!trade) {
       return "";
     }
-    const users = getTradeJoinedUsers(trade);
-    const count = getTradeJoinedUsersCount(trade);
+    const users = Array.isArray(state.actionModal.participants) ? state.actionModal.participants : [];
+    const count = Number(state.actionModal.total ?? getTradeJoinedUsersCount(trade));
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card trade-joined-users-modal">
@@ -5215,7 +5260,11 @@ function renderActionModal() {
           <h3>${count.toLocaleString()} connected</h3>
           <div class="trade-joined-users-list">
             ${
-              users.length
+              state.actionModal.loading
+                ? `<p class="muted-copy">Loading participants...</p>`
+                : state.actionModal.error
+                ? `<div class="empty-state"><p>${escapeHtml(state.actionModal.error)}</p><button class="button-secondary" data-trade-participants-retry="${escapeHtml(trade.id)}" type="button">Retry</button></div>`
+                : users.length
                 ? users
                     .map(
                       (item) => `
@@ -5323,7 +5372,7 @@ function renderActionModal() {
   }
 
   if (state.actionModal.type === "admin-users") {
-    const totalUsers = Number(state.users?.length || 0);
+    const totalUsers = Number(state.adminUsersTotal || 0);
     const filteredUsers = getFilteredAdminUsers();
     const query = String(state.adminUserSearch || "");
     return `
@@ -5342,8 +5391,13 @@ function renderActionModal() {
             <span>Edit</span>
           </div>
           <div class="admin-users-modal-list">
-            ${filteredUsers.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No matching users.</p>`}
+            ${state.loadingUsers
+              ? `<p class="muted-copy">Loading users...</p>`
+              : state.adminUsersError
+              ? `<div class="empty-state"><p>${escapeHtml(state.adminUsersError)}</p><button class="button-secondary" data-admin-users-retry type="button">Retry</button></div>`
+              : filteredUsers.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No matching users.</p>`}
           </div>
+          ${!state.loadingUsers && !state.adminUsersError && totalUsers > 0 ? `<div class="modal-actions"><button class="button-secondary" data-admin-users-page="${Math.max(1, state.adminUsersPage - 1)}" type="button" ${state.adminUsersPage <= 1 ? "disabled" : ""}>Previous</button><span class="muted-copy">Page ${state.adminUsersPage}</span><button class="button-secondary" data-admin-users-page="${state.adminUsersPage + 1}" type="button" ${state.adminUsersHasMore ? "" : "disabled"}>Next</button></div>` : ""}
         </div>
       </div>
     `;
@@ -6233,11 +6287,21 @@ function bindModalActions() {
 
   const adminUserSearchInput = document.getElementById("admin-user-search-input");
   if (adminUserSearchInput) {
-    adminUserSearchInput.addEventListener("input", () => {
+    adminUserSearchInput.addEventListener("change", () => {
       state.adminUserSearch = adminUserSearchInput.value;
-      refreshAdminUsersModalList();
+      void loadAdminUsers({ page: 1, search: state.adminUserSearch }).catch(() => undefined);
     });
   }
+
+  document.querySelectorAll("[data-admin-users-page]").forEach((button) => {
+    button.addEventListener("click", () => void loadAdminUsers({ page: Number(button.dataset.adminUsersPage || 1) }).catch(() => undefined));
+  });
+  document.querySelectorAll("[data-admin-users-retry]").forEach((button) => {
+    button.addEventListener("click", () => void loadAdminUsers({ page: state.adminUsersPage }).catch(() => undefined));
+  });
+  document.querySelectorAll("[data-trade-participants-retry]").forEach((button) => {
+    button.addEventListener("click", () => void openTradeParticipantsModal(button.dataset.tradeParticipantsRetry));
+  });
 
   const historyCleanupConfirmButton = document.getElementById("admin-history-cleanup-confirm-btn");
   if (historyCleanupConfirmButton) {
@@ -14930,10 +14994,7 @@ function bindInvestmentTradeActions() {
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      showActionModal({
-        type: "trade-joined-users",
-        tradeId: button.dataset.openTradeJoinedUsers,
-      });
+      void openTradeParticipantsModal(button.dataset.openTradeJoinedUsers);
     });
   });
 
@@ -15022,7 +15083,7 @@ function bindDashboardActions() {
         await openGiftCardRedeemModal();
       }
       if (action === "users") {
-        showActionModal({ type: "admin-users" });
+        await openAdminUsersModal();
       }
     });
   });
@@ -15687,7 +15748,7 @@ function bindDashboardActions() {
 
   document.querySelectorAll("[data-admin-users-open]").forEach((button) => {
     button.addEventListener("click", () => {
-      showActionModal({ type: "admin-users" });
+      void openAdminUsersModal();
     });
   });
 
