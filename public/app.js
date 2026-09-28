@@ -2189,7 +2189,26 @@ function formatUsdtUnit(value) {
 }
 
 function formatCurrencyAmount(value, currency = "USDT") {
-  return String(currency || "USDT").toUpperCase() === "NGN" ? formatNaira(value) : formatUsdtUnit(value);
+  const normalizedCurrency = String(currency || "USDT").toUpperCase();
+  if (normalizedCurrency === "NGN") {
+    return formatNaira(value);
+  }
+  if (normalizedCurrency === "USDT") {
+    return formatUsdtUnit(value);
+  }
+  return normalizedCurrency;
+}
+
+function formatMixedCurrencyBreakdown(record = {}) {
+  const sources = Array.isArray(record.mixedCurrencyBreakdown)
+    ? record.mixedCurrencyBreakdown
+    : Array.isArray(record.metadata?.releasedSources)
+      ? record.metadata.releasedSources
+      : [];
+  const values = sources
+    .filter((source) => ["NGN", "USDT"].includes(String(source?.currency || "").toUpperCase()))
+    .map((source) => formatCurrencyAmount(source.amount || 0, source.currency));
+  return values.length ? values.join(" / ") : "Mixed currencies";
 }
 
 function isDollarDisplayCurrency(currency = "") {
@@ -2303,6 +2322,9 @@ function formatEquivalentAmount(value, currency = "USDT") {
 
 function formatRecordEquivalent(record, currency = "USDT") {
   const sourceCurrency = String(currency || record?.currency || "USDT").toUpperCase();
+  if (sourceCurrency === "MIXED") {
+    return "";
+  }
   const displayAmounts = record?.displayAmounts || record?.metadata?.displayAmounts || null;
   const targetCurrency = sourceCurrency === "NGN" ? "USDT" : "NGN";
   const targetAmount = displayAmounts?.[targetCurrency];
@@ -11771,7 +11793,9 @@ function renderAdminUserCard(user) {
                 (transaction) => `
                   <div class="mini-ledger-row">
                     <span>${escapeHtml(transaction.type || "TX")}</span>
-                    <strong>${formatCurrencyAmount(transaction.amount, transaction.currency)}</strong>
+                    <strong>${String(transaction.currency || "").toUpperCase() === "MIXED"
+                      ? escapeHtml(formatMixedCurrencyBreakdown(transaction))
+                      : formatCurrencyAmount(transaction.amount, transaction.currency)}</strong>
                   </div>
                 `
               )
@@ -14176,6 +14200,7 @@ function renderProfitLossReportCard() {
 function renderWalletHistoryRow(item) {
   const amount = Number(item.amount || 0);
   const currency = item.currency || "USDT";
+  const isMixedCurrency = String(currency).toUpperCase() === "MIXED";
   const equivalent = formatRecordEquivalent(item, currency);
   const tone = amount > 0 ? "positive" : amount < 0 ? "negative" : "neutral";
   const statusLabel = formatWalletRequestStatus(item.status);
@@ -14190,7 +14215,9 @@ function renderWalletHistoryRow(item) {
         ${equivalent ? `<p class="muted-copy">Eq ${equivalent}</p>` : ""}
       </div>
       <div class="asset-values">
-        <strong class="${tone}">${amount >= 0 ? "+" : "-"}${formatCurrencyAmount(Math.abs(amount), currency)}</strong>
+        <strong class="${tone}">${isMixedCurrency
+          ? escapeHtml(formatMixedCurrencyBreakdown(item))
+          : `${amount >= 0 ? "+" : "-"}${formatCurrencyAmount(Math.abs(amount), currency)}`}</strong>
         <p class="muted-copy">${escapeHtml(item.kind || "")}</p>
       </div>
     </div>
