@@ -74,6 +74,10 @@ test("MIXED transaction display is read-only and is never offered as a balance-e
   assert.match(balanceModal, /<option value="USDT">USDT<\/option>/);
   assert.match(balanceModal, /<option value="NGN">Naira<\/option>/);
   assert.doesNotMatch(balanceModal, /value="MIXED"/);
+  assert.match(balanceModal, /data-usdt-balance=/);
+  assert.match(balanceModal, /data-ngn-balance=/);
+  assert.match(app, /currencySelect\.value === "NGN" \? amountInput\.dataset\.ngnBalance : amountInput\.dataset\.usdtBalance/);
+  assert.match(app, /currency: data\.currency \|\| "USDT"/);
   assert.match(app, /function formatMixedCurrencyBreakdown\([\s\S]*?\.filter\(\(source\) => \["NGN", "USDT"\]/);
 });
 

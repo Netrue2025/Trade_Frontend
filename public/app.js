@@ -5481,6 +5481,8 @@ function renderActionModal() {
     const totalBalance = financeSummary.totalBalance || {};
     const liveUsdt = Number(totalBalance.liveUsdt || totalBalance.usdt || 0);
     const liveNgn = Number(totalBalance.liveNgnEquivalent || totalBalance.ngnEquivalent || 0);
+    const usdtWallet = getWalletFromList(user.ledgerWallets, "USDT");
+    const ngnWallet = getWalletFromList(user.ledgerWallets, "NGN");
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card">
@@ -5500,14 +5502,14 @@ function renderActionModal() {
           <form id="admin-balance-modal-form" class="stack-form wallet-action-fields" data-admin-balance-form="${user.id}">
             <label class="stack-label">
               <span>Currency</span>
-              <select name="currency" aria-label="Balance currency">
+              <select name="currency" aria-label="Balance currency" data-admin-balance-currency>
                 <option value="USDT">USDT</option>
                 <option value="NGN">Naira</option>
               </select>
             </label>
             <label class="stack-label">
               <span>Amount</span>
-              <input name="amount" type="number" min="0" step="0.00000001" value="${formatDecimalInput(liveUsdt)}" placeholder="Set balance" required />
+              <input name="amount" type="number" min="0" step="0.00000001" value="${formatDecimalInput(usdtWallet.availableBalance)}" placeholder="Set balance" data-admin-balance-amount data-usdt-balance="${escapeHtml(usdtWallet.availableBalance)}" data-ngn-balance="${escapeHtml(ngnWallet.availableBalance)}" required />
             </label>
             <label class="stack-label">
               <span>Note</span>
@@ -15818,6 +15820,13 @@ function bindDashboardActions() {
   });
 
   document.querySelectorAll("[data-admin-balance-form]").forEach((form) => {
+    const currencySelect = form.querySelector("[data-admin-balance-currency]");
+    const amountInput = form.querySelector("[data-admin-balance-amount]");
+    currencySelect?.addEventListener("change", () => {
+      if (!amountInput) return;
+      const balance = currencySelect.value === "NGN" ? amountInput.dataset.ngnBalance : amountInput.dataset.usdtBalance;
+      amountInput.value = formatDecimalInput(balance || "0");
+    });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       submitAdminUserBalance(form, form.dataset.adminBalanceForm);
