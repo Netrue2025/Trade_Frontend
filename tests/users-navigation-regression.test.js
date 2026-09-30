@@ -52,3 +52,37 @@ test("history navigation handles trade API failure without rejecting sibling pag
   assert.match(navigation, /state\.tradesLoadError/);
   assert.match(app, /console\.warn\("\[api\] request failed", \{ route, status:/);
 });
+
+test("admin balance display reads the actual NGN and USDT wallet rows independently", () => {
+  const helper = app.match(/function getWalletFromList\(wallets, currency\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.ok(helper);
+  const getWalletFromList = new Function(`${helper}; return getWalletFromList;`)();
+  const wallets = [
+    { currency: "NGN", availableBalance: "12000", lockedBalance: "500" },
+    { currency: "USDT", availableBalance: "8.25", lockedBalance: "1" },
+  ];
+  assert.equal(getWalletFromList(wallets, "NGN").availableBalance, "12000");
+  assert.equal(getWalletFromList(wallets, "USDT").availableBalance, "8.25");
+  const card = app.match(/function renderAdminUserCard\(user\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(card, /USDT wallet[\s\S]*?formatUsdtUnit\(usdtWallet\.availableBalance\)/);
+  assert.match(card, /NGN wallet[\s\S]*?formatNaira\(ngnWallet\.availableBalance\)/);
+});
+
+test("MIXED transaction display is read-only and is never offered as a balance-edit currency", () => {
+  assert.match(app, /String\(transaction\.currency \|\| ""\)\.toUpperCase\(\) === "MIXED"[\s\S]*?formatMixedCurrencyBreakdown\(transaction\)/);
+  const balanceModal = app.match(/if \(state\.actionModal\.type === "admin-balance"\) \{[\s\S]*?\n  \}/)?.[0] || "";
+  assert.match(balanceModal, /<option value="USDT">USDT<\/option>/);
+  assert.match(balanceModal, /<option value="NGN">Naira<\/option>/);
+  assert.doesNotMatch(balanceModal, /value="MIXED"/);
+  assert.match(app, /function formatMixedCurrencyBreakdown\([\s\S]*?\.filter\(\(source\) => \["NGN", "USDT"\]/);
+});
+
+test("Users modal preserves loaded rows and avoids a false zero count on fetch failure", () => {
+  const loader = app.match(/async function loadAdminUsers\([\s\S]*?\n\}/)?.[0] || "";
+  const modal = app.match(/if \(state\.actionModal\.type === "admin-users"\) \{[\s\S]*?\n  \}/)?.[0] || "";
+  assert.match(loader, /state\.users = Array\.isArray\(payload\.users\)/);
+  assert.match(loader, /catch \(error\) \{\s*state\.adminUsersError/);
+  assert.doesNotMatch(loader, /state\.users\s*=\s*\[\]\s*;/);
+  assert.match(modal, /state\.adminUsersTotal \|\| state\.users\.length/);
+  assert.match(modal, /state\.adminUsersError && totalUsers === 0[\s\S]*?"Users"/);
+});

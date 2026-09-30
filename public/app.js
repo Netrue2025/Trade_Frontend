@@ -5402,7 +5402,10 @@ function renderActionModal() {
   }
 
   if (state.actionModal.type === "admin-users") {
-    const totalUsers = Number(state.adminUsersTotal || 0);
+    const totalUsers = Number(state.adminUsersTotal || state.users.length || 0);
+    const usersCountLabel = state.adminUsersError && totalUsers === 0
+      ? "Users"
+      : `${totalUsers.toLocaleString()} registered`;
     const filteredUsers = getFilteredAdminUsers();
     const query = String(state.adminUserSearch || "");
     return `
@@ -5410,7 +5413,7 @@ function renderActionModal() {
         <div class="modal-card action-modal-card admin-users-modal">
           <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
           <p class="modal-eyebrow neutral">Users</p>
-          <h3>${totalUsers.toLocaleString()} registered</h3>
+          <h3>${usersCountLabel}</h3>
           <div class="admin-user-search">
             <span>${icon("profile")}</span>
             <input id="admin-user-search-input" type="search" value="${escapeHtml(query)}" placeholder="Search users" autocomplete="off" />
@@ -11760,6 +11763,7 @@ function renderAdminUserCard(user) {
         <div class="admin-user-summary-actions">
           <div class="asset-values">
             <strong>${formatUsdtUnit(liveUsdt)}</strong>
+            <p class="muted-copy">Total / Mixed</p>
             <p class="muted-copy">${formatNaira(liveNgn)}</p>
           </div>
           <button class="micro-btn icon-only-btn" data-admin-profile-open="${escapeHtml(user.id)}" type="button" aria-label="Edit profile" title="Edit profile">${icon("profile")}</button>
@@ -11783,8 +11787,16 @@ function renderAdminUserCard(user) {
         }
         <div class="trade-detail-grid">
           <div class="trade-detail-pill">
-            <span>Live balance</span>
+            <span>Total / Mixed</span>
             <strong>${formatUsdtUnit(liveUsdt)}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>USDT wallet</span>
+            <strong>${formatUsdtUnit(usdtWallet.availableBalance)}</strong>
+          </div>
+          <div class="trade-detail-pill">
+            <span>NGN wallet</span>
+            <strong>${formatNaira(ngnWallet.availableBalance)}</strong>
           </div>
           <div class="trade-detail-pill">
             <span>P&L</span>
