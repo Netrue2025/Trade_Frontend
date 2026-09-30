@@ -53,6 +53,16 @@ test("history navigation handles trade API failure without rejecting sibling pag
   assert.match(app, /console\.warn\("\[api\] request failed", \{ route, status:/);
 });
 
+test("dashboard transaction preview includes ledger activity and history supports paging and PDF download", () => {
+  const homePane = app.match(/function renderHomePane\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(homePane, /title: "Transactions"/);
+  assert.doesNotMatch(homePane, /requestsOnly: true/);
+  assert.match(app, /data-expand-list-key="wallet-history-page"/);
+  assert.match(app, /\/api\/user\/wallet-history\?limit=80&offset=/);
+  assert.match(app, /id="download-trade-history-btn"/);
+  assert.match(app, /downloadTradeHistoryButton\.addEventListener\("click", downloadProfitLossReport\)/);
+});
+
 test("admin balance display reads the actual NGN and USDT wallet rows independently", () => {
   const helper = app.match(/function getWalletFromList\(wallets, currency\) \{[\s\S]*?\n\}/)?.[0] || "";
   assert.ok(helper);

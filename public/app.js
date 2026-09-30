@@ -172,6 +172,9 @@ const state = {
   paymentBanksLoadedAt: 0,
   resolvedBankAccount: null,
   financialDashboard: null,
+  walletHistoryNextOffset: 0,
+  walletHistoryHasMore: false,
+  walletHistoryLoading: false,
   membership: { plans: null, summary: null },
   vtuSettings: null,
   vtuDataPlans: [],
@@ -3520,6 +3523,12 @@ async function loadFinancialDashboard() {
     ? `${endpoint}?exchange=${encodeURIComponent(getAdminDashboardExchange())}`
     : endpoint;
   state.financialDashboard = await api(url);
+  if (state.user.role === "user") {
+    const walletHistory = state.financialDashboard?.walletHistory || [];
+    state.walletHistoryNextOffset = walletHistory.length;
+    state.walletHistoryHasMore = walletHistory.length >= 80;
+    state.walletHistoryLoading = false;
+  }
   state.notifications = state.financialDashboard?.notifications || [];
   updateAppBadge();
   if (state.user.role === "admin" && state.financialDashboard?.accountSnapshot) {
@@ -4353,6 +4362,28 @@ function downloadProfitLossReport() {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+async function loadMoreWalletHistory() {
+  if (state.walletHistoryLoading || !state.walletHistoryHasMore || state.user?.role !== "user") {
+    return;
+  }
+  state.walletHistoryLoading = true;
+  render();
+  try {
+    const payload = await api(`/api/user/wallet-history?limit=80&offset=${state.walletHistoryNextOffset}`);
+    const current = state.financialDashboard?.walletHistory || [];
+    const existing = new Set(current.map((item) => `${item.kind || item.type}:${item.id}`));
+    const next = (payload.walletHistory || []).filter((item) => !existing.has(`${item.kind || item.type}:${item.id}`));
+    state.financialDashboard.walletHistory = [...current, ...next];
+    state.walletHistoryNextOffset = Number(payload.nextOffset || state.walletHistoryNextOffset + next.length);
+    state.walletHistoryHasMore = payload.hasMore === true;
+  } catch (error) {
+    showError(error.message || "Unable to load more transaction history.");
+  } finally {
+    state.walletHistoryLoading = false;
+    render();
+  }
 }
 
 function getTradeTpPnlPercent(trade, targetPrice) {
@@ -7542,6 +7573,15 @@ function bindHistoryActions() {
   if (downloadReportButton) {
     downloadReportButton.addEventListener("click", downloadProfitLossReport);
   }
+
+  const downloadTradeHistoryButton = document.getElementById("download-trade-history-btn");
+  if (downloadTradeHistoryButton) {
+    downloadTradeHistoryButton.addEventListener("click", downloadProfitLossReport);
+  }
+
+  document.querySelectorAll("[data-load-more-wallet-history]").forEach((button) => {
+    button.addEventListener("click", () => void loadMoreWalletHistory());
+  });
 
   document.querySelectorAll("[data-history-trade-id]").forEach((input) => {
     input.addEventListener("change", () => {
@@ -14449,12 +14489,13 @@ function renderWalletHistorySection({
           <h3>${title}</h3>
           <p class="muted-copy">${description}</p>
         </div>
-        ${showMore ? `<button class="text-link" data-tab="history" type="button">See more</button>` : ""}
+        ${showMore ? `<button class="text-link" data-tab="history" data-expand-list-key="wallet-history-page" type="button">See more</button>` : ""}
         ${showToggle ? renderListToggle(listKey, sortedSource.length, 3) : ""}
       </div>
       <div class="compact-list">
         ${walletHistory.map(renderWalletHistoryRow).join("")}
       </div>
+      ${listKey === "wallet-history-page" && state.user?.role === "user" && state.walletHistoryHasMore ? `<div class="history-toolbar"><button class="text-link" data-load-more-wallet-history type="button" ${state.walletHistoryLoading ? "disabled" : ""}>${state.walletHistoryLoading ? "Loading…" : "Load more transactions"}</button></div>` : ""}
     </section>
   `;
 }
@@ -14551,6 +14592,7 @@ function renderHistoryPane() {
           <p class="muted-copy">Recent spot trades and execution state.</p>
           ${state.tradesLoadError ? `<p class="muted-copy negative" role="alert">Trade history could not be refreshed: ${escapeHtml(state.tradesLoadError)}</p>` : ""}
         </div>
+        ${state.user?.role === "user" ? `<button id="download-trade-history-btn" class="icon-action" type="button" title="Download trading history PDF" aria-label="Download trading history PDF">${icon("download")}</button>` : ""}
       </div>
       ${
         canClearHistory
@@ -14724,7 +14766,6 @@ function renderHomePane() {
         limit: 3,
         title: "Transactions",
         description: "Recent activity",
-        requestsOnly: true,
         showMore: true,
       })}
       <div data-home-trades-host>${renderHomeOpenTradeSection()}</div>
@@ -15051,6 +15092,10 @@ function renderDashboardShell() {
   scrollToRouteSection();
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", async () => {
+      const expandKey = button.dataset.expandListKey;
+      if (expandKey && !isListExpanded(expandKey)) {
+        state.expandedListKeys = [...new Set([...state.expandedListKeys, expandKey])];
+      }
       await navigateToTab(button.dataset.tab);
     });
   });
