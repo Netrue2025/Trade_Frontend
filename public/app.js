@@ -210,6 +210,7 @@ const state = {
   loadingAccount: false,
   loadingTrades: false,
   loadingUsers: false,
+  tradesLoadError: "",
   loadingAdminFinance: false,
   loadingFinancial: false,
   watchlistSeed: [],
@@ -659,6 +660,7 @@ function toggleSelectAllSignals() {
 }
 
 async function api(path, options = {}) {
+  const route = String(path || "").split("?")[0];
   const method = String(options.method || "GET").toUpperCase();
   if (typeof navigator !== "undefined" && navigator.onLine === false && !["GET", "HEAD"].includes(method)) {
     throw new Error("You're offline. Reconnect to continue.");
@@ -677,6 +679,7 @@ async function api(path, options = {}) {
       },
     });
   } catch (error) {
+    console.warn("[api] request failed", { route, status: null, message: "Network request failed." });
     throw new Error(
       typeof navigator !== "undefined" && navigator.onLine === false
         ? "You're offline. Reconnect to continue."
@@ -686,7 +689,13 @@ async function api(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload.error || "Request failed.");
+    const message = String(payload.error || "Request failed.");
+    const diagnosticMessage = message
+      .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [redacted]")
+      .replace(/\b(cookie|authorization|token|secret|password)\s*[=:]\s*[^\s,;]+/gi, "$1=[redacted]")
+      .slice(0, 180);
+    console.warn("[api] request failed", { route, status: response.status, message: diagnosticMessage });
+    const error = new Error(message);
     error.payload = payload;
     throw error;
   }
@@ -1887,7 +1896,6 @@ async function loadAdminUsers({ page = 1, search = state.adminUserSearch } = {})
     state.adminUsersHasMore = !!payload.hasMore;
   } catch (error) {
     state.adminUsersError = error.message || "Unable to load users.";
-    throw error;
   } finally {
     state.loadingUsers = false;
     render();
@@ -5415,9 +5423,10 @@ function renderActionModal() {
           <div class="admin-users-modal-list">
             ${state.loadingUsers
               ? `<p class="muted-copy">Loading users...</p>`
-              : state.adminUsersError
-              ? `<div class="empty-state"><p>${escapeHtml(state.adminUsersError)}</p><button class="button-secondary" data-admin-users-retry type="button">Retry</button></div>`
-              : filteredUsers.map((user) => renderAdminUserCard(user)).join("") || `<p class="muted-copy">No matching users.</p>`}
+              : `<div class="admin-users-results">
+                  ${state.adminUsersError ? `<div class="empty-state" role="alert"><p>${escapeHtml(state.adminUsersError)}</p><button class="button-secondary" data-admin-users-retry type="button">Retry</button></div>` : ""}
+                  ${filteredUsers.map((user) => renderAdminUserCard(user)).join("") || (!state.adminUsersError ? `<p class="muted-copy">No matching users.</p>` : "")}
+                </div>`}
           </div>
           ${!state.loadingUsers && !state.adminUsersError && totalUsers > 0 ? `<div class="modal-actions"><button class="button-secondary" data-admin-users-page="${Math.max(1, state.adminUsersPage - 1)}" type="button" ${state.adminUsersPage <= 1 ? "disabled" : ""}>Previous</button><span class="muted-copy">Page ${state.adminUsersPage}</span><button class="button-secondary" data-admin-users-page="${state.adminUsersPage + 1}" type="button" ${state.adminUsersHasMore ? "" : "disabled"}>Next</button></div>` : ""}
         </div>
@@ -7355,6 +7364,7 @@ async function loadDashboardData() {
   state.loadingAccount = !!(accountConnected && !state.balances.length);
   state.loadingTrades = !state.trades.length;
   state.loadingUsers = !!(state.user.role === "admin" && !state.users.length);
+  state.tradesLoadError = "";
   state.loadingFinancial = !state.financialDashboard;
   state.loadingAdminFinance = !!(state.user.role === "admin" && !state.adminDeposits.length && !state.adminWithdrawals.length);
   render();
@@ -7473,18 +7483,21 @@ async function loadDashboardData() {
     : Promise.resolve().then(() => {
         state.loadingAccount = false;
       });
-  const tradesPromise = api(`/api/trades?exchange=${encodeURIComponent(getActiveExchange())}`);
-  const usersPromise = state.user.role === "admin" && state.activeTab === "settings"
-    ? api("/api/admin/users")
-    : Promise.resolve({ users: [] });
-
-  const [tradesPayload, usersPayload] = await Promise.all([
-    tradesPromise,
-    usersPromise,
-  ]);
-
-  state.trades = tradesPayload.trades || [];
-  state.users = usersPayload.users || [];
+  await window.DashboardLoader.loadDashboardCollections({
+    loadTrades: () => api(`/api/trades?exchange=${encodeURIComponent(getActiveExchange())}`),
+    loadUsers: () => state.user.role === "admin" && state.activeTab === "settings"
+      ? api("/api/admin/users")
+      : Promise.resolve({ users: [] }),
+    onTrades: (payload) => { state.trades = Array.isArray(payload?.trades) ? payload.trades : []; },
+    onUsers: (payload) => {
+      state.users = Array.isArray(payload?.users) ? payload.users : [];
+      state.adminUsersError = "";
+    },
+    onError: (collection, error) => {
+      if (collection === "trades") state.tradesLoadError = error?.message || "Trades could not be refreshed.";
+      if (collection === "users") state.adminUsersError = error?.message || "Users could not be loaded.";
+    },
+  });
   state.loadingTrades = false;
   state.loadingUsers = false;
   const adminUserIds = new Set(state.users.map((user) => user.id));
@@ -14099,8 +14112,12 @@ function renderSettingsPane() {
 }
 
 function renderSignalsPane() {
+  const tradesError = state.tradesLoadError
+    ? `<p class="muted-copy negative" role="alert">Trades could not be refreshed: ${escapeHtml(state.tradesLoadError)}</p>`
+    : "";
   return window.SignalPage?.renderSignalPage
     ? `
+      ${tradesError}
       <div id="signal-page-shell-host">
         ${window.SignalPage.renderSignalPage({
           signalFeed: state.signalFeed,
@@ -14124,7 +14141,7 @@ function renderSignalsPane() {
 }
 
 function renderHomeOpenTradeSection() {
-  return window.SignalPage?.renderOpenTradeInvestmentBoard
+  const board = window.SignalPage?.renderOpenTradeInvestmentBoard
     ? window.SignalPage.renderOpenTradeInvestmentBoard({
         trades: state.trades,
         user: state.user,
@@ -14146,6 +14163,10 @@ function renderHomeOpenTradeSection() {
         showMore: true,
       })
     : `<section class="mobile-card"><p class="muted-copy">Open trades are loading...</p></section>`;
+  const error = state.tradesLoadError
+    ? `<p class="muted-copy negative" role="alert">Trades could not be refreshed: ${escapeHtml(state.tradesLoadError)}</p>`
+    : "";
+  return `${error}${board}`;
 }
 
 function renderProfitLossReportCard() {
@@ -14514,6 +14535,7 @@ function renderHistoryPane() {
         <div>
           <h3>Trade History</h3>
           <p class="muted-copy">Recent spot trades and execution state.</p>
+          ${state.tradesLoadError ? `<p class="muted-copy negative" role="alert">Trade history could not be refreshed: ${escapeHtml(state.tradesLoadError)}</p>` : ""}
         </div>
       </div>
       ${
@@ -14863,24 +14885,28 @@ async function navigateToTab(nextTab) {
   state.activeTab = nextTab;
   render();
   if (nextTab === "settings") {
-    await withLoading(async () => {
-      await loadSavedExchangeSettings(getActiveExchange());
-      if (state.user?.role === "admin") {
-        const payload = await api("/api/admin/users");
-        state.users = payload.users || [];
-      }
-    }).catch((error) => showError(error.message));
+    const results = await Promise.allSettled([
+      loadSavedExchangeSettings(getActiveExchange()),
+      state.user?.role === "admin" ? loadAdminUsers({ page: 1 }) : Promise.resolve(),
+    ]);
+    const settingsFailure = results[0].status === "rejected" ? results[0].reason : null;
+    if (settingsFailure) showError(settingsFailure.message || "Settings could not be refreshed.");
   } else {
     disconnectSettingsUsersSocket();
   }
   if (nextTab === "history") {
-    await withLoading(async () => {
-      await Promise.all([
-        loadFinancialDashboard(),
-        api(`/api/trades?exchange=${encodeURIComponent(getActiveExchange())}`).then((payload) => { state.trades = payload.trades || []; }),
-        state.user?.role === "admin" ? loadAdminFinanceQueues() : Promise.resolve(),
-      ]);
-    }).catch((error) => showError(error.message));
+    const results = await Promise.allSettled([
+      loadFinancialDashboard(),
+      api(`/api/trades?exchange=${encodeURIComponent(getActiveExchange())}`).then((payload) => {
+        state.trades = Array.isArray(payload?.trades) ? payload.trades : [];
+        state.tradesLoadError = "";
+      }),
+      state.user?.role === "admin" ? loadAdminFinanceQueues() : Promise.resolve(),
+    ]);
+    if (results[1].status === "rejected") {
+      state.tradesLoadError = results[1].reason?.message || "Trades could not be refreshed.";
+    }
+    if (results.some((result) => result.status === "rejected")) render();
   }
   if (nextTab === "signals") {
     await withLoading(() => loadSignalsSnapshot({ silent: true })).catch((error) => showError(error.message));
