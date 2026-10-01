@@ -291,6 +291,12 @@ test("Basic, Plus, and Pro membership UX uses backend plans and secure Pro check
   assert.match(app, /plans\.plus/);
   assert.match(app, /Join up to 4 trades per day/);
   assert.match(app, /Daily P&L target 1\.5%, with up to 10% daily/);
+  assert.match(app, /name="plusPrice"/);
+  assert.match(app, /name="plusDescription"/);
+  assert.match(app, /name="plusBenefits"/);
+  assert.match(app, /name="plusDurationDays"/);
+  assert.match(app, /plus: \{ name: data\.plusName, price: data\.plusPrice/);
+  assert.match(app, /Price not set/);
   assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(userId\)\}\/membership/);
   assert.match(app, /data-admin-membership-form/);
   assert.match(app, /Choose the plan that works for you/);
