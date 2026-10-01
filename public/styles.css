@@ -8068,8 +8068,9 @@ button:disabled {
 .plans-header { max-width: 620px; margin: 0 auto 24px; text-align: center; }
 .plans-header h2 { margin: 6px 0 8px; font-size: clamp(1.55rem, 4vw, 2.35rem); letter-spacing: 0; }
 .plans-header p { color: var(--muted); }
-.plans-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.plans-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
 .plan-card { display: flex; min-width: 0; flex-direction: column; padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); box-shadow: var(--shadow); }
+.plan-card-plus { border-color: #20a875; }
 .plan-card-pro { border-color: #d6a928; box-shadow: 0 12px 30px rgba(90, 65, 0, .12); }
 .plan-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .plan-label { font-size: .78rem; font-weight: 800; text-transform: uppercase; }

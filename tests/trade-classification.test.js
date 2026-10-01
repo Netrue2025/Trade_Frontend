@@ -284,10 +284,15 @@ test("Manual history OTP stays behind the fulfilled paid-order eligibility rule"
   assert.match(app, /data-digital-otp-request/);
 });
 
-test("Basic and Pro membership UX uses backend plans and secure checkout flows", () => {
+test("Basic, Plus, and Pro membership UX uses backend plans and secure Pro checkout flows", () => {
   const app = readPublicFile("app.js");
   const styles = readPublicFile("styles.css");
   assert.match(app, /function renderPlansPane/);
+  assert.match(app, /plans\.plus/);
+  assert.match(app, /Join up to 4 trades per day/);
+  assert.match(app, /Daily P&L target 1\.5%, with up to 10% daily/);
+  assert.match(app, /\/api\/admin\/users\/\$\{encodeURIComponent\(userId\)\}\/membership/);
+  assert.match(app, /data-admin-membership-form/);
   assert.match(app, /Choose the plan that works for you/);
   assert.match(app, /Upgrade your trading access whenever you're ready/);
   assert.match(app, /PLAN_TRADE_LIMIT_REACHED/);
@@ -299,7 +304,8 @@ test("Basic and Pro membership UX uses backend plans and secure checkout flows",
   assert.match(app, /Welcome to NetrueFi Pro/);
   assert.match(app, /pro-membership-badge/);
   assert.match(app, /Daily trade access:/);
-  assert.match(styles, /\.plans-grid\s*\{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
+  assert.match(styles, /\.plans-grid\s*\{[^}]*repeat\(3, minmax\(0, 1fr\)\)/s);
+  assert.match(styles, /\.plan-card-plus\s*\{/);
   assert.match(styles, /@media \(max-width: 640px\)[\s\S]*\.plans-grid\s*\{[^}]*minmax\(0, 1fr\)/);
   assert.match(styles, /\.membership-modal\s*\{[^}]*100dvh[^}]*overflow-y:\s*auto/s);
 });

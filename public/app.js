@@ -5473,13 +5473,19 @@ function renderActionModal() {
     if (!user) {
       return "";
     }
+    const currentPlan = String(user.membership?.plan || "BASIC").toUpperCase();
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card admin-profile-modal">
           <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
           <p class="modal-eyebrow neutral">User</p>
           <h3>Edit profile</h3>
-          <div class="action-metric-stack"><div class="action-metric"><span>Plan</span><strong>${escapeHtml(user.membership?.plan === "PRO" ? "Pro" : "Basic")}</strong></div><div class="action-metric"><span>Status</span><strong>${escapeHtml(user.membership?.status || "ACTIVE")}</strong></div>${user.membership?.expiresAt ? `<div class="action-metric"><span>Pro expires</span><strong>${escapeHtml(formatMembershipDate(user.membership.expiresAt))}</strong></div>` : ""}</div>
+          <div class="action-metric-stack"><div class="action-metric"><span>Plan</span><strong>${escapeHtml(currentPlan === "PRO" ? "Pro" : currentPlan === "PLUS" ? "Plus" : "Basic")}</strong></div><div class="action-metric"><span>Status</span><strong>${escapeHtml(user.membership?.status || "ACTIVE")}</strong></div>${user.membership?.expiresAt ? `<div class="action-metric"><span>Plan expires</span><strong>${escapeHtml(formatMembershipDate(user.membership.expiresAt))}</strong></div>` : ""}</div>
+          <form id="admin-user-membership-form" class="stack-form admin-profile-form" data-admin-membership-form="${escapeHtml(user.id)}">
+            <label class="stack-label"><span>Activate or switch plan</span><select name="plan"><option value="BASIC" ${currentPlan === "BASIC" ? "selected" : ""}>Basic</option><option value="PLUS" ${currentPlan === "PLUS" ? "selected" : ""}>Plus</option><option value="PRO" ${currentPlan === "PRO" ? "selected" : ""}>Pro</option></select></label>
+            <p class="muted-copy">Plus and Pro use their configured plan duration. Basic does not expire.</p>
+            <button class="button-primary" type="submit">Activate / Switch Plan</button>
+          </form>
           <form id="admin-user-profile-form" class="stack-form admin-profile-form" data-admin-profile-form="${escapeHtml(user.id)}">
             <label class="stack-label">
               <span>First name</span>
@@ -6388,6 +6394,14 @@ function bindModalActions() {
     adminUserProfileForm.addEventListener("submit", (event) => {
       event.preventDefault();
       submitAdminProfileUpdate(adminUserProfileForm, adminUserProfileForm.dataset.adminProfileForm);
+    });
+  }
+
+  const adminUserMembershipForm = document.getElementById("admin-user-membership-form");
+  if (adminUserMembershipForm) {
+    adminUserMembershipForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitAdminUserMembership(adminUserMembershipForm, adminUserMembershipForm.dataset.adminMembershipForm);
     });
   }
 
@@ -14223,6 +14237,19 @@ function renderHomeOpenTradeSection() {
   return `${error}${board}`;
 }
 
+async function submitAdminUserMembership(form, userId) {
+  const plan = String(new FormData(form).get("plan") || "").toUpperCase();
+  await withLoading(async () => {
+    const payload = await api(`/api/admin/users/${encodeURIComponent(userId)}/membership`, {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    });
+    updateUserInStateUsers(payload.user);
+    render();
+    showNotice(`${plan === "PRO" ? "Pro" : plan === "PLUS" ? "Plus" : "Basic"} plan activated`);
+  }).catch((error) => showError(error.message));
+}
+
 function renderProfitLossReportCard() {
   const rows = getProfitLossReportRows(state.reportPeriod);
   const visibleRows = isListExpanded("profit-loss-report") ? rows : rows.slice(0, 3);
@@ -14991,18 +15018,23 @@ async function navigateToTab(nextTab) {
 function renderPlansPane() {
   const plans = state.membership.plans || {};
   const basic = plans.basic || { name: "Basic", dailyTradeLimit: 1, targetLabel: "Trade target up to 1.5%" };
+  const plus = plans.plus || { name: "Plus", dailyTradeLimit: 4, durationDays: 30, benefits: ["Join up to 4 trades per day", "Daily P&L target 1.5%, with up to 10% daily", "All Basic features"] };
   const pro = plans.pro || { name: "Pro", price: "0", durationDays: 30, benefits: [] };
   const membership = state.membership.summary || state.user?.membership || { plan: "BASIC", tradesUsedToday: 0, dailyTradeLimit: 1 };
-  const isPro = membership.plan === "PRO" && membership.active;
+  const currentPlan = String(membership.plan || "BASIC").toUpperCase();
+  const isPro = currentPlan === "PRO" && membership.active;
+  const isPlus = currentPlan === "PLUS" && membership.active;
   const basicBenefits = ["Access to trading", `Join ${basic.dailyTradeLimit || 1} trade per day`, basic.targetLabel, "Wallet access", "Airtime & Data", "Digital Store", "Quest access"];
-  const proBenefits = pro.benefits?.length ? pro.benefits : ["Unlimited eligible trade joins", "Participate in multiple available trades", "Premium PRO badge", "All Basic features", "Existing trade tracking and P&L tools"];
+  const plusBenefits = plus.benefits?.length ? plus.benefits : ["Join up to 4 trades per day", "Daily P&L target 1.5%, with up to 10% daily", "All Basic features"];
+  const proBenefits = pro.benefits?.length ? pro.benefits : ["Unlimited eligible trade joins", "Unlimited daily P&L", "Participate in multiple available trades", "Premium PRO badge", "All Basic features", "Existing trade tracking and P&L tools"];
   return `<section class="plans-page">
     <header class="plans-header"><p class="eyebrow">Membership</p><h2>Choose the plan that works for you</h2><p>Upgrade your trading access whenever you're ready.</p></header>
     <div class="plans-grid">
-      <article class="plan-card"><span class="plan-label">${escapeHtml(basic.name)}</span><h3>Free</h3><p>Your current everyday plan.</p><ul class="membership-benefits">${basicBenefits.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><button class="button-secondary" type="button" disabled>${isPro ? "Included with Pro" : "Current Plan"}</button></article>
+      <article class="plan-card"><span class="plan-label">${escapeHtml(basic.name)}</span><h3>Free</h3><p>Your current everyday plan.</p><ul class="membership-benefits">${basicBenefits.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><button class="button-secondary" type="button" disabled>${currentPlan === "BASIC" ? "Current Plan" : "Included with your plan"}</button></article>
+      <article class="plan-card plan-card-plus"><div class="plan-card-head"><span class="plan-label">${escapeHtml(plus.name)}</span><span class="pro-membership-badge">PLUS</span></div><h3>Up to 4 trades daily</h3><p>Admin-activated membership · ${Number(plus.durationDays || 30)} days</p><ul class="membership-benefits">${plusBenefits.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><button class="button-secondary" type="button" disabled>${isPlus ? `Plus Active Until ${escapeHtml(formatMembershipDate(membership.expiresAt))}` : "Activation by admin"}</button></article>
       <article class="plan-card plan-card-pro"><div class="plan-card-head"><span class="plan-label">${icon("star")} ${escapeHtml(pro.name)}</span><span class="pro-membership-badge">PRO</span></div><h3>${formatNaira(pro.price || 0)} <small>/ ${Number(pro.durationDays || 30)} days</small></h3><p>Unlock more trading access.</p><ul class="membership-benefits">${proBenefits.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>${isPro ? `<button class="button-secondary" type="button" disabled>Pro Active Until ${escapeHtml(formatMembershipDate(membership.expiresAt))}</button>` : `<button class="button-primary" data-membership-upgrade type="button" ${pro.enabled === false ? "disabled" : ""}>${pro.enabled === false ? "Currently Unavailable" : "Upgrade to Pro"}</button>`}</article>
     </div>
-    <section class="membership-access-strip"><strong>${isPro ? "PRO" : "Basic Plan"}</strong><span>Daily trade access: ${isPro ? "Unlimited" : `${Number(membership.tradesUsedToday || 0)} / ${Number(membership.dailyTradeLimit || basic.dailyTradeLimit || 1)} used`}</span></section>
+    <section class="membership-access-strip"><strong>${currentPlan}</strong><span>Daily trade access: ${isPro ? "Unlimited" : `${Number(membership.tradesUsedToday || 0)} / ${Number(membership.dailyTradeLimit || (isPlus ? plus.dailyTradeLimit : basic.dailyTradeLimit) || 1)} used`}</span></section>
   </section>`;
 }
 
