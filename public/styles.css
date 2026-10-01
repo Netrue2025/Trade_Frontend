@@ -1569,6 +1569,8 @@ body[data-theme="dark"] .section-loading-card {
   background: var(--soft-surface);
   color: var(--text);
   text-align: left;
+  touch-action: pan-y;
+  will-change: transform, opacity;
 }
 
 .notification-item.read {
@@ -8064,6 +8066,11 @@ button:disabled {
 }
 
 .pro-membership-badge svg { width: 12px; height: 12px; }
+.pro-membership-badge.plus-membership-badge { border-color: #20a875; background: #e0f6ec; color: #087451; }
+.user-queued-trades-card { border-left: 3px solid #20a875; background: var(--card); }
+.queue-trades-note { max-width: 38ch; font-size: .82rem; }
+.user-queued-trades-card .queued-trade-row { border: 1px dashed #20a875; background: var(--soft-surface); }
+.message-popover-body[data-notification-swipe] { touch-action: pan-y; }
 .plans-page { width: min(100%, 980px); margin: 0 auto; padding: 20px 16px 110px; overflow-x: hidden; }
 .plans-header { max-width: 620px; margin: 0 auto 24px; text-align: center; }
 .plans-header h2 { margin: 6px 0 8px; font-size: clamp(1.55rem, 4vw, 2.35rem); letter-spacing: 0; }

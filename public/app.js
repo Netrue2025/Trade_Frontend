@@ -4748,7 +4748,7 @@ function renderMessageNotificationPopup() {
   }
   return `
     <aside class="message-popover" aria-live="polite">
-      <button class="message-popover-body" data-message-popup-open="${escapeHtml(message.id)}" type="button">
+      <button class="message-popover-body" data-message-popup-open="${escapeHtml(message.id)}" data-notification-swipe="${escapeHtml(message.id)}" type="button">
         <span class="message-popover-icon">${icon("contact")}</span>
         <span>
           <strong>${escapeHtml(message.title || "Message")}</strong>
@@ -4772,11 +4772,17 @@ function renderDashboardTopBar() {
   }
   const notifications = state.notifications || [];
   const unreadCount = notifications.filter((item) => !item.readAt).length;
+  const membershipPlan = String(state.membership.summary?.plan || state.user.membership?.plan || "").toUpperCase();
+  const membershipExpiry = Date.parse(state.membership.summary?.expiresAt || state.user.membership?.expiresAt || "");
+  const membershipActive = state.membership.summary?.active ?? (["PLUS", "PRO"].includes(membershipPlan)
+    && String(state.user.membership?.status || "ACTIVE").toUpperCase() === "ACTIVE"
+    && Number.isFinite(membershipExpiry) && membershipExpiry > Date.now());
+  const showMembershipBadge = state.user.role === "user" && membershipActive && ["PLUS", "PRO"].includes(membershipPlan);
   return `
     <header class="dashboard-topbar">
       <div>
         <strong>${escapeHtml(state.user.name || "Dashboard")}</strong>
-        <p class="muted-copy">${state.user.role === "admin" ? "Admin" : "Wallet"} ${state.user.role === "user" && state.membership.summary?.plan === "PRO" ? `<button class="pro-membership-badge" data-tab="plans" type="button">${icon("star")} PRO</button>` : ""}</p>
+        <p class="muted-copy">${state.user.role === "admin" ? "Admin" : "Wallet"} ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}</p>
       </div>
       <div class="notification-wrap">
         <button class="icon-action notification-button" id="notification-toggle-btn" type="button" aria-label="Notifications" title="Notifications">
@@ -4791,7 +4797,7 @@ function renderDashboardTopBar() {
                   .slice(0, 30)
                   .map(
                     (item) => `
-                      <button class="notification-item ${item.readAt ? "read" : ""}" data-notification-open="${escapeHtml(item.id)}" type="button">
+                      <button class="notification-item ${item.readAt ? "read" : ""}" data-notification-open="${escapeHtml(item.id)}" data-notification-swipe="${escapeHtml(item.id)}" type="button">
                         <strong>${escapeHtml(item.title || item.type || "Update")}</strong>
                         <p>${escapeHtml(item.message || "")}</p>
                         <span class="notification-time">${item.createdAt ? new Date(item.createdAt).toLocaleString() : ""}</span>
@@ -9457,17 +9463,14 @@ async function dismissNotification(notificationId) {
   if (!notificationId) {
     return;
   }
-  try {
-    await api(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {
+  const markRead = api(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {
       method: "POST",
       body: JSON.stringify({}),
-    });
-  } catch {
-    // The message may have expired on the server; remove it locally either way.
-  }
+    }).catch(() => undefined);
   state.notifications = (state.notifications || []).filter((item) => item.id !== notificationId);
   updateAppBadge();
   render();
+  await markRead;
 }
 
 async function deleteSelectedFinanceHistory() {
@@ -11496,7 +11499,7 @@ function getQueuedTradeRequestedPrice(trade = {}) {
   return Number(execution.rawPrice || execution.price || trade.price || 0);
 }
 
-function renderQueuedTradeDisclosure(trade = {}) {
+function renderQueuedTradeDisclosure(trade = {}, { showCancel = true, showPnl = true } = {}) {
   const orderId = getQueuedTradeOrderId(trade);
   const queueKey = getQueuedTradeKey(trade);
   const currentPrice = Number(getTradeCurrentMarket(trade.symbol).price || 0);
@@ -11519,7 +11522,7 @@ function renderQueuedTradeDisclosure(trade = {}) {
         </div>
         <div class="asset-values">
           ${renderTradeStatusBadge("PENDING")}
-          <strong class="${pnlPercent >= 0 ? "positive" : "negative"}" data-trade-pnl>${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>
+          ${showPnl ? `<strong class="${pnlPercent >= 0 ? "positive" : "negative"}" data-trade-pnl>${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%</strong>` : ""}
         </div>
       </summary>
       <div class="trade-disclosure-body">
@@ -11543,7 +11546,7 @@ function renderQueuedTradeDisclosure(trade = {}) {
           <p class="muted-copy">Size ${formatNumber(remainingQty, 8)}</p>
         </div>
         ${
-          orderId
+          orderId && showCancel
             ? `
               <div class="trade-actions-inline trade-actions-stack reveal-actions">
                 <button class="micro-btn danger" data-cancel-open-order="${escapeHtml(orderId)}" data-order-symbol="${escapeHtml(trade.symbol || "")}" type="button">Cancel</button>
@@ -14238,7 +14241,29 @@ function renderHomeOpenTradeSection() {
   const error = state.tradesLoadError
     ? `<p class="muted-copy negative" role="alert">Trades could not be refreshed: ${escapeHtml(state.tradesLoadError)}</p>`
     : "";
-  return `${error}${board}`;
+  return `${error}${board}${state.user?.role === "user" ? renderUserQueuedTradesSection() : ""}`;
+}
+
+function renderUserQueuedTradesSection() {
+  const queuedTrades = sortRecent((state.trades || []).filter((trade) =>
+    isQueuedTrade(trade) && shouldUserSeeTrade(trade) && String(trade.side || "").toUpperCase() === "BUY"
+  ));
+  const visibleTrades = isListExpanded("user-queued-trades") ? queuedTrades : queuedTrades.slice(0, 4);
+  return `
+    <section class="mobile-card user-queued-trades-card" data-user-queued-trades>
+      <div class="section-head">
+        <div>
+          <h3>Queued Trades</h3>
+          <p class="muted-copy queue-trades-note">These are limit orders. A trade will be available to join when it opens.</p>
+        </div>
+        ${renderListToggle("user-queued-trades", queuedTrades.length)}
+      </div>
+      <div class="compact-list">
+        ${visibleTrades.map((trade) => renderQueuedTradeDisclosure(trade, { showCancel: false, showPnl: false })).join("")}
+        ${!queuedTrades.length ? `<p class="muted-copy">No queued trades right now.</p>` : ""}
+      </div>
+    </section>
+  `;
 }
 
 async function submitAdminUserMembership(form, userId) {
@@ -15280,12 +15305,14 @@ function bindDashboardActions() {
   });
 
   document.querySelectorAll("[data-notification-open]").forEach((button) => {
+    bindSwipeToDismissNotification(button, button.dataset.notificationOpen);
     button.addEventListener("click", () => {
       openNotification(button.dataset.notificationOpen);
     });
   });
 
   document.querySelectorAll("[data-message-popup-open]").forEach((button) => {
+    bindSwipeToDismissNotification(button, button.dataset.messagePopupOpen);
     button.addEventListener("click", () => {
       openNotification(button.dataset.messagePopupOpen);
     });
@@ -16874,6 +16901,35 @@ function bindDashboardActions() {
       deleteAdminUser(button.dataset.adminDeleteUser, button.dataset.adminUserName || "this user");
     });
   });
+}
+
+function bindSwipeToDismissNotification(button, notificationId) {
+  let start = null;
+  button.addEventListener("click", (event) => {
+    if (button.dataset.swipeDismissed !== "true") return;
+    delete button.dataset.swipeDismissed;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  button.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+    start = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    try { button.setPointerCapture(event.pointerId); } catch { /* Pointer capture is optional. */ }
+  });
+  button.addEventListener("pointerup", (event) => {
+    if (!start || start.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    start = null;
+    if (Math.abs(deltaX) < 70 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) return;
+    event.preventDefault();
+    button.dataset.swipeDismissed = "true";
+    button.style.transition = "transform 160ms ease, opacity 160ms ease";
+    button.style.transform = `translateX(${deltaX < 0 ? "-" : ""}110%)`;
+    button.style.opacity = "0";
+    window.setTimeout(() => dismissNotification(notificationId), 165);
+  });
+  button.addEventListener("pointercancel", () => { start = null; });
 }
 
 function bindSignalFeedActions() {

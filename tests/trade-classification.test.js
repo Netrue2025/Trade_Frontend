@@ -316,6 +316,22 @@ test("Basic, Plus, and Pro membership UX uses backend plans and secure Pro check
   assert.match(styles, /\.membership-modal\s*\{[^}]*100dvh[^}]*overflow-y:\s*auto/s);
 });
 
+test("Plus subscribers get a badge and users see queued limit orders separately below open trades", () => {
+  const app = readPublicFile("app.js");
+  const styles = readPublicFile("styles.css");
+  assert.match(app, /membershipPlan === "PLUS" \? "plus-membership-badge"/);
+  assert.match(app, /function renderUserQueuedTradesSection\(\)/);
+  const homeTrades = app.match(/function renderHomeOpenTradeSection\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(homeTrades, /renderUserQueuedTradesSection\(\)/);
+  const queueSection = app.match(/function renderUserQueuedTradesSection\(\) \{[\s\S]*?\n\}/)?.[0] || "";
+  assert.match(queueSection, /These are limit orders[\s\S]*available to join when it opens/);
+  assert.match(queueSection, /renderQueuedTradeDisclosure\(trade, \{ showCancel: false, showPnl: false \}\)/);
+  assert.match(app, /Math\.abs\(deltaX\) < 70 \|\| Math\.abs\(deltaX\) < Math\.abs\(deltaY\) \* 1\.25/);
+  assert.match(app, /button\.style\.transform = `translateX\(\$\{deltaX < 0 \? "-" : ""\}110%\)`/);
+  assert.match(styles, /\.user-queued-trades-card \.queued-trade-row/);
+  assert.match(styles, /\.pro-membership-badge\.plus-membership-badge/);
+});
+
 test("Responsive shop histories forms and transactional modals support narrow phones", () => {
   const styles = readPublicFile("styles.css");
   assert.match(styles, /\.store-stat-strip\s*\{[\s\S]*grid-template-columns:\s*repeat\(auto-fit, minmax\(112px, 1fr\)\)/);
