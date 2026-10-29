@@ -5312,6 +5312,31 @@ function renderActionModal() {
       : "";
   }
 
+  if (state.actionModal.type === "join-trade-amount") {
+    const maxAmount = state.actionModal.maxJoinAmountUsdt || "";
+    return `
+      <div class="modal-backdrop">
+        <div class="modal-card action-modal-card">
+          <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
+          <p class="modal-eyebrow neutral">Join trade</p>
+          <h3>Choose a smaller amount</h3>
+          <p class="modal-text">Sorry, you cannot join this trade because your amount is higher than the admin’s trade amount. Please reduce the amount to join.</p>
+          <p class="muted-copy">Enter an amount no higher than the admin’s trading amount of ${formatUsdtUnit(maxAmount)}.</p>
+          <form id="join-trade-amount-form" class="stack-form">
+            <label class="stack-label">
+              <span>Amount to lock (USDT)</span>
+              <input name="amountUsdt" type="number" min="0.00000001" max="${escapeHtml(maxAmount)}" step="0.00000001" placeholder="Enter a smaller amount" required />
+            </label>
+            <div class="modal-actions">
+              <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
+              <button class="button-primary shimmer-button" type="submit">Join with this amount</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
   if (state.actionModal.type === "trade-joined-users") {
     const trade = state.trades.find((item) => item.id === state.actionModal.tradeId);
     if (!trade) {
@@ -6320,6 +6345,15 @@ function renderTopbarActions() {
 }
 
 function bindModalActions() {
+  const joinTradeAmountForm = document.getElementById("join-trade-amount-form");
+  if (joinTradeAmountForm) {
+    joinTradeAmountForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const tradeId = state.actionModal?.tradeId;
+      if (tradeId) void joinTradeNow(tradeId);
+    });
+  }
+
   const closeButton = document.getElementById("modal-close-btn");
   if (closeButton) {
     closeButton.addEventListener("click", clearError);
@@ -9084,16 +9118,28 @@ async function verifyMembershipPaystackReturn() {
 }
 
 async function joinTradeNow(tradeId) {
+  const amountUsdt = state.actionModal?.type === "join-trade-amount"
+    ? document.querySelector("#join-trade-amount-form [name='amountUsdt']")?.value
+    : undefined;
   await withLoading(async () => {
     const payload = await api(`/api/trades/${encodeURIComponent(tradeId)}/join`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify(amountUsdt ? { amountUsdt } : {}),
     });
     if (payload.membership) state.membership.summary = payload.membership;
     state.actionModal = null;
     await loadDashboardData();
     showNotice("Trade joined");
   }).catch((error) => {
+    if (error.payload?.code === "TRADE_JOIN_AMOUNT_EXCEEDS_ADMIN_TRADE") {
+      state.actionModal = {
+        type: "join-trade-amount",
+        tradeId,
+        maxJoinAmountUsdt: error.payload.maxJoinAmountUsdt,
+      };
+      render();
+      return;
+    }
     if (error.payload?.code === "PLAN_TRADE_LIMIT_REACHED") {
       state.actionModal = { type: "membership-limit", membership: error.payload };
       render();
