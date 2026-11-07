@@ -142,6 +142,7 @@ const state = {
   balances: [],
   openOrders: [],
   trades: [],
+  copyPlans: [],
   dashboardMarketMode: "spot",
   hideBalanceAmounts: localStorage.getItem(BALANCE_PRIVACY_STORAGE_KEY) === "true",
   futuresAccount: null,
@@ -7585,6 +7586,7 @@ async function loadDashboardData() {
       if (collection === "users") state.adminUsersError = error?.message || "Users could not be loaded.";
     },
   });
+  await api("/api/copy-plans").then((payload) => { state.copyPlans = Array.isArray(payload?.plans) ? payload.plans : []; }).catch(() => { state.copyPlans = []; });
   state.loadingTrades = false;
   state.loadingUsers = false;
   const adminUserIds = new Set(state.users.map((user) => user.id));
@@ -9119,7 +9121,8 @@ async function joinTradeNow(tradeId) {
     ? document.querySelector("#join-trade-amount-form [name='amountUsdt']")?.value
     : undefined;
   await withLoading(async () => {
-    const payload = await api(`/api/trades/${encodeURIComponent(tradeId)}/join`, {
+    const endpoint = state.actionModal?.copyPlan ? `/api/copy-plans/${encodeURIComponent(tradeId)}/join` : `/api/trades/${encodeURIComponent(tradeId)}/join`;
+    const payload = await api(endpoint, {
       method: "POST",
       body: JSON.stringify(amountUsdt ? { amountUsdt } : {}),
     });
@@ -11027,6 +11030,7 @@ function renderAdminHomeDashboard() {
       </div>
       ${renderTradeTicket()}
     </section>
+    ${renderAdminCopyPlans()}
     <div class="admin-dashboard-columns">
       <section class="admin-dashboard-section">
         <div class="section-head">
@@ -11048,6 +11052,28 @@ function renderAdminHomeDashboard() {
       </section>
     </div>
   `;
+}
+
+const COPY_PLAN_PAIRS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT", "TRXUSDT", "TONUSDT", "LINKUSDT", "AVAXUSDT", "DOTUSDT", "LTCUSDT", "BCHUSDT", "UNIUSDT", "ATOMUSDT", "NEARUSDT", "APTUSDT", "ARBUSDT", "ETCUSDT"];
+
+function renderAdminCopyPlans() {
+  return `<section class="admin-dashboard-section admin-copy-plans">
+    <div class="section-head"><div><h3>Scheduled copy plans</h3><p class="muted-copy">Configure user returns separately from live spot orders.</p></div></div>
+    <form id="admin-copy-plan-form" class="copy-plan-form">
+      <label class="ticket-box"><span>Pair</span><select name="symbol" required>${COPY_PLAN_PAIRS.map((pair) => `<option value="${pair}">${pair}</option>`).join("")}</select></label>
+      <label class="ticket-box"><span>Profit (%)</span><input name="profitPercent" type="number" min="0.01" max="1000" step="0.01" required placeholder="e.g. 5" /></label>
+      <label class="ticket-box"><span>Timeframe (hours)</span><input name="durationHours" type="number" min="0.0167" max="8760" step="0.01" required placeholder="e.g. 24" /></label>
+      <label class="ticket-box"><span>Open at</span><input name="scheduledAt" type="datetime-local" required /></label>
+      <button class="button-primary shimmer-button" type="submit">Schedule copy plan</button>
+    </form>
+    <div class="copy-plan-list">${(state.copyPlans || []).map((plan) => `<article><div><strong>${escapeHtml(plan.symbol)}</strong><small>${escapeHtml(plan.status)} · ${formatNumber(plan.profitPercent, 2)}% · ${formatNumber(plan.durationHours, 2)}h</small></div><time>${escapeHtml(new Date(plan.scheduledAt).toLocaleString())}</time></article>`).join("") || `<p class="muted-copy">No scheduled plans yet.</p>`}</div>
+  </section>`;
+}
+
+function renderUserCopyPlans() {
+  const plans = state.copyPlans || [];
+  if (!plans.length) return `<section class="mobile-card"><div class="section-head"><div><h3>Copy plans</h3><p class="muted-copy">Admin configured trades you can join with a chosen amount.</p></div></div><p class="muted-copy">No plans are open right now.</p></section>`;
+  return `<section class="mobile-card"><div class="section-head"><div><h3>Copy plans</h3><p class="muted-copy">Choose a plan, then set the amount from your balance.</p></div></div><div class="copy-plan-list">${plans.map((plan) => `<article><div><strong>${escapeHtml(plan.symbol)} <span class="copy-plan-status">${escapeHtml(plan.status)}</span></strong><small>Configured return ${formatNumber(plan.profitPercent, 2)}% · ${formatNumber(plan.durationHours, 2)} hours</small><small>Opens ${escapeHtml(new Date(plan.scheduledAt).toLocaleString())}</small>${plan.userInvestment ? `<small>Committed ${formatUsdtUnit(plan.userInvestment.amountUsdt || 0)}</small>` : ""}</div>${plan.status === "OPEN" && !plan.userInvestment ? `<button class="button-primary" data-copy-plan-join="${escapeHtml(plan.id)}" type="button">Join plan</button>` : plan.userInvestment ? `<small>${escapeHtml(plan.userInvestment.status)}</small>` : ""}</article>`).join("")}</div></section>`;
 }
 
 function renderTradeTicket() {
@@ -14864,6 +14890,7 @@ function renderHomePane() {
     const userHomeContent = `
       ${renderHomePromoSlider()}
       ${renderUserEarningsBalances()}
+      ${renderUserCopyPlans()}
       ${renderVtuQuickActions()}
       ${renderWalletHistorySection({
         limit: 3,
@@ -15236,6 +15263,14 @@ function bindInvestmentTradeActions() {
     });
   });
 
+  document.querySelectorAll("[data-copy-plan-join]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const maxAmount = Number(state.financialDashboard?.totalBalance?.usdt || 0);
+      state.actionModal = { type: "join-trade-amount", tradeId: button.dataset.copyPlanJoin, maxJoinAmountUsdt: String(maxAmount), chooseAmount: true, copyPlan: true };
+      render();
+    });
+  });
+
   document.querySelectorAll("[data-stop-trade-investment]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
@@ -15258,6 +15293,21 @@ function bindDashboardActions() {
   bindAdminUserDisclosureToggles();
   bindSignalFeedActions();
   bindInvestmentTradeActions();
+
+  const copyPlanForm = document.getElementById("admin-copy-plan-form");
+  if (copyPlanForm) copyPlanForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = new FormData(copyPlanForm);
+    const body = Object.fromEntries(data.entries());
+    body.scheduledAt = new Date(body.scheduledAt).toISOString();
+    void withLoading(async () => {
+      await api("/api/admin/copy-plans", { method: "POST", body: JSON.stringify(body) });
+      const payload = await api("/api/copy-plans");
+      state.copyPlans = payload.plans || [];
+      render();
+      showNotice("Copy plan scheduled");
+    }).catch((error) => showError(error.message));
+  });
 
   const notificationButton = document.getElementById("notification-toggle-btn");
   if (notificationButton) {

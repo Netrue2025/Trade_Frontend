@@ -3980,6 +3980,13 @@ body[data-theme="dark"] .vtu-amount-field input {
 .user-earnings-grid article { display:grid; gap:6px; min-width:0; padding:16px; border:1px solid var(--panel-border); border-radius:18px; background:var(--panel); box-shadow:var(--shadow); }
 .user-earnings-grid span,.user-earnings-grid small { color:var(--muted); font-size:.82rem; }
 .user-earnings-grid strong { color:var(--positive,#18a76b); font-size:1.15rem; }
+.copy-plan-form { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; align-items:end; }
+.copy-plan-form .button-primary { min-height:46px; }
+.copy-plan-list { display:grid; gap:9px; }
+.copy-plan-list article { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:13px 14px; border:1px solid var(--panel-border); border-radius:15px; background:var(--panel); }
+.copy-plan-list article > div { display:grid; gap:4px; min-width:0; }
+.copy-plan-list small,.copy-plan-list time { color:var(--muted); font-size:.78rem; }
+.copy-plan-status { margin-left:6px; color:var(--accent); font-size:.72rem; }
 
 .admin-settings-overview {
   display: grid;
@@ -4031,7 +4038,16 @@ body[data-theme="dark"] .vtu-amount-field input {
   display: grid;
   gap: 12px;
   min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--panel-border);
+  border-radius: 20px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
+
+.admin-trade-desk { border-color:rgba(245,91,18,.22); background:linear-gradient(135deg,rgba(255,241,228,.9),var(--panel) 48%); }
+.admin-dashboard-rail .admin-stat-tile { border-radius:18px; }
+.admin-dashboard-rail .admin-stat-tile .card-icon { color:var(--brand-orange,#f15b22); }
 
 .admin-dashboard-section > .section-head {
   padding: 0 2px;
@@ -4623,6 +4639,11 @@ body[data-theme="dark"] .mirror-guide-pill {
   .admin-dashboard-columns {
     grid-template-columns: 1fr;
   }
+
+  .admin-dashboard-section { padding:13px; border-radius:17px; }
+
+  .copy-plan-form { grid-template-columns:1fr; }
+  .copy-plan-list article { align-items:flex-start; flex-direction:column; }
 
   .admin-users-table-head {
     grid-template-columns: minmax(0, 1fr) 44px;
