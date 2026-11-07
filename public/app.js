@@ -5320,18 +5320,19 @@ function renderActionModal() {
 
   if (state.actionModal.type === "join-trade-amount") {
     const maxAmount = state.actionModal.maxJoinAmountUsdt || "";
+    const choosing = !!state.actionModal.chooseAmount;
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card">
           <button class="modal-close" id="action-modal-close-btn" type="button">x</button>
           <p class="modal-eyebrow neutral">Join trade</p>
-          <h3>Choose a smaller amount</h3>
-          <p class="modal-text">Sorry, you cannot join this trade because your amount is higher than the admin’s trade amount. Please reduce the amount to join.</p>
-          <p class="muted-copy">Enter an amount no higher than the admin’s trading amount of ${formatUsdtUnit(maxAmount)}.</p>
+          <h3>${choosing ? "Choose your trade amount" : "Choose a smaller amount"}</h3>
+          <p class="modal-text">${choosing ? "Choose how much of your available balance to use for this trade." : "Your amount is above the trade limit. Enter a smaller amount to join."}</p>
+          <p class="muted-copy">Available to join: ${formatUsdtUnit(maxAmount)}.</p>
           <form id="join-trade-amount-form" class="stack-form">
             <label class="stack-label">
               <span>Amount to lock (USDT)</span>
-              <input name="amountUsdt" type="number" min="0.00000001" max="${escapeHtml(maxAmount)}" step="0.00000001" placeholder="Enter a smaller amount" required />
+              <input name="amountUsdt" type="number" min="0.00000001" max="${escapeHtml(maxAmount)}" step="0.00000001" placeholder="Amount in USDT" required />
             </label>
             <div class="modal-actions">
               <button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button>
@@ -11111,11 +11112,6 @@ function renderTradeTicket() {
         <span>Take Profit (${summary.quoteAsset})</span>
         <input id="trade-tp" value="${tradeDraft.takeProfitPrice}" placeholder="Optional take profit price" />
       </label>
-      <div class="ticket-grid">
-        <label class="ticket-box soft"><span>Copied trade profit (%)</span><input id="trade-copy-profit" type="number" min="0.01" max="1000" step="0.01" value="${tradeDraft.copyProfitPercent}" placeholder="Set user return" /></label>
-        <label class="ticket-box soft"><span>Copied trade duration (hours)</span><input id="trade-copy-duration" type="number" min="0.0167" max="8760" step="0.01" value="${tradeDraft.copyDurationHours}" placeholder="e.g. 24" /></label>
-      </div>
-      <p class="muted-copy">Users who join this plan receive the configured return when its duration ends, independent of live market prices.</p>
       <button id="trade-submit-btn" class="button-primary shimmer-button ticket-submit" type="button">Place Spot Trade</button>
     </section>
   `;
@@ -14867,6 +14863,7 @@ function renderReferralPane() {
 function renderHomePane() {
     const userHomeContent = `
       ${renderHomePromoSlider()}
+      ${renderUserEarningsBalances()}
       ${renderVtuQuickActions()}
       ${renderWalletHistorySection({
         limit: 3,
@@ -14888,6 +14885,16 @@ function renderHomePane() {
           : renderAdminHomeDashboard()
       }
     `;
+}
+
+function renderUserEarningsBalances() {
+  const earnings = state.financialDashboard?.earningsBalances || {};
+  const trading = earnings.tradingInterest || {};
+  const referral = earnings.referral || {};
+  return `<section class="user-earnings-grid" aria-label="Earned balances">
+    <article><span>Trading interest earned</span><strong>${formatUsdtUnit(trading.USDT || 0)}</strong><small>${formatNaira(trading.NGN || 0)}</small></article>
+    <article><span>Referral earnings</span><strong>${formatNaira(referral.NGN || 0)}</strong><small>${formatUsdtUnit(referral.USDT || 0)}</small></article>
+  </section>`;
 }
 
 function renderDigitalServicesPane() {
@@ -15222,7 +15229,11 @@ function bindInvestmentTradeActions() {
   });
 
   document.querySelectorAll("[data-join-trade]").forEach((button) => {
-    button.addEventListener("click", () => joinTradeNow(button.dataset.joinTrade));
+    button.addEventListener("click", () => {
+      const maxAmount = Number(state.financialDashboard?.totalBalance?.usdt || 0);
+      state.actionModal = { type: "join-trade-amount", tradeId: button.dataset.joinTrade, maxJoinAmountUsdt: String(maxAmount), chooseAmount: true };
+      render();
+    });
   });
 
   document.querySelectorAll("[data-stop-trade-investment]").forEach((button) => {
@@ -17155,8 +17166,6 @@ async function submitTrade() {
     quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? marketSpend || fallbackSpend : "",
     price: tradeDraft.type === "LIMIT" ? tradeDraft.price : "",
     takeProfitPrice: tradeDraft.takeProfitPrice,
-    copyProfitPercent: tradeDraft.copyProfitPercent,
-    copyDurationHours: tradeDraft.copyDurationHours,
   };
 
   await withLoading(async () => {

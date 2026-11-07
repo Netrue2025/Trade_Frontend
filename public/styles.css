@@ -3972,9 +3972,14 @@ body[data-theme="dark"] .vtu-amount-field input {
 .admin-dashboard-rail,
 .admin-control-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
 }
+
+.user-earnings-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.user-earnings-grid article { display:grid; gap:6px; min-width:0; padding:16px; border:1px solid var(--panel-border); border-radius:18px; background:var(--panel); box-shadow:var(--shadow); }
+.user-earnings-grid span,.user-earnings-grid small { color:var(--muted); font-size:.82rem; }
+.user-earnings-grid strong { color:var(--positive,#18a76b); font-size:1.15rem; }
 
 .admin-settings-overview {
   display: grid;
@@ -4598,19 +4603,17 @@ body[data-theme="dark"] .mirror-guide-pill {
 
   .admin-dashboard-rail,
   .admin-control-grid {
-    display: flex;
-    gap: 10px;
-    overflow-x: auto;
-    padding-bottom: 6px;
-    scroll-snap-type: x mandatory;
+    display: grid;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 8px;
+    overflow: visible;
   }
 
   .admin-stat-tile,
   .admin-control-tile {
-    flex: 0 0 calc(50% - 8px);
-    min-width: 142px;
-    min-height: 108px;
-    scroll-snap-align: start;
+    min-width: 0;
+    min-height: 96px;
+    padding: 11px;
   }
 
   .admin-balance-tile {
@@ -4642,6 +4645,8 @@ body[data-theme="dark"] .mirror-guide-pill {
   }
 
 }
+
+@media (max-width: 420px) { .user-earnings-grid { grid-template-columns:1fr; } }
 
 .admin-user-actions {
   flex-wrap: wrap;
