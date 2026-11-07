@@ -8205,3 +8205,117 @@ button:disabled {
   .membership-access-strip { align-items: flex-start; flex-direction: column; }
   .membership-modal .modal-actions { position: sticky; bottom: 0; padding-top: 10px; background: var(--card); }
 }
+
+/* Mobile dashboard application surface */
+body:not([data-theme="dark"]) { --bg:#fff; --bg-start:#fff; --bg-end:#fff; --bg-glow-1:transparent; --bg-glow-2:transparent; }
+body:not([data-theme="dark"]) .user-summary-hero { color:#20242b; border:1px solid #eee3b5; background:linear-gradient(135deg,#fffdf5,#fff 74%); box-shadow:0 10px 30px rgba(46,39,13,.08); }
+body:not([data-theme="dark"]) .user-summary-hero .fintech-card-pattern { opacity:.12; background:linear-gradient(165deg,transparent 45%,rgba(215,178,23,.38) 45.5%,transparent 46%); }
+body:not([data-theme="dark"]) .user-summary-hero .fintech-card-top,
+body:not([data-theme="dark"]) .user-summary-hero .fintech-balance-row,
+body:not([data-theme="dark"]) .user-summary-hero .fintech-subline,
+body:not([data-theme="dark"]) .user-summary-hero .muted-bright { color:#555a63; }
+body:not([data-theme="dark"]) .user-summary-hero .card-icon { color:#9a7b00; background:#fff2bc; }
+body:not([data-theme="dark"]) .user-summary-hero .locked-investment-box { color:#555a63; background:rgba(246,243,231,.9); border-color:#e8e2cc; }
+body:not([data-theme="dark"]) .user-summary-hero .locked-investment-box strong { color:#22262d; }
+body:not([data-theme="dark"]) .user-summary-hero .hero-action-btn { color:#24272d; background:#f2cb20; }
+body:not([data-theme="dark"]) .user-summary-hero .hero-action-btn.ghost { color:#282c32; background:#fff; border:1px solid #e7e7e7; }
+body:not([data-theme="dark"]) .admin-dashboard-intro { color:#24272d; border:1px solid #eee4bc; background:linear-gradient(125deg,#fffdf5,#fff 70%); box-shadow:0 8px 26px rgba(46,39,13,.06); }
+body:not([data-theme="dark"]) .admin-dashboard-intro p,
+body:not([data-theme="dark"]) .admin-dashboard-intro > span { color:#737780; }
+body:not([data-theme="dark"]) .summary-hero.fintech-card:not(.user-summary-hero) { color:#24272d; border:1px solid #ece7d3; background:linear-gradient(135deg,#fffdf5,#fff 78%); box-shadow:0 8px 24px rgba(46,39,13,.06); }
+body:not([data-theme="dark"]) .summary-hero.fintech-card:not(.user-summary-hero) .fintech-card-top,
+body:not([data-theme="dark"]) .summary-hero.fintech-card:not(.user-summary-hero) .fintech-balance-row,
+body:not([data-theme="dark"]) .summary-hero.fintech-card:not(.user-summary-hero) .muted-bright { color:#5e636b; }
+body:not([data-theme="dark"]) .summary-hero.fintech-card:not(.user-summary-hero) .hero-chip { color:#555a63; background:#f3f1e7; }
+body:not([data-theme="dark"]) .summary-hero.fintech-card:not(.user-summary-hero) .fintech-card-pattern { opacity:.08; }
+body:not([data-theme="dark"]) .quick-menu-sheet { color:var(--text); border:1px solid var(--line); background:var(--panel); box-shadow:var(--shadow); }
+body:not([data-theme="dark"]) .quick-menu-sheet .quick-menu-handle { background:#c8cbd0; }
+body[data-theme="dark"] .user-summary-hero { color:#fff; }
+body[data-theme="dark"] .admin-dashboard-intro { color:#fff; }
+
+.copy-plan-market-card { display:grid; gap:11px; margin:0 0 14px; padding:14px; border:1px solid #e9e3c9; border-radius:19px; background:#fff; }
+.copy-plan-market-head { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:10px; }
+.copy-plan-market-head > div { display:grid; gap:2px; }
+.copy-plan-market-head small,.copy-plan-chart-footer,.copy-plan-fallback-note { color:#858a91; font-size:.75rem; }
+.copy-plan-market-status { display:flex; align-items:center; gap:6px; color:#6c747c; font-size:.75rem; font-weight:800; }
+.copy-plan-market-status i { width:8px; height:8px; border-radius:50%; background:#12a77a; box-shadow:0 0 0 4px rgba(18,167,122,.12); }
+.copy-plan-market-quote { display:flex; align-items:baseline; gap:10px; }
+.copy-plan-market-quote strong { color:#23272d; font-size:1.25rem; }
+.copy-plan-market-quote span { font-size:.8rem; font-weight:800; }
+.copy-plan-market-chart { height:160px; overflow:hidden; border-radius:14px; background:linear-gradient(180deg,#fffbed,#fff 90%); }
+.copy-plan-market-chart svg { width:100%; height:100%; overflow:visible; }
+.copy-plan-market-line { fill:none; stroke:#c9a715; stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+.copy-plan-chart-loading { height:100%; display:grid; place-items:center; color:#858a91; font-size:.85rem; }
+.copy-plan-active-data { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:12px; border-radius:14px; background:#fff9e8; }
+.copy-plan-active-data > div { display:grid; gap:4px; min-width:0; }
+.copy-plan-active-data small { color:#85817a; font-size:.68rem; }
+.copy-plan-active-data strong { color:#765d00; font-size:.83rem; overflow-wrap:anywhere; }
+.copy-plan-chart-footer { display:flex; justify-content:space-between; gap:8px; }
+.copy-plan-market-disclaimer { margin:0; color:#777d85; font-size:.72rem; line-height:1.4; }
+body[data-theme="dark"] .copy-plan-market-card { border-color:var(--line); background:var(--panel); }
+body[data-theme="dark"] .copy-plan-market-quote strong { color:var(--text); }
+body[data-theme="dark"] .copy-plan-market-chart { background:var(--soft-surface); }
+body[data-theme="dark"] .copy-plan-active-data { background:var(--soft-surface); }
+body[data-theme="dark"] .bottom-nav-user,
+body[data-theme="dark"] .bottom-nav:not(.bottom-nav-user) { border-color:var(--line); background:rgba(10,15,24,.96); }
+body[data-theme="dark"] .bottom-nav-user .nav-button,
+body[data-theme="dark"] .bottom-nav:not(.bottom-nav-user) .nav-button,
+body[data-theme="dark"] .bottom-nav:not(.bottom-nav-user) .nav-home-button { color:var(--nav-text); }
+body[data-theme="dark"] .admin-quick-nav-btn { border-color:var(--line); background:var(--panel); color:var(--text); }
+
+@media (max-width: 720px) {
+  body[data-app-shell="dashboard"] .shell { width:100%; max-width:560px; padding: max(10px,env(safe-area-inset-top)) 14px max(92px,calc(env(safe-area-inset-bottom) + 82px)); }
+  body[data-app-shell="dashboard"] .app-shell { gap:0; }
+  body[data-app-shell="dashboard"] .dashboard-topbar { align-items:center; margin:0 -14px 15px; padding:12px 17px; border-bottom:1px solid #eef0f2; background:var(--panel); }
+  body[data-app-shell="dashboard"] .dashboard-topbar strong { font-size:1.12rem; }
+  body[data-app-shell="dashboard"] .dashboard-topbar .muted-copy { margin-top:4px; }
+  .app-screen-home:has(.user-dashboard-content) { gap:0; }
+  .user-dashboard-content { gap:13px; }
+  .balance-carousel { overflow:visible; background:transparent; }
+  .user-summary-hero { min-height:0; padding:17px!important; border-radius:22px; }
+  .user-summary-hero .fintech-investment-grid { grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; }
+  .user-summary-hero .fintech-pnl-stack h2 { font-size:1.8rem; }
+  .user-summary-hero .locked-investment-box { min-width:84px; padding:8px; }
+  .user-summary-hero .hero-actions { gap:8px; }
+  .user-summary-hero .hero-action-btn { min-height:43px; }
+  .user-session-banner { grid-template-columns:auto minmax(0,1fr); gap:10px; margin:10px 0 13px; padding:13px; border-radius:18px; }
+  .session-status-pill { grid-column:2; justify-self:start; margin-top:-2px; }
+  .user-earnings-grid { gap:9px; }
+  .user-earnings-grid article { padding:13px; padding-right:39px; border-radius:17px; }
+  .user-earnings-grid strong { font-size:1.06rem; }
+  .earnings-icon { top:12px; right:12px; width:25px; height:25px; }
+  .user-shortcut-card { padding:10px 5px; border-radius:18px; }
+  .user-shortcut-card button span { width:40px; height:40px; border-radius:13px; }
+  .user-copy-plans-panel,.user-dashboard-recent,.user-dashboard-wide { padding:14px; border-radius:20px; }
+  .copy-plan-market-chart { height:145px; }
+  .copy-plan-return-box { padding:11px 9px; }
+  .copy-plan-return-box small { font-size:.65rem; }
+  .copy-plan-join-row { grid-template-columns:minmax(0,1fr); }
+  .copy-plan-join-row .button-primary { width:100%; }
+  .admin-dashboard-intro { align-items:flex-start; padding:16px; border-radius:19px; }
+  .admin-dashboard-intro h2 { font-size:1.28rem; }
+  .admin-dashboard-intro p { max-width:30ch; font-size:.78rem; }
+  .admin-dashboard-intro > span { white-space:nowrap; }
+  .admin-quick-nav { display:flex; gap:8px; margin:12px -2px; padding:2px 2px 8px; overflow-x:auto; overscroll-behavior-inline:contain; scrollbar-width:none; }
+  .admin-quick-nav::-webkit-scrollbar { display:none; }
+  .admin-quick-nav-btn { flex:0 0 76px; min-height:76px; display:grid; justify-items:center; align-content:center; gap:6px; padding:8px 5px; border:1px solid #eceef0; border-radius:16px; background:#fff; color:#565d66; font-size:.68rem; }
+  .admin-quick-nav-btn .nav-icon { color:#a1840c; }
+  .admin-dashboard-rail { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .admin-stat-tile { min-height:96px; border-radius:16px; box-shadow:0 6px 18px rgba(24,32,45,.05); }
+  .admin-dashboard-section { gap:11px; margin-top:2px; padding:14px; border-radius:19px; }
+  .admin-trade-desk { background:var(--panel); }
+  .admin-copy-plans .copy-plan-form { grid-template-columns:1fr; }
+  .admin-copy-plans .copy-plan-form .button-primary { width:100%; }
+  .bottom-nav:not(.bottom-nav-user) { width:calc(100vw - 22px); max-width:520px; grid-template-columns:1fr 1fr 1fr; min-height:65px; padding:7px 10px; border:1px solid #e7e9ed; border-radius:20px 20px 14px 14px; background:rgba(255,255,255,.98); box-shadow:0 -5px 22px rgba(21,29,45,.08); }
+  .bottom-nav:not(.bottom-nav-user) .nav-button,.bottom-nav:not(.bottom-nav-user) .nav-home-button { color:#858c96; }
+  .bottom-nav:not(.bottom-nav-user) .nav-button.active,.bottom-nav:not(.bottom-nav-user) .nav-home-button.active { color:#947600; }
+}
+
+@media (max-width: 390px) {
+  body[data-app-shell="dashboard"] .shell { padding-right:11px; padding-left:11px; }
+  .user-earnings-grid { grid-template-columns:1fr; }
+  .user-earnings-grid article { grid-template-columns:minmax(0,1fr) auto; align-items:center; }
+  .user-earnings-grid a { grid-column:1/-1; }
+  .admin-stat-tile { padding:10px; }
+  .admin-stat-tile strong { font-size:1.05rem; }
+}

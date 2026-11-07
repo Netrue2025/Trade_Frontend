@@ -143,6 +143,7 @@ const state = {
   openOrders: [],
   trades: [],
   copyPlans: [],
+  copyPlanChart: { symbol: "BTCUSDT", candles: [], loading: false, updatedAt: null },
   dashboardMarketMode: "spot",
   hideBalanceAmounts: localStorage.getItem(BALANCE_PRIVACY_STORAGE_KEY) === "true",
   futuresAccount: null,
@@ -7593,6 +7594,7 @@ async function loadDashboardData() {
     },
   });
   await api("/api/copy-plans").then((payload) => { state.copyPlans = Array.isArray(payload?.plans) ? payload.plans : []; }).catch(() => { state.copyPlans = []; });
+  if (state.user.role === "user" && state.activeTab === "home") void refreshUserCopyPlanChart();
   state.loadingTrades = false;
   state.loadingUsers = false;
   const adminUserIds = new Set(state.users.map((user) => user.id));
@@ -11100,7 +11102,94 @@ function renderUserCopyPlans() {
       ${plan.userInvestment ? `<p class="copy-plan-joined-note">${escapeHtml(plan.userInvestment.status)} | Committed ${formatUsdtUnit(plan.userInvestment.amountUsdt || 0)}</p>` : canJoin ? `<div class="copy-plan-join-row"><label><span>Investment (USDT)</span><input data-copy-plan-amount="${escapeHtml(plan.id)}" type="number" min="0.00000001" max="${available}" step="0.01" inputmode="decimal" placeholder="Enter amount" /><small>Available ${formatUsdtUnit(available)}</small></label><button class="button-primary" data-copy-plan-join="${escapeHtml(plan.id)}" type="button">${icon("signals")} Copy trade</button></div>` : `<p class="copy-plan-joined-note">Opens ${escapeHtml(new Date(plan.scheduledAt).toLocaleString())}</p>`}
     </article>`;
   }).join("");
-  return `<section class="user-copy-plans-panel" id="user-copy-plans-panel"><div class="section-head"><div><h3>Configured trades</h3><p class="muted-copy">Set your investment for the scheduled admin return.</p></div><span class="copy-plan-count">${plans.filter((plan) => plan.status === "OPEN").length} open</span></div><div class="copy-plan-list">${planRows || `<article class="copy-plan-empty"><strong>No configured trades yet</strong><p class="muted-copy">Scheduled trades from the admin will appear here when available.</p></article>`}</div></section>`;
+  return `<section class="user-copy-plans-panel" id="user-copy-plans-panel"><div class="section-head"><div><h3>Trade</h3><p class="muted-copy">Live market and configured sessions</p></div><span class="copy-plan-count">${plans.filter((plan) => plan.status === "OPEN").length} open</span></div><div data-copy-plan-chart-host>${renderCopyPlanMarketChart()}</div><div class="copy-plan-list">${planRows || `<article class="copy-plan-empty"><strong>No configured trades yet</strong><p class="muted-copy">Scheduled trades from the admin will appear here when available.</p></article>`}</div></section>`;
+}
+
+function getActiveUserCopyPlan() {
+  return (state.copyPlans || []).find((plan) => plan.status === "OPEN") || null;
+}
+
+function getUserCopyPlanChartSymbol() {
+  return String(getActiveUserCopyPlan()?.symbol || "BTCUSDT").trim().toUpperCase() || "BTCUSDT";
+}
+
+function renderCopyPlanMarketChart() {
+  const { symbol, candles = [], loading } = state.copyPlanChart || {};
+  const activePlan = getActiveUserCopyPlan();
+  const chartSymbol = getUserCopyPlanChartSymbol();
+  const geometry = candles.length && symbol === chartSymbol ? getSignalChartGeometry(candles) : null;
+  const summary = geometry ? getSignalChartSummary(candles) : null;
+  const line = geometry ? buildSignalLinePath(candles, geometry) : "";
+  const timeLeft = activePlan?.endsAt ? Math.max(0, new Date(activePlan.endsAt).getTime() - Date.now()) : 0;
+  const remaining = `${String(Math.floor(timeLeft / 3600000)).padStart(2, "0")}:${String(Math.floor((timeLeft % 3600000) / 60000)).padStart(2, "0")}:${String(Math.floor((timeLeft % 60000) / 1000)).padStart(2, "0")}`;
+  return `<article class="copy-plan-market-card ${activePlan ? "has-active-plan" : ""}">
+    <div class="copy-plan-market-head"><span class="copy-plan-symbol-mark">${icon("signals")}</span><div><strong>${escapeHtml(chartSymbol.replace(/(USDT|USD)$/, "/$1"))}</strong><small>${activePlan ? "Admin configured live trade" : "Bitcoin live market"}</small></div><span class="copy-plan-market-status"><i></i>${activePlan ? "Live" : "Market"}</span></div>
+    <div class="copy-plan-market-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${Number(summary?.movePercent || 0) >= 0 ? "positive" : "negative"}">${summary ? `${Number(summary.movePercent) >= 0 ? "+" : ""}${formatNumber(summary.movePercent, 2)}%` : "24h market"}</span></div>
+    <div class="copy-plan-market-chart" aria-label="${escapeHtml(chartSymbol)} live market chart">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="copy-plan-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#e8bd18" stop-opacity=".24"/><stop offset="1" stop-color="#e8bd18" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#copy-plan-chart-fill)"/><path d="${line}" class="copy-plan-market-line"/></svg>` : `<div class="copy-plan-chart-loading">${loading ? "Loading live market data…" : "Market chart will appear when data is available."}</div>`}</div>
+    ${activePlan ? `<div class="copy-plan-active-data"><div><small>Configured return</small><strong>${formatNumber(activePlan.profitPercent, 2)}%</strong></div><div><small>Session ends in</small><strong data-copy-plan-countdown>${remaining}</strong></div><div><small>Term</small><strong>${formatNumber(activePlan.durationHours, 2)}h</strong></div><div><small>Your investment</small><strong>${activePlan.userInvestment ? formatUsdtUnit(activePlan.userInvestment.amountUsdt || 0) : "Not joined"}</strong></div></div><p class="copy-plan-market-disclaimer">Market prices are shown for reference. Your return follows the admin configured trade.</p>` : `<div class="copy-plan-fallback-note">BTC/USDT market view · 15 minute candles</div>`}
+    <div class="copy-plan-chart-footer"><span>Live market data</span><span>${state.copyPlanChart?.updatedAt ? `Updated ${new Date(state.copyPlanChart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Connecting"}</span></div>
+  </article>`;
+}
+
+async function refreshUserCopyPlanChart({ refreshPlans = false } = {}) {
+  if (refreshPlans && state.user?.role === "user") {
+    const payload = await api("/api/copy-plans").catch(() => null);
+    if (payload && Array.isArray(payload.plans)) {
+      const previous = (state.copyPlans || []).map((plan) => `${plan.id}:${plan.status}`).join("|");
+      state.copyPlans = payload.plans;
+      const next = state.copyPlans.map((plan) => `${plan.id}:${plan.status}`).join("|");
+      if (previous !== next) refreshUserCopyPlanPanelDom();
+    }
+  }
+  const symbol = getUserCopyPlanChartSymbol();
+  if (state.copyPlanChart.symbol !== symbol) state.copyPlanChart = { ...state.copyPlanChart, symbol, candles: [], loading: true };
+  else state.copyPlanChart = { ...state.copyPlanChart, loading: !(state.copyPlanChart.candles || []).length };
+  const host = document.querySelector("[data-copy-plan-chart-host]");
+  if (host) host.innerHTML = renderCopyPlanMarketChart();
+  try {
+    const payload = await api(`/api/market/chart?symbol=${encodeURIComponent(symbol)}&interval=15m&limit=48`);
+    if (symbol !== getUserCopyPlanChartSymbol()) return refreshUserCopyPlanChart();
+    state.copyPlanChart = { symbol, candles: payload.candles || [], loading: false, updatedAt: new Date().toISOString() };
+  } catch {
+    state.copyPlanChart = { ...state.copyPlanChart, symbol, loading: false };
+  }
+  const nextHost = document.querySelector("[data-copy-plan-chart-host]");
+  if (nextHost) nextHost.innerHTML = renderCopyPlanMarketChart();
+}
+
+function refreshUserCopyPlanPanelDom() {
+  const current = document.getElementById("user-copy-plans-panel");
+  if (!current) return;
+  const values = [...current.querySelectorAll("[data-copy-plan-amount]")].map((input) => [input.dataset.copyPlanAmount, input.value]);
+  const focusedPlanId = document.activeElement?.dataset?.copyPlanAmount || "";
+  const replacementHost = document.createElement("div");
+  replacementHost.innerHTML = renderUserCopyPlans();
+  const replacement = replacementHost.firstElementChild;
+  if (!replacement) return;
+  current.replaceWith(replacement);
+  values.forEach(([planId, value]) => {
+    const input = replacement.querySelector(`[data-copy-plan-amount="${CSS.escape(planId)}"]`);
+    if (input) input.value = value;
+  });
+  replacement.querySelectorAll("[data-copy-plan-join]").forEach((button) => {
+    button.onclick = () => void joinScheduledCopyPlan(button.dataset.copyPlanJoin);
+  });
+  if (focusedPlanId) replacement.querySelector(`[data-copy-plan-amount="${CSS.escape(focusedPlanId)}"]`)?.focus();
+}
+
+let copyPlanChartRefreshTimer = null;
+function syncCopyPlanChartRefreshTimer() {
+  if (state.user?.role === "user" && state.activeTab === "home") {
+    if (!copyPlanChartRefreshTimer) {
+      void refreshUserCopyPlanChart();
+      copyPlanChartRefreshTimer = setInterval(() => {
+        if (isDocumentVisible() && state.activeTab === "home") void refreshUserCopyPlanChart({ refreshPlans: true });
+      }, 30000);
+    }
+  } else {
+    clearInterval(copyPlanChartRefreshTimer);
+    copyPlanChartRefreshTimer = null;
+  }
 }
 function renderTradeTicket() {
   const summary = getCurrentTradeSummary();
@@ -17611,6 +17700,7 @@ function render() {
     return;
   }
   renderDashboardShell();
+  syncCopyPlanChartRefreshTimer();
   syncQuestCountdownTimer();
   syncQuestQuestionTimer();
   syncHomePromoSliderTimer();
