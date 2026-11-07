@@ -2879,6 +2879,8 @@ function getTradeFormDefaults() {
     quantity: "",
     quoteOrderQty: "",
     takeProfitPrice: "",
+    copyProfitPercent: "",
+    copyDurationHours: "",
   };
 }
 
@@ -3886,6 +3888,11 @@ function getSignalGuidePrice(candles) {
 }
 
 function getTradePnlPercent(trade) {
+  if (state.user?.role === "user" && trade.userInvestment?.profitPercent != null) {
+    return String(trade.userInvestment.status || "").toUpperCase() === "COMPLETED"
+      ? Number(trade.userInvestment.profitPercent)
+      : 0;
+  }
   const entry = getTradeEntryPrice(trade);
   const current = Number(getTradeCurrentMarket(trade.symbol)?.price || 0);
   if (!entry || !current) {
@@ -4016,10 +4023,9 @@ function getTradeCurrentValue(trade) {
 }
 
 function getTradePnlValue(trade) {
-  if (state.user?.role === "user" && trade.userInvestment?.status === "ACTIVE") {
+  if (state.user?.role === "user" && trade.userInvestment?.profitPercent != null) {
     const amountUsdt = Number(trade.userInvestment.amountUsdt || 0);
-    const baselinePnlPercent = Number(trade.userInvestment.baselinePnlPercent || 0);
-    return amountUsdt * ((getTradePnlPercent(trade) - baselinePnlPercent) / 100);
+    return amountUsdt * (getTradePnlPercent(trade) / 100);
   }
   const entry = getTradeEntryPrice(trade);
   const current = Number(getTradeCurrentMarket(trade.symbol)?.price || 0);
@@ -6000,6 +6006,7 @@ function renderActionModal() {
   if (state.actionModal.type === "stop-investment") {
     const investment = trade.userInvestment || {};
     const amountUsdt = Number(investment.amountUsdt || 0);
+    const configuredPlan = investment.profitPercent != null;
     const pnlPercent = getUserInvestmentPnlPercent(trade);
     const pnlValue = getTradePnlValue(trade);
     const currentValue = Math.max(amountUsdt + pnlValue, 0);
@@ -6020,20 +6027,9 @@ function renderActionModal() {
               <span>Joined amount</span>
               <strong>${formatUsdtUnit(amountUsdt)}</strong>
             </div>
-            <div class="action-metric">
-              <span>Estimated value</span>
-              <strong>${formatUsdtUnit(currentValue)}</strong>
-            </div>
-            <div class="action-metric">
-              <span>Current price</span>
-              <strong>${currentPrice ? formatNumber(currentPrice, 8) : "-"}</strong>
-            </div>
-            <div class="action-metric">
-              <span>Estimated P&L</span>
-              <strong class="${pnlTone}">${pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(pnlValue))} (${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%)</strong>
-            </div>
+            ${configuredPlan ? `<div class="action-metric"><span>Configured return</span><strong>${formatNumber(investment.profitPercent, 2)}% after ${formatNumber(investment.durationHours, 2)} hours</strong></div><div class="action-metric"><span>Early cancellation</span><strong>Principal returned without profit</strong></div>` : `<div class="action-metric"><span>Estimated value</span><strong>${formatUsdtUnit(currentValue)}</strong></div><div class="action-metric"><span>Current price</span><strong>${currentPrice ? formatNumber(currentPrice, 8) : "-"}</strong></div><div class="action-metric"><span>Estimated P&amp;L</span><strong class="${pnlTone}">${pnlValue >= 0 ? "+" : "-"}${formatUsdtUnit(Math.abs(pnlValue))} (${pnlPercent >= 0 ? "+" : ""}${formatNumber(pnlPercent, 2)}%)</strong></div>`}
           </div>
-          <p class="modal-text">Stopping cancels this trade only for you. It stays active for other joined users and admin until they close or stop their own connection.</p>
+          <p class="modal-text">${configuredPlan ? "Canceling before expiry returns your principal without the configured profit." : "Stopping cancels this trade only for you. It stays active for other joined users and admin until they close or stop their own connection."}</p>
           <div class="modal-actions">
             <button class="button-secondary" id="action-modal-cancel-btn" type="button">No</button>
             <button class="button-primary shimmer-button danger-action" id="confirm-stop-investment-btn" data-trade-id="${escapeHtml(trade.id || "")}" type="button">Yes, stop trade</button>
@@ -11115,6 +11111,11 @@ function renderTradeTicket() {
         <span>Take Profit (${summary.quoteAsset})</span>
         <input id="trade-tp" value="${tradeDraft.takeProfitPrice}" placeholder="Optional take profit price" />
       </label>
+      <div class="ticket-grid">
+        <label class="ticket-box soft"><span>Copied trade profit (%)</span><input id="trade-copy-profit" type="number" min="0.01" max="1000" step="0.01" value="${tradeDraft.copyProfitPercent}" placeholder="Set user return" /></label>
+        <label class="ticket-box soft"><span>Copied trade duration (hours)</span><input id="trade-copy-duration" type="number" min="0.0167" max="8760" step="0.01" value="${tradeDraft.copyDurationHours}" placeholder="e.g. 24" /></label>
+      </div>
+      <p class="muted-copy">Users who join this plan receive the configured return when its duration ends, independent of live market prices.</p>
       <button id="trade-submit-btn" class="button-primary shimmer-button ticket-submit" type="button">Place Spot Trade</button>
     </section>
   `;
@@ -11708,7 +11709,10 @@ function renderExternalHoldingDisclosure(holding) {
 function renderOpenOrdersSection() {
   const canManageTrades = state.user?.role === "admin";
   const activeTrades = state.trades.filter(isTradeVisibleOnHome);
-  const openTrades = sortRecent(activeTrades.filter(isTradeStrictlyOpen));
+  const openTrades = sortRecent(activeTrades.filter((trade) =>
+    (state.user?.role === "user" && trade.copyPlan && (!trade.userInvestment || trade.userInvestment.status === "ACTIVE"))
+      || isTradeStrictlyOpen(trade)
+  ));
   const queuedTrades = sortRecent(activeTrades.filter(isQueuedTrade));
   const queuedTradeOrderIds = new Set(queuedTrades.map(getQueuedTradeOrderId).filter(Boolean));
   const externalOpenOrders = sortRecent(state.openOrders || []).filter((order) => !queuedTradeOrderIds.has(String(order.orderId || "")));
@@ -11737,20 +11741,22 @@ function renderOpenOrdersSection() {
           ${visibleOpenTrades
             .map(
               (trade) => {
-                const pnlPercent = getTradePnlPercent(trade);
+                const isJoinedInvestment = state.user?.role === "user" && trade.userInvestment?.status === "ACTIVE";
+                const pnlPercent = state.user?.role === "user" && trade.copyPlan
+                  ? Number(trade.userInvestment?.profitPercent ?? trade.copyPlan.profitPercent)
+                  : getTradePnlPercent(trade);
                 const currentValue = getTradeCurrentValue(trade);
                 const currentPrice = Number(getTradeCurrentMarket(trade.symbol).price || 0);
                 const targetPrice = trade.takeProfitTargetPrice || "";
                 const targetPnl = getTradeTpPnlPercent(trade, targetPrice);
-                const isJoinedInvestment = state.user?.role === "user" && trade.userInvestment?.status === "ACTIVE";
                 const isExpanded = state.expandedTradeIds.includes(trade.id);
                 return `
-                  <details class="trade-disclosure trade-row-rich" data-trade-id="${trade.id}" data-trade-symbol-row="${trade.symbol}" data-trade-entry="${getTradeEntryPrice(trade)}" data-trade-side="${trade.side}" data-trade-quantity="${getTradeRemainingQuantity(trade)}" ${isExpanded ? "open" : ""}>
+                  <details class="trade-disclosure trade-row-rich" data-trade-id="${trade.id}" data-trade-symbol-row="${trade.symbol}" data-trade-entry="${getTradeEntryPrice(trade)}" data-trade-side="${trade.side}" data-trade-quantity="${getTradeRemainingQuantity(trade)}" data-trade-pnl-static="${state.user?.role === "user" && !!trade.copyPlan}" ${isExpanded ? "open" : ""}>
                     <summary class="trade-summary-row">
                       <div>
                         <strong>${trade.symbol}</strong>
                         <p class="muted-copy">${renderExchangeBadge(trade.exchange || getActiveExchange())}</p>
-                        <p class="muted-copy" data-trade-current-value>${formatUsdtUnit(currentValue)}</p>
+                        ${state.user?.role === "admin" ? `<p class="muted-copy" data-trade-current-value>${formatUsdtUnit(currentValue)}</p>` : `<p class="muted-copy">${isJoinedInvestment ? "Investment" : "Configured copy plan"}</p>`}
                       </div>
                       <div class="asset-values">
                         ${renderTradeStatusBadge(trade.lifecycleStatus)}
@@ -11774,9 +11780,7 @@ function renderOpenOrdersSection() {
                         </div>
                       </div>
                       <div class="trade-detail-lines">
-                        <p class="muted-copy trade-meta-line" data-trade-entry>Entry ${getTradeEntryPrice(trade) ? formatNumber(getTradeEntryPrice(trade), 8) : "Market"}</p>
-                        <p class="muted-copy trade-meta-line" data-trade-current>Current ${currentPrice ? formatNumber(currentPrice, 8) : "-"}</p>
-                        <p class="muted-copy">Live value <span data-trade-current-value>${formatUsdtUnit(currentValue)}</span></p>
+                        ${state.user?.role === "admin" ? `<p class="muted-copy trade-meta-line" data-trade-entry>Entry ${getTradeEntryPrice(trade) ? formatNumber(getTradeEntryPrice(trade), 8) : "Market"}</p><p class="muted-copy trade-meta-line" data-trade-current>Current ${currentPrice ? formatNumber(currentPrice, 8) : "-"}</p><p class="muted-copy">Live value <span data-trade-current-value>${formatUsdtUnit(currentValue)}</span></p>` : trade.copyPlan ? `<p class="muted-copy">${isJoinedInvestment ? `Configured return ${formatNumber(trade.userInvestment.profitPercent, 2)}% after ${formatNumber(trade.userInvestment.durationHours, 2)} hours; ends ${new Date(trade.userInvestment.expiresAt).toLocaleString()}` : `Copy plan: ${formatNumber(trade.copyPlan.profitPercent, 2)}% over ${formatNumber(trade.copyPlan.durationHours, 2)} hours`}</p>` : ""}
                         ${
                           targetPrice
                             ? `<p class="muted-copy">TP ${formatNumber(targetPrice, 8)} <span class="${targetPnl >= 0 ? "positive" : "negative"}">${targetPnl >= 0 ? "+" : ""}${formatNumber(targetPnl, 2)}%</span></p>`
@@ -11784,12 +11788,12 @@ function renderOpenOrdersSection() {
                         }
                       </div>
                       ${
-                        canManageTrades || isJoinedInvestment
+                        canManageTrades || isJoinedInvestment || (state.user?.role === "user" && !!trade.copyPlan)
                           ? `
                             <div class="trade-actions-inline trade-actions-stack reveal-actions">
                               ${canManageTrades ? `<button class="micro-btn" data-sell-trade="${trade.id}" type="button">Sell</button>` : ""}
                               ${canManageTrades ? `<button class="micro-btn primary" data-tp-trade="${trade.id}" type="button">TP</button>` : ""}
-                              ${isJoinedInvestment ? `<button class="micro-btn danger" data-stop-trade-investment="${trade.id}" type="button">Stop</button>` : ""}
+                              ${isJoinedInvestment ? `<button class="micro-btn danger" data-stop-trade-investment="${trade.id}" type="button">Cancel</button>` : state.user?.role === "user" && trade.copyPlan && !trade.userInvestment ? `<button class="micro-btn primary" data-join-trade="${trade.id}" type="button">Copy trade</button>` : ""}
                             </div>
                           `
                           : ""
@@ -17151,6 +17155,8 @@ async function submitTrade() {
     quoteOrderQty: tradeDraft.type === "MARKET" && tradeDraft.side === "BUY" ? marketSpend || fallbackSpend : "",
     price: tradeDraft.type === "LIMIT" ? tradeDraft.price : "",
     takeProfitPrice: tradeDraft.takeProfitPrice,
+    copyProfitPercent: tradeDraft.copyProfitPercent,
+    copyDurationHours: tradeDraft.copyDurationHours,
   };
 
   await withLoading(async () => {
@@ -17301,6 +17307,8 @@ function bindTradeTicketActions() {
   const quantityInput = document.getElementById("trade-quantity");
   const totalInput = document.getElementById("trade-total");
   const takeProfitInput = document.getElementById("trade-tp");
+  const copyProfitInput = document.getElementById("trade-copy-profit");
+  const copyDurationInput = document.getElementById("trade-copy-duration");
   const submitButton = document.getElementById("trade-submit-btn");
   const bboButton = document.getElementById("use-live-price-btn");
 
@@ -17343,6 +17351,8 @@ function bindTradeTicketActions() {
     }
   });
   if (takeProfitInput) takeProfitInput.addEventListener("input", () => updateTradeDraft({ takeProfitPrice: takeProfitInput.value }));
+  if (copyProfitInput) copyProfitInput.addEventListener("input", () => updateTradeDraft({ copyProfitPercent: copyProfitInput.value }));
+  if (copyDurationInput) copyDurationInput.addEventListener("input", () => updateTradeDraft({ copyDurationHours: copyDurationInput.value }));
   if (submitButton) submitButton.addEventListener("click", submitTrade);
   if (bboButton) bboButton.addEventListener("click", async () => {
     await Promise.allSettled([
