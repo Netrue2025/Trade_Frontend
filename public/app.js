@@ -1295,7 +1295,7 @@ function writeDraftFieldValue(field, value) {
     field.checked = String(field.value) === String(value);
     return;
   }
-  field.value = value ?? "";
+  field.value = value | "";
 }
 
 function captureFormDrafts(root = app) {
@@ -1381,8 +1381,8 @@ function getFocusedFieldSnapshot(root = app) {
   let selectionStart = null;
   let selectionEnd = null;
   try {
-    selectionStart = field.selectionStart ?? null;
-    selectionEnd = field.selectionEnd ?? null;
+    selectionStart = field.selectionStart | null;
+    selectionEnd = field.selectionEnd | null;
   } catch {
     selectionStart = null;
     selectionEnd = null;
@@ -1896,7 +1896,7 @@ async function loadAdminUsers({ page = 1, search = state.adminUserSearch } = {})
     state.users = Array.isArray(payload.users) ? payload.users : [];
     state.adminUsersPage = Number(payload.page || page);
     state.adminUsersLimit = Number(payload.limit || state.adminUsersLimit || 50);
-    state.adminUsersTotal = Number(payload.total ?? state.users.length);
+    state.adminUsersTotal = Number(payload.total | state.users.length);
     state.adminUsersHasMore = !!payload.hasMore;
   } catch (error) {
     state.adminUsersError = error.message || "Unable to load users.";
@@ -2816,6 +2816,10 @@ function icon(name) {
       '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"/><path d="M13.5 11.5v4"/><path d="M11.5 13.5h4"/>',
     star:
       '<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1L12 16.9l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z"/>',
+    calendar:
+      '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17h.01M12 17h.01"/>',
+    history:
+      '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
     home:
       '<path d="M4 11.5 12 5l8 6.5V20h-5v-4h-6v4H4z"/>',
   };
@@ -2851,9 +2855,9 @@ function getWatchlist() {
     return {
       symbol,
       price: Number(live.price || seed.price || 0),
-      changePercent: Number(live.changePercent ?? seed.changePercent ?? 0),
-      volume24h: Number(live.volume24h ?? seed.volume24h ?? 0),
-      turnover24h: Number(live.turnover24h ?? seed.turnover24h ?? 0),
+      changePercent: Number(live.changePercent | seed.changePercent | 0),
+      volume24h: Number(live.volume24h | seed.volume24h | 0),
+      turnover24h: Number(live.turnover24h | seed.turnover24h | 0),
     };
   });
 }
@@ -2928,13 +2932,13 @@ function getStablecoinBuyingBalance(balances = []) {
     if (!STABLECOIN_ASSETS.includes(asset)) {
       return sum;
     }
-    return sum + Number(balance.free ?? balance.total ?? 0);
+    return sum + Number(balance.free | balance.total | 0);
   }, 0);
 }
 
 function getUnifiedQuoteBalance(quoteAsset = "USDT") {
   const normalizedQuote = String(quoteAsset || "USDT").trim().toUpperCase();
-  const walletBalance = Number(getBalanceForAsset(normalizedQuote)?.free ?? getBalanceForAsset(normalizedQuote)?.total ?? 0);
+  const walletBalance = Number(getBalanceForAsset(normalizedQuote)?.free | getBalanceForAsset(normalizedQuote)?.total | 0);
   const stablecoinBalance = normalizedQuote === "USDT" ? getStablecoinBuyingBalance(state.balances || []) : walletBalance;
   const accountAvailable = normalizedQuote === "USDT" ? Number(state.accountTotalAvailableBalance || 0) : 0;
   const candidates = [walletBalance, stablecoinBalance, accountAvailable].filter((value) => Number(value) > 0);
@@ -3074,6 +3078,7 @@ function isClosedTrade(trade) {
 }
 
 function shouldUserSeeTrade(trade) {
+  if (state.user?.role === "user") return !!trade?.copyPlan || !!trade?.userInvestment;
   return tradeClassification.shouldUserSeeTrade
     ? tradeClassification.shouldUserSeeTrade(trade)
     : isOpenTrade(trade) || (isQueuedTrade(trade) && String(trade?.side || "").toUpperCase() === "BUY");
@@ -3289,7 +3294,7 @@ function savePendingShopOrder(order = {}) {
   localStorage.setItem(SHOP_PENDING_ORDER_STORAGE_KEY, JSON.stringify({
     productId: order.productId,
     quantity: order.quantity || 1,
-    store: order.store ?? state.digitalServices.store ?? "",
+    store: order.store | state.digitalServices.store | "",
     savedAt: new Date().toISOString(),
   }));
 }
@@ -4140,7 +4145,7 @@ function getTradeJoinedUsers(trade) {
 }
 
 function getTradeJoinedUsersCount(trade) {
-  const count = Number(trade?.joinedUsersCount ?? getTradeJoinedUsers(trade).length ?? 0);
+  const count = Number(trade?.joinedUsersCount | getTradeJoinedUsers(trade).length | 0);
   return Number.isFinite(count) && count > 0 ? count : 0;
 }
 
@@ -4781,15 +4786,16 @@ function renderDashboardTopBar() {
   const unreadCount = notifications.filter((item) => !item.readAt).length;
   const membershipPlan = String(state.membership.summary?.plan || state.user.membership?.plan || "").toUpperCase();
   const membershipExpiry = Date.parse(state.membership.summary?.expiresAt || state.user.membership?.expiresAt || "");
-  const membershipActive = state.membership.summary?.active ?? (["PLUS", "PRO"].includes(membershipPlan)
+  const membershipActive = state.membership.summary?.active | (["PLUS", "PRO"].includes(membershipPlan)
     && String(state.user.membership?.status || "ACTIVE").toUpperCase() === "ACTIVE"
     && Number.isFinite(membershipExpiry) && membershipExpiry > Date.now());
   const showMembershipBadge = state.user.role === "user" && membershipActive && ["PLUS", "PRO"].includes(membershipPlan);
+  const userFirstName = String(state.user.name || "there").trim().split(/\s+/)[0];
   return `
     <header class="dashboard-topbar">
       <div>
-        <strong>${escapeHtml(state.user.name || "Dashboard")}</strong>
-        <p class="muted-copy">${state.user.role === "admin" ? "Admin" : "Wallet"} ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}</p>
+        <strong>${state.user.role === "user" ? `Hello, ${escapeHtml(userFirstName)} 👋` : escapeHtml(state.user.name || "Dashboard")}</strong>
+        <p class="muted-copy">${state.user.role === "admin" ? "Admin workspace" : "Welcome back!"} ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}</p>
       </div>
       <div class="notification-wrap">
         <button class="icon-action notification-button" id="notification-toggle-btn" type="button" aria-label="Notifications" title="Notifications">
@@ -5351,7 +5357,7 @@ function renderActionModal() {
       return "";
     }
     const users = Array.isArray(state.actionModal.participants) ? state.actionModal.participants : [];
-    const count = Number(state.actionModal.total ?? getTradeJoinedUsersCount(trade));
+    const count = Number(state.actionModal.total | getTradeJoinedUsersCount(trade));
     return `
       <div class="modal-backdrop">
         <div class="modal-card action-modal-card trade-joined-users-modal">
@@ -7160,7 +7166,7 @@ async function loadWatchlistSeed() {
     const payload = await api(`/api/market/watchlist?exchange=${encodeURIComponent(getActiveExchange())}`);
     state.watchlistSeed = (payload.watchlist || []).map((item) => ({
       ...item,
-      changePercent: Number(item.changePercent ?? item.priceChangePercent ?? 0),
+      changePercent: Number(item.changePercent | item.priceChangePercent | 0),
       price: Number(item.price || 0),
       volume24h: Number(item.volume24h || 0),
       turnover24h: Number(item.turnover24h || 0),
@@ -7196,7 +7202,7 @@ function hydrateWatchlistFromSeed() {
       item.symbol,
       {
         price: Number(item.price || 0),
-        changePercent: Number(item.changePercent ?? item.priceChangePercent ?? 0),
+        changePercent: Number(item.changePercent | item.priceChangePercent | 0),
         volume24h: Number(item.volume24h || 0),
         turnover24h: Number(item.turnover24h || 0),
       },
@@ -7937,7 +7943,7 @@ async function finalizeQuestSession(sessionId) {
   });
   state.quest.result = {
     passed: payload.passed !== false,
-    scorePercent: Number(payload.scorePercent ?? payload.session?.scorePercent ?? 0),
+    scorePercent: Number(payload.scorePercent | payload.session?.scorePercent | 0),
   };
   state.quest.status = {
     ...(state.quest.status || {}),
@@ -9008,9 +9014,9 @@ async function resolveSelectedBankAccount() {
     });
     const resolvedAccount = {
       ...(payload.bankAccount || {}),
-      nameMatch: payload.nameMatch ?? payload.bankAccount?.nameMatch,
+      nameMatch: payload.nameMatch | payload.bankAccount?.nameMatch,
       nameMatchWarning: payload.nameMatchWarning || payload.bankAccount?.nameMatchWarning || "",
-      matchedNameCount: payload.matchedNameCount ?? payload.bankAccount?.matchedNameCount,
+      matchedNameCount: payload.matchedNameCount | payload.bankAccount?.matchedNameCount,
     };
     state.resolvedBankAccount = resolvedAccount;
     const nextBankAccounts = payload.saved && resolvedAccount?.id
@@ -9998,7 +10004,7 @@ async function resumePendingShopOrder() {
   if (!pending?.productId || !state.user || state.user.role !== "user") {
     return false;
   }
-  state.digitalServices.store = pending.store ?? state.digitalServices.store ?? "";
+  state.digitalServices.store = pending.store | state.digitalServices.store | "";
   await loadDigitalServiceProducts({ force: true }).catch(() => undefined);
   await loadDigitalServicesSnapshot().catch(() => undefined);
   const product = getDigitalServiceProductById(pending.productId);
@@ -10428,7 +10434,7 @@ function renderAutomaticDeliveryDetails(delivery = {}) {
     return `<pre class="digital-delivery-box digital-auto-delivery-raw">${escapeHtml(formatDeliveryValue(delivery))}</pre>`;
   }
   return items.map((item, index) => {
-    const raw = formatDeliveryValue(item.rawItem ?? item.value ?? item);
+    const raw = formatDeliveryValue(item.rawItem | item.value | item);
     return `
       <div class="digital-delivery-account digital-auto-delivery-item">
         <p class="modal-eyebrow neutral">Delivery ${index + 1}</p>
@@ -10815,6 +10821,17 @@ function renderDigitalServiceReceiptModal() {
 }
 
 function renderBottomNav() {
+  if (state.user?.role === "user") {
+    return `
+      <nav class="bottom-nav bottom-nav-user" aria-label="Primary">
+        <button class="nav-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button">${icon("home")}<span>Home</span></button>
+        <button class="nav-button" data-scroll-to-copy-plans type="button">${icon("signals")}<span>Trade</span></button>
+        <button class="nav-button" data-scroll-to-balance type="button">${icon("lock")}<span>Vault</span></button>
+        <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>History</span></button>
+        <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("profile")}<span>Profile</span></button>
+      </nav>
+    `;
+  }
   return `
     <nav class="bottom-nav" aria-label="Primary">
       <button class="nav-button nav-side ${state.activeTab === "store" ? "active" : ""}" data-tab="store" type="button">
@@ -10855,8 +10872,8 @@ function renderSummaryCard() {
   const baseInvestmentUsdt = Number(state.financialDashboard?.totalBalance?.usdt || ledgerUsdt + (configuredRate ? ledgerNgn / configuredRate : 0));
   const userDynamicPnlUsdt = getUserDynamicPnlUsdt();
   const lockedInvestmentUsdt = getUserLockedInvestmentUsdt();
-  const liveInvestmentNgn = Number(state.financialDashboard?.totalBalance?.liveNgnEquivalent ?? baseInvestmentNgn + (configuredRate ? userDynamicPnlUsdt * configuredRate : 0));
-  const liveInvestmentUsdt = Number(state.financialDashboard?.totalBalance?.liveUsdt ?? baseInvestmentUsdt + userDynamicPnlUsdt);
+  const liveInvestmentNgn = Number(state.financialDashboard?.totalBalance?.liveNgnEquivalent | baseInvestmentNgn + (configuredRate ? userDynamicPnlUsdt * configuredRate : 0));
+  const liveInvestmentUsdt = Number(state.financialDashboard?.totalBalance?.liveUsdt | baseInvestmentUsdt + userDynamicPnlUsdt);
   const investmentNgn = isAdmin ? baseInvestmentNgn : liveInvestmentNgn;
   const investmentUsdt = isAdmin ? baseInvestmentUsdt : liveInvestmentUsdt;
   const accountLoading = state.loadingAccount;
@@ -10884,7 +10901,7 @@ function renderSummaryCard() {
     const adminExchangeLabel = getExchangeLabel(adminAccountSnapshot?.exchange || getAdminDashboardExchange());
     return `
       <section class="balance-carousel" data-section="wallet">
-        <article class="summary-hero balance-slide fintech-card">
+        <article class="summary-hero balance-slide fintech-card ${isAdmin ? "" : "user-summary-hero"}">
           ${state.loadingFinancial || accountLoading ? renderSectionLoadingOverlay("Loading wallet", `Syncing ${adminExchangeLabel}`) : ""}
           <div class="fintech-card-pattern" aria-hidden="true"></div>
           <div class="fintech-card-top">
@@ -10917,7 +10934,7 @@ function renderSummaryCard() {
           <div class="fintech-card-pattern" aria-hidden="true"></div>
           <div class="fintech-card-top">
             <span class="card-icon">${icon("card")}</span>
-            <span>Investment</span>
+            <span>${isAdmin ? "Admin wallet" : "Investment balance"}</span>
           </div>
           <div class="fintech-investment-grid">
             <button
@@ -10987,6 +11004,7 @@ function renderAdminHomeDashboard() {
   const userBalanceRate = getUsdtToNgnRate();
   const totalUserBalanceEquivalent = totalUserBalanceNgn + (userBalanceRate > 0 ? totalUserBalanceUsdt * userBalanceRate : 0);
   return `
+    <section class="admin-dashboard-intro"><div><small>NETRUE OPERATIONS</small><h2>Trade overview</h2><p>Manage exchange activity, schedules and account operations.</p></div><span>${new Date().toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}</span></section>
     ${renderAdminQuickNav()}
     <section class="admin-dashboard-rail" aria-label="Admin overview">
       <button class="admin-stat-tile" data-admin-users-open type="button">
@@ -11072,10 +11090,18 @@ function renderAdminCopyPlans() {
 
 function renderUserCopyPlans() {
   const plans = state.copyPlans || [];
-  if (!plans.length) return `<section class="mobile-card"><div class="section-head"><div><h3>Copy plans</h3><p class="muted-copy">Admin configured trades you can join with a chosen amount.</p></div></div><p class="muted-copy">No plans are open right now.</p></section>`;
-  return `<section class="mobile-card"><div class="section-head"><div><h3>Copy plans</h3><p class="muted-copy">Choose a plan, then set the amount from your balance.</p></div></div><div class="copy-plan-list">${plans.map((plan) => `<article><div><strong>${escapeHtml(plan.symbol)} <span class="copy-plan-status">${escapeHtml(plan.status)}</span></strong><small>Configured return ${formatNumber(plan.profitPercent, 2)}% · ${formatNumber(plan.durationHours, 2)} hours</small><small>Opens ${escapeHtml(new Date(plan.scheduledAt).toLocaleString())}</small>${plan.userInvestment ? `<small>Committed ${formatUsdtUnit(plan.userInvestment.amountUsdt || 0)}</small>` : ""}</div>${plan.status === "OPEN" && !plan.userInvestment ? `<button class="button-primary" data-copy-plan-join="${escapeHtml(plan.id)}" type="button">Join plan</button>` : plan.userInvestment ? `<small>${escapeHtml(plan.userInvestment.status)}</small>` : ""}</article>`).join("")}</div></section>`;
+  const available = Number(state.financialDashboard?.totalBalance?.usdt || 0);
+  const planRows = plans.map((plan) => {
+    const isOpen = plan.status === "OPEN" && !plan.userInvestment;
+    const symbol = String(plan.symbol || "").replace("USDT", "/USDT");
+    return `<article class="copy-plan-card ${isOpen ? "is-open" : ""}">
+      <div class="copy-plan-card-head"><span class="copy-plan-symbol-mark">${icon("signals")}</span><div><strong>${escapeHtml(symbol)}</strong><small>${isOpen ? "Configured copy trade" : "Scheduled session"}</small></div><span class="copy-plan-live-pill ${isOpen ? "is-open" : ""}">${isOpen ? "Open" : escapeHtml(plan.status)}</span></div>
+      <div class="copy-plan-return-box"><div><small>Configured return</small><strong>${formatNumber(plan.profitPercent, 2)}%</strong></div><div><small>Timeframe</small><strong>${formatNumber(plan.durationHours, 2)}h</strong></div><div><small>${isOpen ? "Session ends" : "Opens"}</small><strong>${escapeHtml(new Date(isOpen ? plan.endsAt : plan.scheduledAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" }))}</strong></div></div>
+      ${plan.userInvestment ? `<p class="copy-plan-joined-note">${escapeHtml(plan.userInvestment.status)} | Committed ${formatUsdtUnit(plan.userInvestment.amountUsdt || 0)}</p>` : isOpen ? `<div class="copy-plan-join-row"><label><span>Investment (USDT)</span><input data-copy-plan-amount="${escapeHtml(plan.id)}" type="number" min="0.00000001" max="${available}" step="0.01" inputmode="decimal" placeholder="Enter amount" /><small>Available ${formatUsdtUnit(available)}</small></label><button class="button-primary" data-copy-plan-join="${escapeHtml(plan.id)}" type="button">${icon("signals")} Copy trade</button></div>` : `<p class="copy-plan-joined-note">Opens ${escapeHtml(new Date(plan.scheduledAt).toLocaleString())}</p>`}
+    </article>`;
+  }).join("");
+  return `<section class="user-copy-plans-panel" id="user-copy-plans-panel"><div class="section-head"><div><h3>Configured trades</h3><p class="muted-copy">Set your investment for the scheduled admin return.</p></div><span class="copy-plan-count">${plans.filter((plan) => plan.status === "OPEN").length} open</span></div><div class="copy-plan-list">${planRows || `<article class="copy-plan-empty"><strong>No configured trades yet</strong><p class="muted-copy">Scheduled trades from the admin will appear here when available.</p></article>`}</div></section>`;
 }
-
 function renderTradeTicket() {
   const summary = getCurrentTradeSummary();
   const livePositive = Number(summary.live.changePercent || 0) >= 0;
@@ -11385,7 +11411,7 @@ function getAiRecommendations() {
     .map((item) => ({
       symbol: item.symbol,
       price: Number(item.price || 0),
-      changePercent: Number(item.changePercent ?? item.priceChangePercent ?? 0),
+      changePercent: Number(item.changePercent | item.priceChangePercent | 0),
       volume24h: Number(item.volume24h || 0),
       turnover24h: Number(item.turnover24h || 0),
       bybitAiInsight: item.bybitAiInsight || "",
@@ -11765,7 +11791,7 @@ function renderOpenOrdersSection() {
               (trade) => {
                 const isJoinedInvestment = state.user?.role === "user" && trade.userInvestment?.status === "ACTIVE";
                 const pnlPercent = state.user?.role === "user" && trade.copyPlan
-                  ? Number(trade.userInvestment?.profitPercent ?? trade.copyPlan.profitPercent)
+                  ? Number(trade.userInvestment?.profitPercent | trade.copyPlan.profitPercent)
                   : getTradePnlPercent(trade);
                 const currentValue = getTradeCurrentValue(trade);
                 const currentPrice = Number(getTradeCurrentMarket(trade.symbol).price || 0);
@@ -12479,7 +12505,7 @@ function renderAdminDigitalSupplierCard(supplier = {}) {
   const isBuiltIn = ["akunding", "emma"].includes(String(supplier.id || ""));
   const connected = supplier.configured && supplier.enabled !== false;
   const lastSync = supplier.lastSuccessfulSyncAt || supplier.lastSyncAt || supplier.lastConnectionTestAt || "";
-  const balance = supplier.supplierBalance ?? supplier.lastKnownBalance ?? null;
+  const balance = supplier.supplierBalance | supplier.lastKnownBalance | null;
   const balanceCurrency = String(supplier.supplierBalanceCurrency || supplier.currency || "NGN").toUpperCase();
   return `
     <article class="admin-supplier-card">
@@ -12850,7 +12876,7 @@ function renderAdminDigitalSupplierPreviewModal() {
               <label class="admin-supplier-preview-row">
                 <input name="selectedProductIds" type="checkbox" value="${escapeHtml(product.supplierProductId || product.id || "")}" checked />
                 ${renderDigitalServiceImage(product)}
-                <span><strong>${escapeHtml(product.name || "Product")}</strong><small>${escapeHtml(product.description || "")}</small><small>${escapeHtml(product.currency || product.supplierCurrency || "")} ${escapeHtml(product.providerCost ?? product.supplierCost ?? "-")} | Stock ${escapeHtml(product.stock ?? "-")}</small></span>
+                <span><strong>${escapeHtml(product.name || "Product")}</strong><small>${escapeHtml(product.description || "")}</small><small>${escapeHtml(product.currency || product.supplierCurrency || "")} ${escapeHtml(product.providerCost | product.supplierCost | "-")} | Stock ${escapeHtml(product.stock | "-")}</small></span>
                 <b>${escapeHtml(getDigitalProductDisplayPrice(product).primary)}</b>
               </label>
             `).join("") || `<p class="muted-copy">No products to preview.</p>`}
@@ -12903,7 +12929,7 @@ function renderAdminManualProductForm(product = {}) {
           <label>Selling Price <input name="sellingPrice" type="number" min="1" step="1" value="${escapeHtml(product.priceNgn || product.sellingPrice || product.price || "")}" required /></label>
           <label>Status <select name="available"><option value="true" ${product.available !== false ? "selected" : ""}>Available</option><option value="false" ${product.available === false ? "selected" : ""}>Unavailable</option></select></label>
           <label>Stock mode <select name="unlimitedStock"><option value="true" ${product.unlimitedStock !== false ? "selected" : ""}>Unlimited</option><option value="false" ${product.unlimitedStock === false ? "selected" : ""}>Track quantity</option></select></label>
-          <label>Stock <input name="stock" type="number" min="0" step="1" value="${escapeHtml(product.stock ?? "")}" /></label>
+          <label>Stock <input name="stock" type="number" min="0" step="1" value="${escapeHtml(product.stock | "")}" /></label>
           <label>OTP support<select name="otpMode"><option value="none" ${product.otpSupport?.mode !== "admin_request" ? "selected" : ""}>None</option><option value="admin_request" ${product.otpSupport?.mode === "admin_request" ? "selected" : ""}>Admin request</option></select></label>
           <label>OTP requests<select name="otpEnabled"><option value="true" ${product.otpSupport?.enabled !== false ? "selected" : ""}>Enabled</option><option value="false" ${product.otpSupport?.enabled === false ? "selected" : ""}>Disabled</option></select></label>
           <label>Wait seconds <input name="otpWaitSeconds" type="number" min="10" max="600" value="${escapeHtml(product.otpSupport?.waitSeconds || 60)}" /></label>
@@ -13061,7 +13087,7 @@ function renderAdminReferralPanel() {
         <label>Referral Bonus Amount <input name="bonusAmountNgn" type="number" min="0" step="1" value="${escapeHtml(settings.bonusAmountNgn || "500")}" /></label>
         <label>Minimum Deposit <input name="minimumDepositNgn" type="number" min="0" step="1" value="${escapeHtml(settings.minimumDepositNgn || "2000")}" /></label>
         <label>Minimum Airtime/Data Spend <input name="minimumSpendNgn" type="number" min="0" step="1" value="${escapeHtml(settings.minimumSpendNgn || "2000")}" /></label>
-        <label>Minimum Joined Trades <input name="minimumTrades" type="number" min="0" step="1" value="${escapeHtml(settings.minimumTrades ?? 2)}" /></label>
+        <label>Minimum Joined Trades <input name="minimumTrades" type="number" min="0" step="1" value="${escapeHtml(settings.minimumTrades | 2)}" /></label>
         <label>Maximum Referral Earnings <input name="maximumEarningsNgn" type="number" min="0" step="1" value="${escapeHtml(settings.maximumEarningsNgn || "100000")}" /></label>
         <label>Campaign Display Maximum <input name="campaignMaximumNgn" type="number" min="0" step="1" value="${escapeHtml(settings.campaignMaximumNgn || settings.maximumEarningsNgn || "100000")}" /></label>
         <button class="button-primary shimmer-button" type="submit">${icon("settings")} Save Referral Settings</button>
@@ -14290,7 +14316,7 @@ function renderSignalsPane() {
 function renderHomeOpenTradeSection() {
   const board = window.SignalPage?.renderOpenTradeInvestmentBoard
     ? window.SignalPage.renderOpenTradeInvestmentBoard({
-        trades: state.trades,
+        trades: state.trades.filter((trade) => !!trade.copyPlan),
         user: state.user,
         formatNumber,
         formatUsdtUnit,
@@ -14318,7 +14344,7 @@ function renderHomeOpenTradeSection() {
 
 function renderUserQueuedTradesSection() {
   const queuedTrades = sortRecent((state.trades || []).filter((trade) =>
-    isQueuedTrade(trade) && shouldUserSeeTrade(trade) && String(trade.side || "").toUpperCase() === "BUY"
+    !!trade.copyPlan && isQueuedTrade(trade) && shouldUserSeeTrade(trade) && String(trade.side || "").toUpperCase() === "BUY"
   ));
   const visibleTrades = isListExpanded("user-queued-trades") ? queuedTrades : queuedTrades.slice(0, 4);
   return `
@@ -14887,26 +14913,27 @@ function renderReferralPane() {
 }
 
 function renderHomePane() {
-    const userHomeContent = `
-      ${renderHomePromoSlider()}
+    const userHomeContent = `<section class="user-dashboard-content">
       ${renderUserEarningsBalances()}
+      ${renderUserQuickLinks()}
       ${renderUserCopyPlans()}
-      ${renderVtuQuickActions()}
-      ${renderWalletHistorySection({
+      <div class="user-dashboard-wide" data-home-trades-host>${renderHomeOpenTradeSection()}</div>
+      <div class="user-dashboard-recent">${renderWalletHistorySection({
         limit: 3,
-        title: "Transactions",
-        description: "Recent activity",
+        title: "Recent activity",
+        description: "Latest account transactions",
         showMore: true,
-      })}
-      <div data-home-trades-host>${renderHomeOpenTradeSection()}</div>
-    `;
+      })}</div>
+      ${renderVtuQuickActions()}
+      ${renderHomePromoSlider()}
+    </section>`;
 
     return `
       ${renderMarketModeSwitch()}
       <div data-live-summary-host>${renderSummaryCard()}</div>
       ${
         state.user.role === "user"
-          ? userHomeContent
+          ? `${renderCopyPlanSessionBanner()}${userHomeContent}`
           : isFuturesMode()
           ? renderFuturesDashboard()
           : renderAdminHomeDashboard()
@@ -14914,13 +14941,29 @@ function renderHomePane() {
     `;
 }
 
+function renderCopyPlanSessionBanner() {
+  const plans = state.copyPlans || [];
+  const plan = plans.find((item) => item.status === "OPEN") || plans.find((item) => item.status === "SCHEDULED");
+  if (!plan) return `<section class="user-session-banner"><span class="session-calendar-icon">${icon("calendar")}</span><div><small>Trading session</small><strong>No configured trade is open</strong><p>Admin scheduled trades will appear here.</p></div><span class="session-status-pill">Upcoming</span></section>`;
+  const open = plan.status === "OPEN";
+  return `<section class="user-session-banner"><span class="session-calendar-icon">${icon("calendar")}</span><div><small>${open ? "Trading now" : "Next trading session"}</small><strong>${open ? "Configured trade" : "Scheduled trade"} · ${escapeHtml(String(plan.symbol || "").replace("USDT", "/USDT"))}</strong><p>${open ? `Open · ${formatNumber(plan.profitPercent, 2)}% return · ${formatNumber(plan.durationHours, 2)}h term` : new Date(plan.scheduledAt).toLocaleString()}</p></div><span class="session-status-pill ${open ? "is-live" : ""}">${open ? "Live" : "Upcoming"}</span></section>`;
+}
+
+function renderUserQuickLinks() {
+  return `<nav class="user-shortcut-card" aria-label="Quick links">
+    <button type="button" data-scroll-to-copy-plans><span>${icon("signals")}</span><strong>Trade</strong></button>
+    <button type="button" data-tab="history"><span>${icon("lock")}</span><strong>Wallet</strong></button>
+    <button type="button" data-tab="referral"><span>${icon("users")}</span><strong>Referral</strong></button>
+  </nav>`;
+}
+
 function renderUserEarningsBalances() {
   const earnings = state.financialDashboard?.earningsBalances || {};
   const trading = earnings.tradingInterest || {};
   const referral = earnings.referral || {};
   return `<section class="user-earnings-grid" aria-label="Earned balances">
-    <article><span>Trading interest earned</span><strong>${formatUsdtUnit(trading.USDT || 0)}</strong><small>${formatNaira(trading.NGN || 0)}</small></article>
-    <article><span>Referral earnings</span><strong>${formatNaira(referral.NGN || 0)}</strong><small>${formatUsdtUnit(referral.USDT || 0)}</small></article>
+    <article><span class="earnings-icon">${icon("users")}</span><small>Referral earnings</small><strong>${formatNaira(referral.NGN || 0)}</strong><a data-tab="referral">View referrals →</a></article>
+    <article><span class="earnings-icon">${icon("signals")}</span><small>Total profit earned</small><strong>${formatUsdtUnit(trading.USDT || 0)}</strong><a data-tab="history">View activity →</a></article>
   </section>`;
 }
 
@@ -15164,8 +15207,8 @@ function renderDashboardShell() {
     ? {
         scrollTop: adminUsersList ? adminUsersList.scrollTop : state.adminUsersModalScrollTop,
         searchFocused: document.activeElement === adminUsersSearch,
-        selectionStart: adminUsersSearch?.selectionStart ?? null,
-        selectionEnd: adminUsersSearch?.selectionEnd ?? null,
+        selectionStart: adminUsersSearch?.selectionStart | null,
+        selectionEnd: adminUsersSearch?.selectionEnd | null,
       }
     : null;
   if (adminUsersList) {
@@ -15265,9 +15308,7 @@ function bindInvestmentTradeActions() {
 
   document.querySelectorAll("[data-copy-plan-join]").forEach((button) => {
     button.addEventListener("click", () => {
-      const maxAmount = Number(state.financialDashboard?.totalBalance?.usdt || 0);
-      state.actionModal = { type: "join-trade-amount", tradeId: button.dataset.copyPlanJoin, maxJoinAmountUsdt: String(maxAmount), chooseAmount: true, copyPlan: true };
-      render();
+      void joinScheduledCopyPlan(button.dataset.copyPlanJoin);
     });
   });
 
@@ -15284,6 +15325,28 @@ function bindInvestmentTradeActions() {
   });
 }
 
+async function joinScheduledCopyPlan(planId) {
+  const input = document.querySelector(`[data-copy-plan-amount="${CSS.escape(planId)}"]`);
+  const amountUsdt = Number(input?.value || 0);
+  const maxAmount = Number(state.financialDashboard?.totalBalance?.usdt || 0);
+  if (!Number.isFinite(amountUsdt) || amountUsdt <= 0) {
+    showError("Enter an amount to join this configured trade.");
+    input?.focus();
+    return;
+  }
+  if (amountUsdt > maxAmount) {
+    showError(`Your available balance is ${formatUsdtUnit(maxAmount)}.`);
+    input?.focus();
+    return;
+  }
+  await withLoading(async () => {
+    const payload = await api(`/api/copy-plans/${encodeURIComponent(planId)}/join`, { method: "POST", body: JSON.stringify({ amountUsdt: String(amountUsdt) }) });
+    if (payload.membership) state.membership.summary = payload.membership;
+    await loadDashboardData();
+    showNotice("Configured trade joined");
+  }).catch((error) => showError(error.message));
+}
+
 function bindDashboardActions() {
   bindPasswordVisibilityToggles();
   bindPwaActions();
@@ -15293,6 +15356,13 @@ function bindDashboardActions() {
   bindAdminUserDisclosureToggles();
   bindSignalFeedActions();
   bindInvestmentTradeActions();
+
+  document.querySelectorAll("[data-scroll-to-copy-plans]").forEach((button) => button.addEventListener("click", () => {
+    document.getElementById("user-copy-plans-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
+  document.querySelectorAll("[data-scroll-to-balance]").forEach((button) => button.addEventListener("click", () => {
+    document.querySelector("[data-live-summary-host]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
 
   const copyPlanForm = document.getElementById("admin-copy-plan-form");
   if (copyPlanForm) copyPlanForm.addEventListener("submit", (event) => {
