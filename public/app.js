@@ -10826,7 +10826,6 @@ function renderBottomNav() {
       <nav class="bottom-nav bottom-nav-user" aria-label="Primary">
         <button class="nav-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button">${icon("home")}<span>Home</span></button>
         <button class="nav-button" data-scroll-to-copy-plans type="button">${icon("signals")}<span>Trade</span></button>
-        <button class="nav-button" data-scroll-to-balance type="button">${icon("lock")}<span>Vault</span></button>
         <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>History</span></button>
         <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("profile")}<span>Profile</span></button>
       </nav>
@@ -15361,10 +15360,6 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-scroll-to-copy-plans]").forEach((button) => button.addEventListener("click", () => {
     document.getElementById("user-copy-plans-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }));
-  document.querySelectorAll("[data-scroll-to-balance]").forEach((button) => button.addEventListener("click", () => {
-    document.querySelector("[data-live-summary-host]")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }));
-
   const copyPlanForm = document.getElementById("admin-copy-plan-form");
   if (copyPlanForm) copyPlanForm.addEventListener("submit", (event) => {
     event.preventDefault();
