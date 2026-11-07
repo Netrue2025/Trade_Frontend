@@ -30,6 +30,7 @@ const STATIC_ASSETS = [
 ];
 const SAFE_ROUTE_PREFIXES = [
   "/",
+  "/dashboard",
   "/?tab=home",
   "/?tab=wallet",
   "/?tab=history",
@@ -135,17 +136,17 @@ self.addEventListener("fetch", (event) => {
 });
 
 function normalizeRoute(route) {
-  const raw = String(route || "/?tab=home");
-  let path = "/?tab=home";
+  const raw = String(route || "/dashboard?tab=home");
+  let path = "/dashboard?tab=home";
   try {
     const parsed = new URL(raw, self.location.origin);
     path = `${parsed.pathname || "/"}${parsed.search || ""}`;
   } catch {
-    path = "/?tab=home";
+    path = "/dashboard?tab=home";
   }
-  return SAFE_ROUTE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}&`))
+  return path.startsWith("/dashboard?") || SAFE_ROUTE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}&`))
     ? path
-    : "/?tab=home";
+    : "/dashboard?tab=home";
 }
 
 self.addEventListener("push", (event) => {

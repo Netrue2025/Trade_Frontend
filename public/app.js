@@ -18,7 +18,7 @@ const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.3.2";
+const APP_VERSION = "1.3.3";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -2765,6 +2765,12 @@ function icon(name) {
       '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
     arrowLeft:
       '<path d="m15 18-6-6 6-6"/>',
+    arrow:
+      '<path d="M4 12h15"/><path d="m13 6 6 6-6 6"/>',
+    shield:
+      '<path d="M12 3 20 6v5c0 5-3.4 8.3-8 10-4.6-1.7-8-5-8-10V6z"/><path d="m9 12 2 2 4-4"/>',
+    smartphone:
+      '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10 18.5h4"/>',
     plus:
       '<path d="M12 5v14"/><path d="M5 12h14"/>',
     card:
@@ -3274,6 +3280,14 @@ function clearPendingReferralCode() {
 
 function isPublicShopRoute() {
   return /^\/shop\/?$/.test(String(window.location?.pathname || ""));
+}
+
+function canonicalizeDashboardRoute({ authenticated = false } = {}) {
+  if (isPublicShopRoute() || String(window.location?.pathname || "") !== "/") return;
+  const params = new URLSearchParams(window.location?.search || "");
+  if (!authenticated && !params.has("tab") && !params.has("signup") && !getPaystackReferenceFromUrl()) return;
+  const target = `/dashboard${window.location?.search || ""}${window.location?.hash || ""}`;
+  window.history?.replaceState?.({}, "", target);
 }
 
 function getActiveStoreLabel() {
@@ -6259,6 +6273,7 @@ function renderAuthLanding() {
   const pendingShopOrder = readPendingShopOrder();
   return `
     <section class="auth-landing">
+      <a class="auth-back-to-home" href="/">${icon("arrowLeft")} Back to NetrueFi</a>
       <section class="auth-shell-card">
         <div class="auth-brand-block">
           <img class="auth-brand-logo" src="/netruefi-logo.png" alt="NetrueFi logo" />
@@ -6335,6 +6350,58 @@ function renderLanding() {
   });
 
   bindAuthForms();
+  bindModalActions();
+  bindPwaActions();
+}
+
+function isPublicMarketingRoute() {
+  const params = new URLSearchParams(window.location?.search || "");
+  return window.location?.pathname === "/" && !params.has("tab") && !getPaystackReferenceFromUrl();
+}
+
+function renderPublicLanding() {
+  app.innerHTML = `
+    <main class="marketing-page">
+      <header class="marketing-nav">
+        <a class="marketing-brand" href="/" aria-label="NetrueFi home"><img src="/netruefi-logo.png" alt="" /><span>NetrueFi</span></a>
+        <nav aria-label="Main navigation"><a href="#features">Features</a><a href="#app-download">Get the app</a></nav>
+        <a class="marketing-signin" href="/dashboard">Sign in</a>
+      </header>
+      <section class="marketing-hero">
+        <div class="marketing-hero-copy">
+          <span class="marketing-kicker"><i></i> Your money, in one clear view</span>
+          <h1>Trade and manage your money with <em>NetrueFi.</em></h1>
+          <p>Follow configured trade sessions, keep track of your balances and earnings, and take care of everyday digital services in one secure app.</p>
+          <div class="marketing-hero-actions"><a class="marketing-primary-action" href="/dashboard?signup=1">Create your account ${icon("arrow")}</a><button class="marketing-secondary-action" data-public-install type="button">${icon("download")} Download the app</button></div>
+          <div class="marketing-trust-row"><span>${icon("shield")} Secure account access</span><span>${icon("smartphone")} Built for mobile</span></div>
+        </div>
+        <div class="marketing-device-wrap" aria-label="NetrueFi app preview">
+          <div class="marketing-device"><div class="marketing-device-top"><span>9:41</span><span>● ● ●</span></div><div class="marketing-device-content"><div class="marketing-device-greeting"><small>Welcome back</small><strong>Your account</strong></div><article class="marketing-device-balance"><small>Investment balance</small><strong>₦ 0.00</strong><span>Balances and activity at a glance</span></article><article class="marketing-device-session"><span class="marketing-device-icon">${icon("signals")}</span><div><small>Trade sessions</small><strong>Configured by your admin</strong></div><i>Ready</i></article><div class="marketing-device-metrics"><article><small>Trading earnings</small><strong>View balance</strong></article><article><small>Referral earnings</small><strong>View balance</strong></article></div><div class="marketing-device-actions"><span>${icon("home")}Home</span><span>${icon("signals")}Trade</span><span>${icon("history")}Activity</span><span>${icon("settings")}Settings</span></div></div></div>
+          <div class="marketing-float-card">${icon("check")} <span><strong>Everything together</strong><small>Simple, clear account tools</small></span></div>
+        </div>
+      </section>
+      <section class="marketing-features" id="features"><div class="marketing-section-heading"><span class="marketing-kicker">A simpler way to stay on top</span><h2>Everyday finance, organized.</h2><p>Clear tools for the things you do in NetrueFi.</p></div><div class="marketing-feature-grid">
+        <article>${icon("signals")}<h3>Configured trades</h3><p>See the session terms, duration, and return configured for each trade before joining.</p></article>
+        <article>${icon("card")}<h3>Wallet overview</h3><p>Review your available balance, trade commitments, and transaction activity.</p></article>
+        <article>${icon("users")}<h3>Separate earnings</h3><p>Keep referral earnings and trading interest visible in their own balance views.</p></article>
+        <article>${icon("gift")}<h3>Digital services</h3><p>Access supported airtime, data, and other services from your account.</p></article>
+      </div></section>
+      <section class="marketing-download" id="app-download"><div><span class="marketing-kicker">Made for your home screen</span><h2>Take NetrueFi with you.</h2><p>Install the NetrueFi web app for a focused, full-screen mobile experience. You can also use NetrueFi in your browser.</p></div><div class="marketing-download-actions"><button class="marketing-primary-action" data-public-install type="button">${icon("download")} Download the app</button><a class="marketing-secondary-action" href="/dashboard">Open NetrueFi ${icon("arrow")}</a></div></section>
+      <footer class="marketing-footer"><a class="marketing-brand" href="/"><img src="/netruefi-logo.png" alt="" /><span>NetrueFi</span></a><span>© ${new Date().getFullYear()} NetrueFi</span><a href="/dashboard">Sign in</a></footer>
+    </main>
+    ${renderNotice()}${renderErrorModal()}${renderPwaLayer()}
+  `;
+  document.querySelectorAll("[data-public-install]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (state.pwa.isStandalone) return showNotice("NetrueFi is already installed.");
+      if (state.pwa.installEvent) return void installNetrueFiApp().catch((error) => showError(error.message));
+      if (state.pwa.isIos) {
+        state.pwa.installPromptVisible = true;
+        return render();
+      }
+      showNotice("Open your browser menu and choose Install app or Add to Home Screen.");
+    });
+  });
   bindModalActions();
   bindPwaActions();
 }
@@ -9418,19 +9485,20 @@ function renderBankNameWarning(account) {
 }
 
 function getTabRoute(tab) {
+  const dashboardPath = "/dashboard";
   if (tab === "referral") {
-    return "/?tab=referral";
+    return `${dashboardPath}?tab=referral`;
   }
   if (tab === "quest") {
-    return "/?tab=quest";
+    return `${dashboardPath}?tab=quest`;
   }
   if (tab === "adminQuests") {
-    return "/?tab=adminQuests";
+    return `${dashboardPath}?tab=adminQuests`;
   }
   if (["home", "settings", "signals", "store", "history", "plans"].includes(tab)) {
-    return `/?tab=${encodeURIComponent(tab)}`;
+    return `${dashboardPath}?tab=${encodeURIComponent(tab)}`;
   }
-  return "/?tab=home";
+  return `${dashboardPath}?tab=home`;
 }
 
 function getNotificationTarget(notification) {
@@ -10828,24 +10896,19 @@ function renderBottomNav() {
       <nav class="bottom-nav bottom-nav-user" aria-label="Primary">
         <button class="nav-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button">${icon("home")}<span>Home</span></button>
         <button class="nav-button" data-scroll-to-copy-plans type="button">${icon("signals")}<span>Trade</span></button>
-        <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>History</span></button>
-        <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("profile")}<span>Profile</span></button>
+        <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>Activity</span></button>
+        <button class="nav-button ${state.activeTab === "referral" ? "active" : ""}" data-tab="referral" type="button">${icon("users")}<span>Referral</span></button>
+        <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("settings")}<span>Settings</span></button>
       </nav>
     `;
   }
   return `
-    <nav class="bottom-nav" aria-label="Primary">
-      <button class="nav-button nav-side ${state.activeTab === "store" ? "active" : ""}" data-tab="store" type="button">
-        ${icon("gift")}
-        <span>Store</span>
-      </button>
-      <button class="nav-home-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button" aria-label="Home">
-        <span class="nav-home-orb">${icon("home")}</span>
-      </button>
-      <button class="nav-button nav-side ${state.menuSheetOpen ? "active" : ""}" data-menu-toggle type="button" aria-expanded="${state.menuSheetOpen ? "true" : "false"}">
-        ${icon("menu")}
-        <span>Menu</span>
-      </button>
+    <nav class="bottom-nav bottom-nav-admin" aria-label="Primary">
+      <button class="nav-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button">${icon("home")}<span>Home</span></button>
+      <button class="nav-button" data-scroll-to-admin-trade type="button">${icon("signals")}<span>Trades</span></button>
+      <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>Finance</span></button>
+      <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("settings")}<span>Settings</span></button>
+      <button class="nav-button ${state.menuSheetOpen ? "active" : ""}" data-menu-toggle type="button" aria-expanded="${state.menuSheetOpen ? "true" : "false"}">${icon("menu")}<span>More</span></button>
     </nav>
   `;
 }
@@ -10972,17 +11035,15 @@ function renderSummaryCard() {
 function renderAdminQuickNav() {
   const items = [
     { label: "Users", iconName: "users", action: "users" },
-    { label: "Trades", iconName: "signals", tab: "home" },
+    { label: "Trade desk", iconName: "signals", scroll: "admin-trade-desk" },
     { label: "Finance", iconName: "bank", tab: "history" },
-    { label: "Products", iconName: "gift", tab: "store" },
-    { label: "Orders", iconName: "profile", tab: "store" },
+    { label: "Services", iconName: "gift", tab: "store" },
     { label: "Quests", iconName: "star", tab: "adminQuests" },
-    { label: "Settings", iconName: "settings", tab: "settings" },
   ];
   return `
     <nav class="admin-quick-nav" aria-label="Admin sections">
       ${items.map((item) => `
-        <button class="admin-quick-nav-btn" ${item.tab ? `data-tab="${escapeHtml(item.tab)}"` : `data-menu-action="${escapeHtml(item.action)}"`} type="button">
+        <button class="admin-quick-nav-btn" ${item.tab ? `data-tab="${escapeHtml(item.tab)}"` : item.scroll ? `data-scroll-to-admin-trade` : `data-menu-action="${escapeHtml(item.action)}"`} type="button">
           ${icon(item.iconName)}
           <span>${escapeHtml(item.label)}</span>
         </button>
@@ -11040,7 +11101,7 @@ function renderAdminHomeDashboard() {
         <small>Open / queue</small>
       </div>
     </section>
-    <section class="admin-dashboard-section admin-trade-desk">
+    <section class="admin-dashboard-section admin-trade-desk" id="admin-trade-desk">
       <div class="section-head">
         <div>
           <h3>Trade Desk</h3>
@@ -15003,8 +15064,6 @@ function renderReferralPane() {
 
 function renderHomePane() {
     const userHomeContent = `<section class="user-dashboard-content">
-      ${renderUserEarningsBalances()}
-      ${renderUserQuickLinks()}
       ${renderUserCopyPlans()}
       <div class="user-dashboard-wide" data-home-trades-host>${renderHomeOpenTradeSection()}</div>
       <div class="user-dashboard-recent">${renderWalletHistorySection({
@@ -15019,14 +15078,7 @@ function renderHomePane() {
 
     return `
       ${renderMarketModeSwitch()}
-      <div data-live-summary-host>${renderSummaryCard()}</div>
-      ${
-        state.user.role === "user"
-          ? `${renderCopyPlanSessionBanner()}${userHomeContent}`
-          : isFuturesMode()
-          ? renderFuturesDashboard()
-          : renderAdminHomeDashboard()
-      }
+      ${state.user.role === "user" ? `<section class="user-home-dashboard"><section class="user-home-overview"><div data-live-summary-host>${renderSummaryCard()}</div>${renderCopyPlanSessionBanner()}${renderUserEarningsBalances()}</section>${userHomeContent}</section>` : `<div data-live-summary-host>${renderSummaryCard()}</div>${isFuturesMode() ? renderFuturesDashboard() : renderAdminHomeDashboard()}`}
     `;
 }
 
@@ -15449,6 +15501,9 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-scroll-to-copy-plans]").forEach((button) => button.addEventListener("click", () => {
     document.getElementById("user-copy-plans-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }));
+  document.querySelectorAll("[data-scroll-to-admin-trade]").forEach((button) => button.addEventListener("click", () => {
+    document.getElementById("admin-trade-desk")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }));
   const copyPlanForm = document.getElementById("admin-copy-plan-form");
   if (copyPlanForm) copyPlanForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -15595,7 +15650,7 @@ function bindDashboardActions() {
     button.addEventListener("click", async () => {
       state.activeTab = "quest";
       if (window.history?.pushState) {
-        window.history.pushState({}, "", "/?tab=quest");
+        window.history.pushState({}, "", "/dashboard?tab=quest");
       }
       render();
       await refreshQuestData();
@@ -15657,10 +15712,10 @@ function bindDashboardActions() {
       state.quest.view = button.dataset.questView || "play";
       if (window.history?.pushState) {
         const nextPath = state.quest.view === "rewards"
-          ? "/?tab=quest&questView=rewards"
+          ? "/dashboard?tab=quest&questView=rewards"
           : state.quest.view === "history"
-            ? "/?tab=quest&questView=history"
-            : "/?tab=quest";
+            ? "/dashboard?tab=quest&questView=history"
+            : "/dashboard?tab=quest";
         window.history.pushState({}, "", nextPath);
       }
       render();
@@ -17695,6 +17750,11 @@ function render() {
       refreshWatchlistDom();
       return;
     }
+    if (isPublicMarketingRoute()) {
+      renderPublicLanding();
+      refreshWatchlistDom();
+      return;
+    }
     renderLanding();
     refreshWatchlistDom();
     return;
@@ -17718,6 +17778,7 @@ async function bootstrap() {
     await loadGoogleAuthConfig().catch(() => undefined);
     const me = await api("/api/auth/me");
     state.user = normalizeUserPayload(me.user);
+    canonicalizeDashboardRoute({ authenticated: !!state.user });
     if (state.user?.activeExchange) {
       setSelectedExchange(state.user.activeExchange);
     }
@@ -17752,6 +17813,7 @@ async function bootstrap() {
   } catch {
     await loadGoogleAuthConfig().catch(() => undefined);
     state.user = null;
+    canonicalizeDashboardRoute({ authenticated: false });
     clearAuthSessionToken();
     disconnectWatchSocket();
     disconnectSignalStream();

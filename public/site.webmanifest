@@ -3,12 +3,12 @@
   "name": "NetrueFi",
   "short_name": "NetrueFi",
   "description": "Trade, manage your wallet, complete quests, and access NetrueFi services from one secure fintech app.",
-  "start_url": "/",
+  "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#04110b",
-  "theme_color": "#00d978",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "categories": ["finance", "business"],
   "icons": [
     {
@@ -34,13 +34,13 @@
     {
       "name": "Signals",
       "short_name": "Signals",
-      "url": "/?tab=signals",
+      "url": "/dashboard?tab=signals",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
       "name": "Wallet",
       "short_name": "Wallet",
-      "url": "/?tab=home",
+      "url": "/dashboard?tab=home",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
