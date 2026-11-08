@@ -8490,3 +8490,80 @@ body[data-app-shell="guest"] #app { display:block; min-height:100vh; }
   .user-home-overview .user-earnings-grid { grid-template-columns:1fr 1fr; }
   .bottom-nav-user .nav-button,.bottom-nav-admin .nav-button { font-size:.54rem; }
 }
+
+/* Account overview inspired by the compact mobile account reference. */
+.user-dashboard-topbar { border:0; background:transparent; box-shadow:none; }
+.user-dashboard-topbar > div:first-child { display:grid; gap:5px; }
+.user-dashboard-topbar .user-dashboard-welcome { margin:0; color:var(--muted); font-size:.91rem; font-weight:500; }
+.user-dashboard-topbar strong { color:var(--text); font-size:1.65rem; line-height:1.12; letter-spacing:-.035em; }
+.user-home-dashboard { gap:20px; }
+.user-home-overview { gap:14px; }
+.user-home-overview .balance-carousel { margin:0; }
+.user-account-card { position:relative; display:grid; gap:0; padding:25px 24px 17px; border:1px solid #eddda2; border-radius:26px; background:var(--panel); color:var(--text); box-shadow:none; }
+.user-account-label { color:var(--muted); font-size:.9rem; }
+.user-account-balance { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; margin:15px 0 8px; padding:0; border:0; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+.user-account-balance span { font-size:clamp(2rem,6vw,2.8rem); line-height:1.1; font-weight:800; letter-spacing:-.05em; overflow-wrap:anywhere; }
+.user-account-balance .nav-icon { flex:none; width:18px; height:18px; color:var(--muted); }
+.user-account-balance.is-hidden span { filter:blur(8px); }
+.user-account-caption { margin:7px 0 22px; color:var(--muted); font-size:.83rem; }
+.user-account-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding-top:15px; border-top:1px solid var(--line); }
+.user-account-actions button { display:flex; align-items:center; justify-content:center; gap:7px; min-height:39px; border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--text); font:inherit; font-size:.78rem; font-weight:750; cursor:pointer; }
+.user-account-actions button:first-child { border-color:#e9d06a; background:#f8dc76; color:#252930; }
+.user-account-actions .nav-icon { width:16px; height:16px; }
+.user-home-overview .user-session-banner { min-height:94px; margin:0; padding:17px 18px; border:1px solid #f0dc8b; border-radius:22px; background:#fffbef; box-shadow:none; }
+.user-session-banner .session-calendar-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:14px; background:#fff0b5; color:#9b7600; }
+.user-session-banner .session-calendar-icon .nav-icon { width:23px; height:23px; }
+.user-session-banner > div { gap:3px; }
+.user-session-banner small { color:var(--muted); font-size:.78rem; }
+.user-session-banner strong { color:var(--text); font-size:.9rem; }
+.user-session-banner p { font-size:.69rem; }
+.user-session-banner .session-status-pill { color:#007d5a; background:transparent; font-weight:800; font-size:.78rem; }
+.user-home-overview .user-earnings-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0; }
+.user-home-overview .user-earnings-grid article { display:flex; flex-direction:column; align-items:flex-start; justify-content:space-between; min-height:129px; padding:17px; border:1px solid var(--line); border-radius:22px; background:var(--panel); box-shadow:none; }
+.user-home-overview .user-earnings-grid small { color:var(--muted); font-size:.78rem; }
+.user-home-overview .user-earnings-grid strong { color:var(--text); font-size:1.05rem; letter-spacing:-.025em; overflow-wrap:anywhere; }
+.user-home-overview .user-earnings-grid button { display:flex; align-items:center; gap:5px; padding:0; border:0; background:transparent; color:var(--text); font:inherit; font-size:.75rem; font-weight:750; text-align:left; cursor:pointer; }
+.user-home-overview .user-earnings-grid button .nav-icon { width:14px; height:14px; }
+.btc-dashboard-card { display:grid; gap:14px; padding:20px; border:1px solid var(--line); border-radius:23px; background:var(--panel); color:var(--text); }
+.btc-dashboard-head,.btc-dashboard-quote { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.btc-dashboard-head small,.btc-dashboard-stats small { color:var(--muted); font-size:.73rem; }
+.btc-dashboard-head h3 { margin:3px 0 0; font-size:1.17rem; }
+.btc-dashboard-live { display:inline-flex; align-items:center; gap:5px; color:#008464; font-size:.73rem; font-weight:750; }
+.btc-dashboard-live i { width:7px; height:7px; border-radius:50%; background:#00aa80; box-shadow:0 0 0 4px #e2f7ef; }
+.btc-dashboard-quote strong { font-size:1.7rem; letter-spacing:-.04em; }
+.btc-dashboard-quote span { font-size:.8rem; font-weight:800; }
+.btc-dashboard-chart { display:grid; place-items:center; min-height:160px; border-radius:15px; background:linear-gradient(180deg,#fffdf5,#fff); overflow:hidden; }
+.btc-dashboard-chart svg { display:block; width:100%; height:180px; }
+.btc-dashboard-chart p { color:var(--muted); font-size:.82rem; text-align:center; }
+.btc-dashboard-line { fill:none; stroke:#bb8e0b; stroke-width:2.4; stroke-linecap:round; stroke-linejoin:round; }
+.btc-dashboard-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding-top:12px; border-top:1px solid var(--line); }
+.btc-dashboard-stats div { display:grid; gap:4px; min-width:0; }
+.btc-dashboard-stats strong { font-size:.76rem; overflow-wrap:anywhere; }
+.btc-dashboard-foot { margin:0; color:var(--muted); font-size:.68rem; }
+.bottom-nav-user { grid-template-columns:repeat(4,minmax(0,1fr)); }
+
+@media (max-width:760px) {
+  body[data-app-shell="dashboard"] .user-dashboard-topbar { min-height:100px; align-items:end; margin:0 -14px 14px; padding:18px 20px 13px; border:0; background:transparent; }
+  body[data-app-shell="dashboard"] .user-dashboard-topbar strong { font-size:1.65rem; }
+  .user-home-dashboard { gap:18px; }
+  .user-home-overview { gap:14px; }
+  .user-account-card { padding:23px 21px 16px; }
+  .user-home-overview .user-session-banner { grid-template-columns:auto minmax(0,1fr) auto; gap:10px; padding:15px; }
+  .user-home-overview .user-earnings-grid article { min-height:122px; padding:15px; }
+  .user-home-overview .user-earnings-grid small { font-size:.74rem; }
+  .user-home-overview .user-earnings-grid strong { font-size:.95rem; }
+  .user-home-overview .user-earnings-grid button { font-size:.7rem; }
+  .bottom-nav-user { left:0; bottom:0; transform:none; width:100%; max-width:none; min-height:70px; padding:6px max(10px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left)); border:0; border-top:1px solid var(--line); border-radius:0; background:var(--panel); box-shadow:none; backdrop-filter:none; }
+  .bottom-nav-user .nav-button { min-height:54px; border-radius:10px; color:var(--muted); font-size:.67rem; }
+  .bottom-nav-user .nav-button.active { color:#987700; background:transparent; }
+}
+@media (max-width:390px) {
+  .user-home-overview .user-earnings-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .user-session-banner .session-calendar-icon { width:38px; height:38px; }
+  .user-session-banner .session-status-pill { font-size:.68rem; }
+}
+body[data-theme="dark"] .user-account-card,body[data-theme="dark"] .btc-dashboard-card,body[data-theme="dark"] .user-home-overview .user-earnings-grid article { border-color:var(--line); background:var(--panel); }
+body[data-theme="dark"] .user-session-banner { border-color:#564921; background:#2a281f; }
+body[data-theme="dark"] .user-session-banner .session-calendar-icon { background:#4d3d1b; color:#f3ce61; }
+body[data-theme="dark"] .btc-dashboard-chart { background:linear-gradient(180deg,#292818,#191e26); }
+body[data-theme="dark"] .bottom-nav-user { border-color:var(--line); background:var(--panel); }

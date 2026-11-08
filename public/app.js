@@ -144,6 +144,7 @@ const state = {
   trades: [],
   copyPlans: [],
   copyPlanChart: { symbol: "BTCUSDT", candles: [], loading: false, updatedAt: null },
+  btcDashboardChart: { candles: [], loading: false, updatedAt: null },
   dashboardMarketMode: "spot",
   hideBalanceAmounts: localStorage.getItem(BALANCE_PRIVACY_STORAGE_KEY) === "true",
   futuresAccount: null,
@@ -4807,10 +4808,10 @@ function renderDashboardTopBar() {
   const showMembershipBadge = state.user.role === "user" && membershipActive && ["PLUS", "PRO"].includes(membershipPlan);
   const userFirstName = String(state.user.name || "there").trim().split(/\s+/)[0];
   return `
-    <header class="dashboard-topbar">
+    <header class="dashboard-topbar ${state.user.role === "user" ? "user-dashboard-topbar" : ""}">
       <div>
-        <strong>${state.user.role === "user" ? `Hello, ${escapeHtml(userFirstName)} 👋` : escapeHtml(state.user.name || "Dashboard")}</strong>
-        <p class="muted-copy">${state.user.role === "admin" ? "Admin workspace" : "Welcome back!"} ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}</p>
+        ${state.user.role === "user" ? `<p class="user-dashboard-welcome">Welcome back${userFirstName ? `, ${escapeHtml(userFirstName)}` : ""}</p><strong>Your account</strong>` : `<strong>${escapeHtml(state.user.name || "Dashboard")}</strong><p class="muted-copy">Admin workspace</p>`}
+        ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}
       </div>
       <div class="notification-wrap">
         <button class="icon-action notification-button" id="notification-toggle-btn" type="button" aria-label="Notifications" title="Notifications">
@@ -10897,7 +10898,6 @@ function renderBottomNav() {
         <button class="nav-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button">${icon("home")}<span>Home</span></button>
         <button class="nav-button" data-scroll-to-copy-plans type="button">${icon("signals")}<span>Trade</span></button>
         <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>Activity</span></button>
-        <button class="nav-button ${state.activeTab === "referral" ? "active" : ""}" data-tab="referral" type="button">${icon("users")}<span>Referral</span></button>
         <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("settings")}<span>Settings</span></button>
       </nav>
     `;
@@ -10933,13 +10933,9 @@ function renderSummaryCard() {
   const ledgerNgn = Number(ngnWallet?.availableBalance || 0);
   const configuredRate = getUsdtToNgnRate();
   const baseInvestmentNgn = Number(state.financialDashboard?.totalBalance?.ngnEquivalent || ledgerNgn + (configuredRate ? ledgerUsdt * configuredRate : 0));
-  const baseInvestmentUsdt = Number(state.financialDashboard?.totalBalance?.usdt || ledgerUsdt + (configuredRate ? ledgerNgn / configuredRate : 0));
   const userDynamicPnlUsdt = getUserDynamicPnlUsdt();
-  const lockedInvestmentUsdt = getUserLockedInvestmentUsdt();
-  const liveInvestmentNgn = Number(state.financialDashboard?.totalBalance?.liveNgnEquivalent | baseInvestmentNgn + (configuredRate ? userDynamicPnlUsdt * configuredRate : 0));
-  const liveInvestmentUsdt = Number(state.financialDashboard?.totalBalance?.liveUsdt | baseInvestmentUsdt + userDynamicPnlUsdt);
+  const liveInvestmentNgn = Number(state.financialDashboard?.totalBalance?.liveNgnEquivalent ?? baseInvestmentNgn + (configuredRate ? userDynamicPnlUsdt * configuredRate : 0));
   const investmentNgn = isAdmin ? baseInvestmentNgn : liveInvestmentNgn;
-  const investmentUsdt = isAdmin ? baseInvestmentUsdt : liveInvestmentUsdt;
   const accountLoading = state.loadingAccount;
   const exchangeLabel = getExchangeLabel(getActiveExchange());
   const todayValue = isFuturesMode()
@@ -10953,10 +10949,6 @@ function renderSummaryCard() {
       ? Number(adminAccountSnapshot.todayPnlPercent || 0)
     : Number(state.todayPnlPercent || 0);
   const todayTone = todayValue > 0 ? "positive" : todayValue < 0 ? "negative" : "neutral";
-  const userMirroredPnlPercentage = Number(state.financialDashboard?.performance?.todayPercentage || 0);
-  const userBalanceTone = userDynamicPnlUsdt < 0 ? "balance-main-loss" : "balance-main-profit";
-  const userCardPnlTone = userDynamicPnlUsdt > 0 ? "card-pnl-profit" : userDynamicPnlUsdt < 0 ? "card-pnl-loss" : "card-pnl-neutral";
-  const userDynamicPnlNgn = configuredRate ? userDynamicPnlUsdt * configuredRate : 0;
 
   if (isAdmin) {
     const adminBalanceNgn = configuredRate ? portfolioBalance * configuredRate : Number(state.totalNgn || 0);
@@ -10993,39 +10985,16 @@ function renderSummaryCard() {
 
   return `
       <section class="balance-carousel" data-section="wallet">
-        <article class="summary-hero balance-slide fintech-card">
+        <article class="user-account-card">
           ${state.loadingFinancial ? renderSectionLoadingOverlay("Loading investment view", "Pulling your ledger wallet") : ""}
-          <div class="fintech-card-pattern" aria-hidden="true"></div>
-          <div class="fintech-card-top">
-            <span class="card-icon">${icon("card")}</span>
-            <span>${isAdmin ? "Admin wallet" : "Investment balance"}</span>
-          </div>
-          <div class="fintech-investment-grid">
-            <button
-              class="fintech-pnl-stack balance-privacy-toggle ${state.hideBalanceAmounts ? "is-hidden" : ""}"
-              data-balance-privacy-toggle
-              type="button"
-              aria-label="${state.hideBalanceAmounts ? "Show balance" : "Hide balance"}"
-              aria-pressed="${state.hideBalanceAmounts ? "true" : "false"}"
-            >
-              <h2 class="${userBalanceTone}">${formatSignedNaira(investmentNgn)}</h2>
-              <p class="fintech-subline">
-                <span>${investmentUsdt < 0 ? "-" : ""}${formatUsdtUnit(Math.abs(investmentUsdt))}</span>
-                <span class="fintech-pnl-chip ${userCardPnlTone}">
-                  ${userMirroredPnlPercentage > 0 ? "+" : ""}${formatNumber(userMirroredPnlPercentage, 2)}% | ${formatSignedNaira(userDynamicPnlNgn, { positiveSign: userDynamicPnlNgn > 0 })}
-                </span>
-              </p>
-            </button>
-            <div class="locked-investment-box">
-              <span class="lock-badge">${icon("lock")}</span>
-              <small>Locked</small>
-              <strong>${formatUsdtUnit(lockedInvestmentUsdt)}</strong>
-              ${configuredRate ? `<span>${formatNaira(lockedInvestmentUsdt * configuredRate)}</span>` : ""}
-            </div>
-          </div>
-          <div class="hero-actions">
-            <button class="hero-action-btn" id="netrue-deposit-btn" type="button">${icon("bank")} Deposit</button>
-            <button class="hero-action-btn ghost" id="netrue-withdraw-btn" type="button">${icon("download")} Withdraw</button>
+          <div class="user-account-label">Investment balance</div>
+          <button class="user-account-balance balance-privacy-toggle ${state.hideBalanceAmounts ? "is-hidden" : ""}" data-balance-privacy-toggle type="button" aria-label="${state.hideBalanceAmounts ? "Show balance" : "Hide balance"}" aria-pressed="${state.hideBalanceAmounts ? "true" : "false"}">
+            <span>${formatSignedNaira(investmentNgn)}</span>${icon(state.hideBalanceAmounts ? "eyeOff" : "eye")}
+          </button>
+          <p class="user-account-caption">Balances and activity at a glance</p>
+          <div class="user-account-actions">
+            <button id="netrue-deposit-btn" type="button">${icon("bank")} Deposit</button>
+            <button id="netrue-withdraw-btn" type="button">${icon("download")} Withdraw</button>
           </div>
         </article>
       </section>
@@ -11192,6 +11161,35 @@ function renderCopyPlanMarketChart() {
   </article>`;
 }
 
+function renderBtcDashboardChart() {
+  const chart = state.copyPlanChart?.symbol === "BTCUSDT" && state.copyPlanChart.candles?.length
+    ? state.copyPlanChart : state.btcDashboardChart;
+  const candles = chart?.candles || [];
+  const geometry = candles.length ? getSignalChartGeometry(candles) : null;
+  const summary = geometry ? getSignalChartSummary(candles) : null;
+  const line = geometry ? buildSignalLinePath(candles, geometry) : "";
+  const move = Number(summary?.movePercent || 0);
+  return `<section class="btc-dashboard-card" aria-label="BTC/USDT live market">
+    <div class="btc-dashboard-head"><div><small>Live market</small><h3>BTC/USDT</h3></div><span class="btc-dashboard-live"><i></i> Live</span></div>
+    <div class="btc-dashboard-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${move >= 0 ? "positive" : "negative"}">${summary ? `${move >= 0 ? "+" : ""}${formatNumber(move, 2)}%` : "Waiting for data"}</span></div>
+    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#d6a916" stop-opacity=".22"/><stop offset="1" stop-color="#d6a916" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
+    <div class="btc-dashboard-stats"><div><small>Range high</small><strong>${summary ? formatUsdtUnit(summary.highPrice) : "--"}</strong></div><div><small>Range low</small><strong>${summary ? formatUsdtUnit(summary.lowPrice) : "--"}</strong></div><div><small>Interval</small><strong>15 min</strong></div></div>
+    <p class="btc-dashboard-foot">Market data for reference${chart?.updatedAt ? ` · Updated ${new Date(chart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
+  </section>`;
+}
+
+async function refreshBtcDashboardChart() {
+  state.btcDashboardChart = { ...state.btcDashboardChart, loading: !state.btcDashboardChart.candles.length };
+  try {
+    const payload = await api("/api/market/chart?symbol=BTCUSDT&interval=15m&limit=48");
+    state.btcDashboardChart = { candles: payload.candles || [], loading: false, updatedAt: new Date().toISOString() };
+  } catch {
+    state.btcDashboardChart = { ...state.btcDashboardChart, loading: false };
+  }
+  const host = document.querySelector("[data-btc-dashboard-chart-host]");
+  if (host) host.innerHTML = renderBtcDashboardChart();
+}
+
 async function refreshUserCopyPlanChart({ refreshPlans = false } = {}) {
   if (refreshPlans && state.user?.role === "user") {
     const payload = await api("/api/copy-plans").catch(() => null);
@@ -11216,6 +11214,13 @@ async function refreshUserCopyPlanChart({ refreshPlans = false } = {}) {
   }
   const nextHost = document.querySelector("[data-copy-plan-chart-host]");
   if (nextHost) nextHost.innerHTML = renderCopyPlanMarketChart();
+  if (symbol === "BTCUSDT") {
+    state.btcDashboardChart = { ...state.copyPlanChart };
+    const btcHost = document.querySelector("[data-btc-dashboard-chart-host]");
+    if (btcHost) btcHost.innerHTML = renderBtcDashboardChart();
+  } else {
+    await refreshBtcDashboardChart();
+  }
 }
 
 function refreshUserCopyPlanPanelDom() {
@@ -15064,6 +15069,7 @@ function renderReferralPane() {
 
 function renderHomePane() {
     const userHomeContent = `<section class="user-dashboard-content">
+      <div data-btc-dashboard-chart-host>${renderBtcDashboardChart()}</div>
       ${renderUserCopyPlans()}
       <div class="user-dashboard-wide" data-home-trades-host>${renderHomeOpenTradeSection()}</div>
       <div class="user-dashboard-recent">${renderWalletHistorySection({
@@ -15085,9 +15091,9 @@ function renderHomePane() {
 function renderCopyPlanSessionBanner() {
   const plans = state.copyPlans || [];
   const plan = plans.find((item) => item.status === "OPEN") || plans.find((item) => item.status === "SCHEDULED");
-  if (!plan) return `<section class="user-session-banner"><span class="session-calendar-icon">${icon("calendar")}</span><div><small>Trading session</small><strong>No configured trade is open</strong><p>Admin scheduled trades will appear here.</p></div><span class="session-status-pill">Upcoming</span></section>`;
+  if (!plan) return `<section class="user-session-banner"><span class="session-calendar-icon">${icon("signals")}</span><div><small>Trade sessions</small><strong>Configured by your admin</strong></div><span class="session-status-pill">Ready</span></section>`;
   const open = plan.status === "OPEN";
-  return `<section class="user-session-banner"><span class="session-calendar-icon">${icon("calendar")}</span><div><small>${open ? "Trading now" : "Next trading session"}</small><strong>${open ? "Configured trade" : "Scheduled trade"} · ${escapeHtml(String(plan.symbol || "").replace("USDT", "/USDT"))}</strong><p>${open ? `Open · ${formatNumber(plan.profitPercent, 2)}% return · ${formatNumber(plan.durationHours, 2)}h term` : new Date(plan.scheduledAt).toLocaleString()}</p></div><span class="session-status-pill ${open ? "is-live" : ""}">${open ? "Live" : "Upcoming"}</span></section>`;
+  return `<section class="user-session-banner"><span class="session-calendar-icon">${icon("signals")}</span><div><small>${open ? "Trade sessions" : "Next trade session"}</small><strong>${escapeHtml(String(plan.symbol || "").replace("USDT", "/USDT"))} ${open ? "is open" : "scheduled"}</strong><p>${open ? `${formatNumber(plan.profitPercent, 2)}% configured return · ${formatNumber(plan.durationHours, 2)}h` : new Date(plan.scheduledAt).toLocaleString()}</p></div><span class="session-status-pill ${open ? "is-live" : ""}">${open ? "Live" : "Upcoming"}</span></section>`;
 }
 
 function renderUserQuickLinks() {
@@ -15103,8 +15109,8 @@ function renderUserEarningsBalances() {
   const trading = earnings.tradingInterest || {};
   const referral = earnings.referral || {};
   return `<section class="user-earnings-grid" aria-label="Earned balances">
-    <article><span class="earnings-icon">${icon("users")}</span><small>Referral earnings</small><strong>${formatNaira(referral.NGN || 0)}</strong><a data-tab="referral">View referrals →</a></article>
-    <article><span class="earnings-icon">${icon("signals")}</span><small>Total profit earned</small><strong>${formatUsdtUnit(trading.USDT || 0)}</strong><a data-tab="history">View activity →</a></article>
+    <article><small>Trading earnings</small><strong>${formatUsdtUnit(trading.USDT || 0)}</strong><button data-tab="history" type="button">View balance ${icon("arrow")}</button></article>
+    <article><small>Referral earnings</small><strong>${formatNaira(referral.NGN || 0)}</strong><button data-tab="referral" type="button">View balance ${icon("arrow")}</button></article>
   </section>`;
 }
 
@@ -15498,7 +15504,8 @@ function bindDashboardActions() {
   bindSignalFeedActions();
   bindInvestmentTradeActions();
 
-  document.querySelectorAll("[data-scroll-to-copy-plans]").forEach((button) => button.addEventListener("click", () => {
+  document.querySelectorAll("[data-scroll-to-copy-plans]").forEach((button) => button.addEventListener("click", async () => {
+    if (state.activeTab !== "home") await navigateToTab("home");
     document.getElementById("user-copy-plans-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }));
   document.querySelectorAll("[data-scroll-to-admin-trade]").forEach((button) => button.addEventListener("click", () => {
