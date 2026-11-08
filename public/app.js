@@ -4810,7 +4810,7 @@ function renderDashboardTopBar() {
   return `
     <header class="dashboard-topbar ${state.user.role === "user" ? "user-dashboard-topbar" : ""}">
       <div>
-        ${state.user.role === "user" ? `<p class="user-dashboard-welcome">Welcome back${userFirstName ? `, ${escapeHtml(userFirstName)}` : ""}</p><strong>Your account</strong>` : `<strong>${escapeHtml(state.user.name || "Dashboard")}</strong><p class="muted-copy">Admin workspace</p>`}
+        ${state.user.role === "user" ? state.activeTab === "settings" ? `<p class="user-dashboard-welcome">Your preferences</p><strong>Settings</strong>` : `<p class="user-dashboard-welcome">Welcome back${userFirstName ? `, ${escapeHtml(userFirstName)}` : ""}</p><strong>Your account</strong>` : `<strong>${escapeHtml(state.user.name || "Dashboard")}</strong><p class="muted-copy">Admin workspace</p>`}
         ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}
       </div>
       <div class="notification-wrap">
@@ -12314,7 +12314,7 @@ function renderCurrentUserWalletSummary() {
       </div>
       <div class="asset-values">
         <strong>${state.user.exchangeConnected ? `${activeExchangeLabel} linked` : `No ${activeExchangeLabel} linked`}</strong>
-        <p class="muted-copy">${state.user.mirrorEnabled ? "Mirroring enabled" : "Mirroring disabled"}</p>
+        <p class="muted-copy">Copy sessions are configured by your admin</p>
       </div>
     </div>
     ${renderWalletDetailsList(connectedWallets, `Connect ${activeExchangeLabel} to load your wallet balance.`)}
@@ -14085,9 +14085,9 @@ function renderSettingsPane() {
   }
   if (state.user.role === "user") {
     const appearancePanel = `
-      <div class="theme-toggle">
-        <button class="theme-btn ${state.theme === "light" ? "active" : ""}" data-theme-mode="light" type="button">Light</button>
-        <button class="theme-btn ${state.theme === "dark" ? "active" : ""}" data-theme-mode="dark" type="button">Dark</button>
+      <div class="user-settings-theme-options" role="group" aria-label="Color theme">
+        <button class="theme-btn ${state.theme === "light" ? "active" : ""}" data-theme-mode="light" type="button" aria-pressed="${state.theme === "light"}"><span class="theme-swatch light"></span><span>Light<small>Bright and clear</small></span>${state.theme === "light" ? icon("check") : ""}</button>
+        <button class="theme-btn ${state.theme === "dark" ? "active" : ""}" data-theme-mode="dark" type="button" aria-pressed="${state.theme === "dark"}"><span class="theme-swatch dark"></span><span>Dark<small>Low light viewing</small></span>${state.theme === "dark" ? icon("check") : ""}</button>
       </div>
     `;
     const exchangePanel = `
@@ -14119,17 +14119,6 @@ function renderSettingsPane() {
         </label>
         <button class="button-primary shimmer-button" type="submit">${icon("settings")} Connect</button>
       </form>
-      <form id="mirror-form" class="stack-form subtle-form progressive-settings-form">
-        <label>
-          Mirror trades
-          <select name="enabled">
-            <option value="true" ${state.user.mirrorEnabled ? "selected" : ""}>Enabled</option>
-            <option value="false" ${!state.user.mirrorEnabled ? "selected" : ""}>Disabled</option>
-          </select>
-        </label>
-        <button class="button-secondary shimmer-button" type="submit">${icon("signals")} Save</button>
-      </form>
-      ${renderMirrorMinimumNotice()}
     `;
     const bankPanel = `
       <form id="user-bank-account-form" class="stack-form subtle-form progressive-settings-form">
@@ -14152,7 +14141,7 @@ function renderSettingsPane() {
       <p class="muted-copy" data-settings-live-status>${escapeHtml(settingsLiveLabel)}</p>
       <button class="button-secondary" data-tab="plans" type="button">${state.membership.summary?.plan === "PRO" ? "Manage Pro Plan" : "View Membership Plans"}</button>
     `;
-    const supportPanel = `
+    const securityPanel = `
       <form id="user-password-form" class="stack-form subtle-form progressive-settings-form">
         ${renderPasswordField({
           label: "Current password",
@@ -14172,8 +14161,10 @@ function renderSettingsPane() {
           placeholder: "Confirm password",
           autocomplete: "new-password",
         })}
-        <button class="button-secondary shimmer-button" type="submit">${icon("lock")} Update</button>
+        <button class="button-secondary shimmer-button" type="submit">${icon("lock")} Update password</button>
       </form>
+    `;
+    const supportPanel = `
       <div class="support-action-grid">
         <a class="support-action-card whatsapp" href="https://wa.me/2347062671100" target="_blank" rel="noopener noreferrer">
           ${icon("whatsapp")}
@@ -14187,18 +14178,28 @@ function renderSettingsPane() {
           <button class="button-primary shimmer-button" type="submit">${icon("contact")} Send</button>
         </form>
       </div>
-      <div class="contact-card compact-contact-card">
-        <p><strong>Email:</strong> support@trade.local</p>
-        <button id="logout-btn" class="button-secondary shimmer-button" type="button">Logout</button>
-      </div>
     `;
+    const userInitials = String(state.user.name || "User").trim().split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
     return `
-      ${renderSettingsDisclosure({ key: "user-appearance", title: "Appearance", subtitle: "Theme", iconName: "settings", content: appearancePanel })}
-      ${renderSettingsDisclosure({ key: "user-exchange", title: "Exchange", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, open: true, extraClass: loadingClass(state.loadingUsers) })}
-      ${renderSettingsDisclosure({ key: "user-bank", title: "Withdrawal Bank", subtitle: savedBank.verified ? "Verified" : "Add account", iconName: "bank", content: bankPanel })}
-      ${renderSettingsDisclosure({ key: "user-account", title: "Account", subtitle: state.user.mirrorEnabled ? "Mirror active" : "Mirror off", iconName: "profile", content: accountPanel })}
-      ${renderSettingsDisclosure({ key: "user-app", title: "App", subtitle: state.pwa.isStandalone ? "Installed" : "Install and alerts", iconName: "download", content: renderPwaSettingsContent(), section: "app" })}
-      ${renderSettingsDisclosure({ key: "user-support", title: "Support", subtitle: "Password and help", iconName: "contact", content: supportPanel, section: "support" })}
+      <section class="user-settings-page" aria-label="Account settings">
+        <div class="user-settings-profile"><span class="user-settings-avatar">${escapeHtml(userInitials)}</span><div><strong>${escapeHtml(state.user.name || "Your account")}</strong><small>${escapeHtml(state.user.email || "")}</small></div><span class="user-settings-profile-icon">${icon("shield")}</span></div>
+        <div class="user-settings-group"><h3>Preferences</h3>
+          ${renderSettingsDisclosure({ key: "user-appearance", title: "Appearance", subtitle: state.theme === "dark" ? "Dark mode" : "Light mode", iconName: "settings", content: appearancePanel, open: true })}
+          ${renderSettingsDisclosure({ key: "user-app", title: "App & notifications", subtitle: state.pwa.isStandalone ? "Installed on this device" : "Install and manage alerts", iconName: "smartphone", content: renderPwaSettingsContent(), section: "app" })}
+        </div>
+        <div class="user-settings-group"><h3>Your account</h3>
+          ${renderSettingsDisclosure({ key: "user-account", title: "Account overview", subtitle: "Wallet and membership", iconName: "profile", content: accountPanel })}
+          ${renderSettingsDisclosure({ key: "user-bank", title: "Withdrawal bank", subtitle: savedBank.verified ? "Verified account" : "Add a bank account", iconName: "bank", content: bankPanel })}
+        </div>
+        <div class="user-settings-group"><h3>Security & support</h3>
+          ${renderSettingsDisclosure({ key: "user-security", title: "Password", subtitle: "Update your sign-in password", iconName: "lock", content: securityPanel })}
+          ${renderSettingsDisclosure({ key: "user-support", title: "Help & support", subtitle: "Message us or chat on WhatsApp", iconName: "contact", content: supportPanel, section: "support" })}
+        </div>
+        <div class="user-settings-group"><h3>Advanced</h3>
+          ${renderSettingsDisclosure({ key: "user-exchange", title: "Exchange connection", subtitle: activeExchangeLabel, iconName: "card", content: exchangePanel, extraClass: loadingClass(state.loadingUsers) })}
+        </div>
+        <button id="logout-btn" class="user-settings-logout" type="button">${icon("arrow")} Sign out</button>
+      </section>
     `;
   }
   return `

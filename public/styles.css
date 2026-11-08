@@ -8567,3 +8567,61 @@ body[data-theme="dark"] .user-session-banner { border-color:#564921; background:
 body[data-theme="dark"] .user-session-banner .session-calendar-icon { background:#4d3d1b; color:#f3ce61; }
 body[data-theme="dark"] .btc-dashboard-chart { background:linear-gradient(180deg,#292818,#191e26); }
 body[data-theme="dark"] .bottom-nav-user { border-color:var(--line); background:var(--panel); }
+
+/* User settings: clear groups, calm controls, and compact mobile rows. */
+.user-settings-page { display:grid; gap:22px; width:min(100%,720px); margin:0 auto 28px; }
+.user-settings-profile { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:13px; min-width:0; padding:18px; border:1px solid var(--line); border-radius:22px; background:var(--panel); }
+.user-settings-avatar { display:grid; place-items:center; width:48px; height:48px; border-radius:16px; background:#fff1bd; color:#8d6900; font-size:.96rem; font-weight:850; }
+.user-settings-profile > div { display:grid; gap:3px; min-width:0; }
+.user-settings-profile strong { font-size:.96rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.user-settings-profile small { color:var(--muted); font-size:.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.user-settings-profile-icon { display:grid; place-items:center; width:32px; height:32px; border-radius:50%; background:#eaf7f1; color:#087e5c; }
+.user-settings-profile-icon .nav-icon { width:18px; height:18px; }
+.user-settings-group { display:grid; gap:9px; min-width:0; }
+.user-settings-group > h3 { margin:0 3px 2px; color:var(--muted); font-size:.74rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.user-settings-page .settings-disclosure { margin:0; border:1px solid var(--line); border-radius:18px; background:var(--panel); box-shadow:none; overflow:hidden; }
+.user-settings-page .settings-disclosure-summary { min-height:68px; padding:13px 16px; gap:13px; }
+.user-settings-page .settings-disclosure-summary .card-icon { display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:12px; background:#f8f6ed; color:#957600; }
+.user-settings-page .settings-disclosure-summary .card-icon .nav-icon { width:20px; height:20px; }
+.user-settings-page .settings-disclosure-summary strong { color:var(--text); font-size:.87rem; line-height:1.2; }
+.user-settings-page .settings-disclosure-summary small { display:block; margin-top:3px; color:var(--muted); font-size:.7rem; font-weight:500; }
+.user-settings-page .settings-disclosure-chevron .nav-icon { width:16px; height:16px; }
+.user-settings-page .settings-disclosure[open] .settings-disclosure-summary { border-bottom:1px solid var(--line); }
+.user-settings-page .settings-disclosure-body { gap:14px; padding:17px; }
+.user-settings-page .progressive-settings-form { margin:0; padding:15px; border-radius:14px; background:var(--soft-surface); }
+.user-settings-page .stack-form { gap:12px; }
+.user-settings-page .stack-form label { min-width:0; }
+.user-settings-page .stack-form input,.user-settings-page .stack-form select,.user-settings-page .stack-form textarea { min-height:44px; border-radius:11px; }
+.user-settings-page .stack-form button[type="submit"] { min-height:44px; justify-self:start; border-radius:11px; }
+.user-settings-theme-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.user-settings-page .user-settings-theme-options .theme-btn { display:flex; align-items:center; gap:9px; min-height:70px; padding:11px; border:1px solid var(--line); border-radius:14px; background:var(--panel); color:var(--text); text-align:left; box-shadow:none; cursor:pointer; }
+.user-settings-page .user-settings-theme-options .theme-btn.active { border-color:#d6b449; background:#fff9e7; color:var(--text); }
+.user-settings-theme-options .theme-btn > span:nth-child(2) { display:grid; gap:2px; min-width:0; font-size:.8rem; }
+.user-settings-theme-options .theme-btn small { color:var(--muted); font-size:.62rem; font-weight:500; }
+.user-settings-theme-options .theme-btn .nav-icon { width:16px; height:16px; margin-left:auto; color:#087e5c; }
+.theme-swatch { flex:none; width:24px; height:24px; border:1px solid #d8dadd; border-radius:8px; }
+.theme-swatch.light { background:#fff; }
+.theme-swatch.dark { border-color:#404954; background:#222a34; }
+.user-settings-page .pwa-settings-title-row strong { font-size:.75rem; }
+.user-settings-page .pwa-settings-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.user-settings-page .pwa-settings-actions button { min-width:0; }
+.user-settings-page .support-action-grid { margin:0; }
+.user-settings-logout { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-height:46px; border:1px solid var(--line); border-radius:14px; background:var(--panel); color:var(--text); font:inherit; font-size:.82rem; font-weight:750; cursor:pointer; }
+.user-settings-logout .nav-icon { width:16px; height:16px; transform:rotate(180deg); }
+.user-settings-page button:focus-visible,.user-settings-page summary:focus-visible { outline:2px solid #987700; outline-offset:2px; }
+body[data-theme="dark"] .user-settings-avatar { background:#4c3d1c; color:#f1ce68; }
+body[data-theme="dark"] .user-settings-profile-icon { background:#16392d; color:#92dfbb; }
+body[data-theme="dark"] .user-settings-page .settings-disclosure-summary .card-icon { background:#353023; color:#e9c45a; }
+body[data-theme="dark"] .user-settings-page .user-settings-theme-options .theme-btn.active { border-color:#a48324; background:#302c1e; }
+
+@media (max-width:760px) {
+  .user-settings-page { gap:20px; }
+  .user-settings-profile { padding:15px; }
+  .user-settings-page .settings-disclosure-body { padding:15px; }
+  .user-settings-page .stack-form { grid-template-columns:minmax(0,1fr); }
+  .user-settings-page .pwa-settings-actions { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:360px) {
+  .user-settings-page .user-settings-theme-options .theme-btn { padding:8px; gap:7px; }
+  .user-settings-theme-options .theme-btn small { font-size:.58rem; }
+}
