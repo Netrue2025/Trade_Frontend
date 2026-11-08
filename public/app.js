@@ -198,6 +198,7 @@ const state = {
     orderFilter: "all",
   },
   notifications: [],
+  userHistoryView: "all",
   showNotifications: false,
   totalUsdt: 0,
   previousTotalUsdt: 0,
@@ -4810,30 +4811,34 @@ function renderDashboardTopBar() {
   return `
     <header class="dashboard-topbar ${state.user.role === "user" ? "user-dashboard-topbar" : ""}">
       <div>
-        ${state.user.role === "user" ? state.activeTab === "settings" ? `<p class="user-dashboard-welcome">Your preferences</p><strong>Settings</strong>` : `<p class="user-dashboard-welcome">Welcome back${userFirstName ? `, ${escapeHtml(userFirstName)}` : ""}</p><strong>Your account</strong>` : `<strong>${escapeHtml(state.user.name || "Dashboard")}</strong><p class="muted-copy">Admin workspace</p>`}
+        ${state.user.role === "user" ? state.activeTab === "settings" ? `<p class="user-dashboard-welcome">Your preferences</p><strong>Settings</strong>` : state.activeTab === "history" ? `<p class="user-dashboard-welcome">Your records</p><strong>Activity</strong>` : `<p class="user-dashboard-welcome">Welcome back${userFirstName ? `, ${escapeHtml(userFirstName)}` : ""}</p><strong>Your account</strong>` : `<strong>${escapeHtml(state.user.name || "Dashboard")}</strong><p class="muted-copy">Admin workspace</p>`}
         ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}
       </div>
       <div class="notification-wrap">
-        <button class="icon-action notification-button" id="notification-toggle-btn" type="button" aria-label="Notifications" title="Notifications">
+        <button class="icon-action notification-button" id="notification-toggle-btn" type="button" aria-label="Notifications${unreadCount ? `, ${unreadCount} unread` : ""}" aria-expanded="${state.showNotifications ? "true" : "false"}" aria-controls="notification-panel" title="Notifications">
           ${icon("bell")}
           ${unreadCount ? `<span class="notification-badge">${unreadCount > 9 ? "9+" : unreadCount}</span>` : ""}
         </button>
         ${
           state.showNotifications
             ? `
-              <div class="notification-panel">
+              <div class="notification-panel" id="notification-panel" role="dialog" aria-label="Notifications">
+                <div class="notification-panel-head"><div><strong>Notifications</strong><small>${unreadCount ? `${unreadCount} unread` : "All caught up"}</small></div><button type="button" data-notification-close aria-label="Close notifications">${icon("x")}</button></div>
+                <div class="notification-panel-list">
                 ${notifications
                   .slice(0, 30)
                   .map(
                     (item) => `
                       <button class="notification-item ${item.readAt ? "read" : ""}" data-notification-open="${escapeHtml(item.id)}" data-notification-swipe="${escapeHtml(item.id)}" type="button">
-                        <strong>${escapeHtml(item.title || item.type || "Update")}</strong>
-                        <p>${escapeHtml(item.message || "")}</p>
-                        <span class="notification-time">${item.createdAt ? new Date(item.createdAt).toLocaleString() : ""}</span>
+                        <span class="notification-item-icon">${icon(String(item.type || "").toUpperCase() === "MESSAGE" ? "contact" : ["DEPOSIT", "WITHDRAWAL", "TRANSACTION"].includes(String(item.type || item.entityType || "").toUpperCase()) ? "bank" : "bell")}</span>
+                        <span class="notification-item-copy"><strong>${escapeHtml(item.title || item.type || "Update")}</strong><span>${escapeHtml(item.message || "")}</span><small>${item.createdAt ? new Date(item.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""}</small></span>
+                        ${item.readAt ? "" : `<i class="notification-unread-dot" aria-label="Unread"></i>`}
                       </button>
                     `
                   )
-                  .join("") || `<p class="muted-copy">No notifications.</p>`}
+                  .join("") || `<div class="notification-empty">${icon("check")}<strong>All caught up</strong><p>New account updates will appear here.</p></div>`}
+                </div>
+                <button class="notification-settings-link" data-tab="settings" type="button">Manage notification settings ${icon("arrow")}</button>
               </div>
             `
             : ""
@@ -11155,7 +11160,7 @@ function renderCopyPlanMarketChart() {
   return `<article class="copy-plan-market-card ${activePlan ? "has-active-plan" : ""}">
     <div class="copy-plan-market-head"><span class="copy-plan-symbol-mark">${icon("signals")}</span><div><strong>${escapeHtml(chartSymbol.replace(/(USDT|USD)$/, "/$1"))}</strong><small>${activePlan ? "Admin configured live trade" : "Bitcoin live market"}</small></div><span class="copy-plan-market-status"><i></i>${activePlan ? "Live" : "Market"}</span></div>
     <div class="copy-plan-market-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${Number(summary?.movePercent || 0) >= 0 ? "positive" : "negative"}">${summary ? `${Number(summary.movePercent) >= 0 ? "+" : ""}${formatNumber(summary.movePercent, 2)}%` : "24h market"}</span></div>
-    <div class="copy-plan-market-chart" aria-label="${escapeHtml(chartSymbol)} live market chart">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="copy-plan-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#e8bd18" stop-opacity=".24"/><stop offset="1" stop-color="#e8bd18" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#copy-plan-chart-fill)"/><path d="${line}" class="copy-plan-market-line"/></svg>` : `<div class="copy-plan-chart-loading">${loading ? "Loading live market data…" : "Market chart will appear when data is available."}</div>`}</div>
+    <div class="copy-plan-market-chart" aria-label="${escapeHtml(chartSymbol)} live market chart">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="copy-plan-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#0b966c" stop-opacity=".24"/><stop offset="1" stop-color="#0b966c" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#copy-plan-chart-fill)"/><path d="${line}" class="copy-plan-market-line"/></svg>` : `<div class="copy-plan-chart-loading">${loading ? "Loading live market data…" : "Market chart will appear when data is available."}</div>`}</div>
     ${activePlan ? `<div class="copy-plan-active-data"><div><small>Configured return</small><strong>${formatNumber(activePlan.profitPercent, 2)}%</strong></div><div><small>Session ends in</small><strong data-copy-plan-countdown>${remaining}</strong></div><div><small>Term</small><strong>${formatNumber(activePlan.durationHours, 2)}h</strong></div><div><small>Your investment</small><strong>${activePlan.userInvestment ? formatUsdtUnit(activePlan.userInvestment.amountUsdt || 0) : "Not joined"}</strong></div></div><p class="copy-plan-market-disclaimer">Market prices are shown for reference. Your return follows the admin configured trade.</p>` : `<div class="copy-plan-fallback-note">BTC/USDT market view · 15 minute candles</div>`}
     <div class="copy-plan-chart-footer"><span>Live market data</span><span>${state.copyPlanChart?.updatedAt ? `Updated ${new Date(state.copyPlanChart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Connecting"}</span></div>
   </article>`;
@@ -11172,7 +11177,7 @@ function renderBtcDashboardChart() {
   return `<section class="btc-dashboard-card" aria-label="BTC/USDT live market">
     <div class="btc-dashboard-head"><div><small>Live market</small><h3>BTC/USDT</h3></div><span class="btc-dashboard-live"><i></i> Live</span></div>
     <div class="btc-dashboard-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${move >= 0 ? "positive" : "negative"}">${summary ? `${move >= 0 ? "+" : ""}${formatNumber(move, 2)}%` : "Waiting for data"}</span></div>
-    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#d6a916" stop-opacity=".22"/><stop offset="1" stop-color="#d6a916" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
+    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#0b966c" stop-opacity=".22"/><stop offset="1" stop-color="#0b966c" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
     <div class="btc-dashboard-stats"><div><small>Range high</small><strong>${summary ? formatUsdtUnit(summary.highPrice) : "--"}</strong></div><div><small>Range low</small><strong>${summary ? formatUsdtUnit(summary.lowPrice) : "--"}</strong></div><div><small>Interval</small><strong>15 min</strong></div></div>
     <p class="btc-dashboard-foot">Market data for reference${chart?.updatedAt ? ` · Updated ${new Date(chart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
   </section>`;
@@ -14585,12 +14590,15 @@ function renderProfitLossReportCard() {
 function renderWalletHistoryRow(item) {
   const amount = Number(item.amount || 0);
   const currency = item.currency || "USDT";
+  const kind = String(item.kind || item.type || "").toUpperCase();
+  const outgoing = amount < 0 || /WITHDRAW|PURCHASE|DEBIT|PAYMENT/.test(kind);
   const isMixedCurrency = String(currency).toUpperCase() === "MIXED";
   const equivalent = formatRecordEquivalent(item, currency);
   const tone = amount > 0 ? "positive" : amount < 0 ? "negative" : "neutral";
   const statusLabel = formatWalletRequestStatus(item.status);
   return `
     <div class="asset-card wallet-history-row">
+      <span class="wallet-history-icon ${outgoing ? "outgoing" : "incoming"}">${icon(outgoing ? "download" : "bank")}</span>
       <div>
         <strong>${escapeHtml(item.description || item.type || "Wallet")}</strong>
         <p class="muted-copy">
@@ -14885,7 +14893,24 @@ function renderHistoryContent() {
   `;
 }
 
+function renderUserActivityPane() {
+  const view = ["all", "wallet", "trades"].includes(state.userHistoryView) ? state.userHistoryView : "all";
+  const walletItems = state.financialDashboard?.walletHistory || [];
+  const joinedPlans = (state.copyPlans || []).filter((plan) => plan.userInvestment);
+  const copiedTrades = getHistoryTrades().filter(shouldUserSeeTrade);
+  const showWallet = view !== "trades";
+  const showTrades = view !== "wallet";
+  return `<section class="user-activity-page" aria-label="Account activity">
+    <div class="user-activity-intro"><div><h2>Your activity</h2><p>Wallet movements and configured trade sessions</p></div><span>${walletItems.length + joinedPlans.length} recent</span></div>
+    <div class="user-activity-tabs" role="group" aria-label="Activity type">${[["all", "All"], ["wallet", "Wallet"], ["trades", "Trades"]].map(([key, label]) => `<button class="${view === key ? "active" : ""}" data-user-history-view="${key}" type="button" aria-pressed="${view === key}">${label}</button>`).join("")}</div>
+    ${showWallet ? `<div class="user-activity-section"><div class="user-activity-section-head"><div><h3>Wallet activity</h3><p>Deposits, withdrawals and earnings</p></div><span>${walletItems.length}</span></div>${renderWalletHistorySection({ title: "Transactions", description: "Your latest account movements", listKey: "wallet-history-page", limit: 80 }) || `<div class="user-activity-empty">${icon("wallet")}<strong>No wallet activity yet</strong><p>Deposits, withdrawals and earnings will appear here.</p></div>`}</div>` : ""}
+    ${showTrades ? `<div class="user-activity-section"><div class="user-activity-section-head"><div><h3>Trade sessions</h3><p>Trades you chose to join</p></div><span>${joinedPlans.length}</span></div><div class="user-activity-trades">${joinedPlans.map((plan) => `<article class="user-activity-trade"><span class="user-activity-trade-icon">${icon("signals")}</span><div><strong>${escapeHtml(String(plan.symbol || "Trade").replace("USDT", "/USDT"))}</strong><small>${plan.userInvestment?.createdAt ? new Date(plan.userInvestment.createdAt).toLocaleDateString([], { dateStyle: "medium" }) : plan.scheduledAt ? new Date(plan.scheduledAt).toLocaleDateString([], { dateStyle: "medium" }) : "Configured session"}</small></div><div><strong>${formatUsdtUnit(plan.userInvestment?.amountUsdt || 0)}</strong><small>${escapeHtml(plan.userInvestment?.status || plan.status || "Joined")} · ${formatNumber(plan.profitPercent || 0, 2)}% target</small></div></article>`).join("") || `<div class="user-activity-empty">${icon("signals")}<strong>No joined trades yet</strong><p>Sessions you join will appear here.</p></div>`}</div></div>` : ""}
+    ${showTrades && copiedTrades.length ? `<details class="user-activity-exchange"><summary>Exchange trade records <span>${copiedTrades.length}</span>${icon("chevronDown")}</summary><div>${copiedTrades.map((trade) => `<div class="user-activity-exchange-row"><strong>${escapeHtml(trade.symbol || "Trade")}</strong><span>${escapeHtml(trade.lifecycleStatus || "Recorded")}</span><small>${trade.createdAt ? new Date(trade.createdAt).toLocaleString() : ""}</small></div>`).join("")}</div></details>` : ""}
+  </section>`;
+}
+
 function renderHistoryPane() {
+  if (state.user?.role === "user") return renderUserActivityPane();
   const trades = getHistoryTrades();
   const clearableTrades = trades.filter(isTradeClearableFromHistory);
   const canClearHistory = state.user?.role === "admin";
@@ -15288,11 +15313,12 @@ async function navigateToTab(nextTab) {
         state.tradesLoadError = "";
       }),
       state.user?.role === "admin" ? loadAdminFinanceQueues() : Promise.resolve(),
+      state.user?.role === "user" ? api("/api/copy-plans").then((payload) => { state.copyPlans = Array.isArray(payload?.plans) ? payload.plans : []; }) : Promise.resolve(),
     ]);
     if (results[1].status === "rejected") {
       state.tradesLoadError = results[1].reason?.message || "Trades could not be refreshed.";
     }
-    if (results.some((result) => result.status === "rejected")) render();
+    if (state.activeTab === "history") render();
   }
   if (nextTab === "signals") {
     await withLoading(() => loadSignalsSnapshot({ silent: true })).catch((error) => showError(error.message));
@@ -15428,6 +15454,7 @@ function renderDashboardShell() {
   scrollToRouteSection();
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", async () => {
+      if (state.showNotifications) state.showNotifications = false;
       const expandKey = button.dataset.expandListKey;
       if (expandKey && !isListExpanded(expandKey)) {
         state.expandedListKeys = [...new Set([...state.expandedListKeys, expandKey])];
@@ -15530,13 +15557,27 @@ function bindDashboardActions() {
   const notificationButton = document.getElementById("notification-toggle-btn");
   if (notificationButton) {
     notificationButton.addEventListener("click", () => {
-          state.showNotifications = !state.showNotifications;
-          if (state.showNotifications) {
-            updateAppBadge();
-          }
-          render();
-        });
-      }
+      state.showNotifications = !state.showNotifications;
+      if (state.showNotifications) updateAppBadge();
+      render();
+      if (state.showNotifications) document.querySelector("[data-notification-close]")?.focus();
+    });
+  }
+  document.querySelector("[data-notification-close]")?.addEventListener("click", () => {
+    state.showNotifications = false;
+    render();
+  });
+  document.getElementById("notification-panel")?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      state.showNotifications = false;
+      render();
+      document.getElementById("notification-toggle-btn")?.focus();
+    }
+  });
+  document.querySelectorAll("[data-user-history-view]").forEach((button) => button.addEventListener("click", () => {
+    state.userHistoryView = button.dataset.userHistoryView;
+    render();
+  }));
 
   document.querySelectorAll("[data-menu-toggle]").forEach((button) => {
     button.addEventListener("click", () => {
