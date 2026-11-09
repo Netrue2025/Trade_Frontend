@@ -17,11 +17,12 @@ const FUTURES_REFRESH_INTERVAL_MS = 180000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const WELCOME_COMPLETED_STORAGE_KEY = "netruefi-welcome-completed-v1";
+const PREMIUM_THEME_MIGRATION_KEY = "netruefi-premium-theme-v1";
 const LOCATION_COUNTRY_STORAGE_KEY = "netruefi-location-country-v1";
 const DISPLAY_CURRENCY_STORAGE_KEY = "netruefi-display-currency-v1";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -121,7 +122,9 @@ function getDefaultSignalAutoTradeState() {
 
 const state = {
   user: null,
-  theme: localStorage.getItem("tradeflow-theme") || "light",
+  theme: localStorage.getItem(PREMIUM_THEME_MIGRATION_KEY) === "true"
+    ? localStorage.getItem("tradeflow-theme") || "dark"
+    : "dark",
   authExchange: localStorage.getItem("tradeflow-auth-exchange") || "bybit",
   selectedExchange: localStorage.getItem("tradeflow-selected-exchange") || "bybit",
   authTab: "login",
@@ -380,6 +383,7 @@ function normalizeUserPayload(user) {
 function applyTheme() {
   document.body.dataset.theme = state.theme;
   localStorage.setItem("tradeflow-theme", state.theme);
+  localStorage.setItem(PREMIUM_THEME_MIGRATION_KEY, "true");
 }
 
 function isDocumentVisible() {
@@ -7085,6 +7089,8 @@ function refreshTradeSectionsDom() {
 }
 
 function bindLiveDashboardControls() {
+  document.querySelectorAll("[data-transfer-open]").forEach((button) => { button.onclick = openTransferModal; });
+  document.querySelectorAll(".user-account-actions [data-tab='signals']").forEach((button) => { button.onclick = () => { void navigateToTab("signals"); }; });
   document.querySelectorAll("[data-display-currency-toggle]").forEach((button) => {
     button.onclick = () => {
       state.displayCurrencyOverride = getDisplayCurrency() === "NGN" ? "USD" : "NGN";
@@ -11080,11 +11086,13 @@ function renderSummaryCard() {
           <button class="user-account-balance balance-privacy-toggle ${state.hideBalanceAmounts ? "is-hidden" : ""}" data-balance-privacy-toggle type="button" aria-label="${state.hideBalanceAmounts ? "Show balance" : "Hide balance"}" aria-pressed="${state.hideBalanceAmounts ? "true" : "false"}">
             <span>${displayCurrency === "NGN" ? formatSignedNaira(investmentNgn) : formatUsdEquivalent(investmentUsd)}</span>${icon(state.hideBalanceAmounts ? "eyeOff" : "eye")}
           </button>
-          <div class="user-account-currency-row"><span class="${state.hideBalanceAmounts ? "is-hidden" : ""}">${displayCurrency === "NGN" ? `${formatUsdEquivalent(investmentUsd)} USD equivalent` : `${formatSignedNaira(investmentNgn)} NGN equivalent`}</span><button data-display-currency-toggle type="button" aria-label="Switch primary currency">Switch to ${displayCurrency === "NGN" ? "USD" : "NGN"}</button></div>
+          <div class="user-account-currency-row"><span class="${state.hideBalanceAmounts ? "is-hidden" : ""}">${displayCurrency === "NGN" ? `${formatUsdEquivalent(investmentUsd)} USD equivalent` : `${formatSignedNaira(investmentNgn)} equivalent`}</span><button data-display-currency-toggle type="button" aria-label="Switch primary currency">Switch to ${displayCurrency === "NGN" ? "USD" : "NGN"}</button></div>
           ${!state.locationCountry ? `<button class="account-location-action" data-location-request type="button">Enable location for local currency</button>` : ""}
           <div class="user-account-actions">
             <button id="netrue-deposit-btn" type="button">${icon("bank")} Deposit</button>
             <button id="netrue-withdraw-btn" type="button">${icon("download")} Withdraw</button>
+            <button data-transfer-open type="button">${icon("send")} Transfer</button>
+            <button data-tab="signals" type="button">${icon("signals")} Trade</button>
           </div>
         </article>
       </section>
@@ -11245,7 +11253,7 @@ function renderCopyPlanMarketChart() {
   return `<article class="copy-plan-market-card ${activePlan ? "has-active-plan" : ""}">
     <div class="copy-plan-market-head"><span class="copy-plan-symbol-mark">${icon("signals")}</span><div><strong>${escapeHtml(chartSymbol.replace(/(USDT|USD)$/, "/$1"))}</strong><small>${activePlan ? "Admin configured live trade" : "Bitcoin live market"}</small></div><span class="copy-plan-market-status"><i></i>${activePlan ? "Live" : "Market"}</span></div>
     <div class="copy-plan-market-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${Number(summary?.movePercent || 0) >= 0 ? "positive" : "negative"}">${summary ? `${Number(summary.movePercent) >= 0 ? "+" : ""}${formatNumber(summary.movePercent, 2)}%` : "24h market"}</span></div>
-    <div class="copy-plan-market-chart" aria-label="${escapeHtml(chartSymbol)} live market chart">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="copy-plan-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#1768d1" stop-opacity=".24"/><stop offset="1" stop-color="#1768d1" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#copy-plan-chart-fill)"/><path d="${line}" class="copy-plan-market-line"/></svg>` : `<div class="copy-plan-chart-loading">${loading ? "Loading live market data…" : "Market chart will appear when data is available."}</div>`}</div>
+    <div class="copy-plan-market-chart" aria-label="${escapeHtml(chartSymbol)} live market chart">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="copy-plan-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#00C781" stop-opacity=".24"/><stop offset="1" stop-color="#00C781" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#copy-plan-chart-fill)"/><path d="${line}" class="copy-plan-market-line"/></svg>` : `<div class="copy-plan-chart-loading">${loading ? "Loading live market data…" : "Market chart will appear when data is available."}</div>`}</div>
     ${activePlan ? `<div class="copy-plan-active-data"><div><small>Configured return</small><strong>${formatNumber(activePlan.profitPercent, 2)}%</strong></div><div><small>Session ends in</small><strong data-copy-plan-countdown>${remaining}</strong></div><div><small>Term</small><strong>${formatNumber(activePlan.durationHours, 2)}h</strong></div><div><small>Your investment</small><strong>${activePlan.userInvestment ? formatUsdtUnit(activePlan.userInvestment.amountUsdt || 0) : "Not joined"}</strong></div></div><p class="copy-plan-market-disclaimer">Market prices are shown for reference. Your return follows the admin configured trade.</p>` : `<div class="copy-plan-fallback-note">BTC/USDT market view · 15 minute candles</div>`}
     <div class="copy-plan-chart-footer"><span>Live market data</span><span>${state.copyPlanChart?.updatedAt ? `Updated ${new Date(state.copyPlanChart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Connecting"}</span></div>
   </article>`;
@@ -11262,7 +11270,7 @@ function renderBtcDashboardChart() {
   return `<section class="btc-dashboard-card" aria-label="BTC/USDT live market">
     <div class="btc-dashboard-head"><div><small>Live market</small><h3>BTC/USDT</h3></div><span class="btc-dashboard-live"><i></i> Live</span></div>
     <div class="btc-dashboard-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${move >= 0 ? "positive" : "negative"}">${summary ? `${move >= 0 ? "+" : ""}${formatNumber(move, 2)}%` : "Waiting for data"}</span></div>
-    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#1768d1" stop-opacity=".22"/><stop offset="1" stop-color="#1768d1" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
+    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#00C781" stop-opacity=".22"/><stop offset="1" stop-color="#00C781" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
     <div class="btc-dashboard-stats"><div><small>Range high</small><strong>${summary ? formatUsdtUnit(summary.highPrice) : "--"}</strong></div><div><small>Range low</small><strong>${summary ? formatUsdtUnit(summary.lowPrice) : "--"}</strong></div><div><small>Interval</small><strong>15 min</strong></div></div>
     <p class="btc-dashboard-foot">Market data for reference${chart?.updatedAt ? ` · Updated ${new Date(chart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
   </section>`;
@@ -16636,10 +16644,7 @@ function bindDashboardActions() {
     });
   });
 
-  const transferOpenButton = document.querySelector("[data-transfer-open]");
-  if (transferOpenButton) {
-    transferOpenButton.addEventListener("click", openTransferModal);
-  }
+  document.querySelectorAll("[data-transfer-open]").forEach((button) => { button.onclick = openTransferModal; });
 
   document.querySelectorAll("[data-vtu-network]").forEach((button) => {
     button.addEventListener("click", () => {

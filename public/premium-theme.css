@@ -1,0 +1,341 @@
+/* NetrueFi premium identity. This layer follows the legacy layout stylesheet. */
+:root {
+  --brand-background: #071A16;
+  --brand-emerald: #00C781;
+  --brand-emerald-hover: #00AD70;
+  --brand-surface: #102C25;
+  --brand-card: #12352B;
+  --brand-border: #1D4035;
+  --brand-coral: #FF5263;
+  --brand-white: #FFFFFF;
+  --brand-slate: #94A3B8;
+  --brand-input: #0B211B;
+  --brand-disabled: #64748B;
+  --brand-green-wash: rgba(0, 199, 129, 0.10);
+  --brand-red-wash: rgba(255, 82, 99, 0.10);
+  --brand-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
+}
+
+body[data-theme="dark"] {
+  --bg: var(--brand-background);
+  --bg-start: var(--brand-background);
+  --bg-end: var(--brand-background);
+  --bg-glow-1: transparent;
+  --bg-glow-2: transparent;
+  --panel: var(--brand-surface);
+  --panel-border: var(--brand-border);
+  --line: var(--brand-border);
+  --text: var(--brand-white);
+  --muted: var(--brand-slate);
+  --accent: var(--brand-emerald);
+  --accent-2: var(--brand-emerald-hover);
+  --danger: var(--brand-coral);
+  --danger-soft: var(--brand-red-wash);
+  --warning: var(--brand-emerald);
+  --warning-soft: var(--brand-green-wash);
+  --shadow: var(--brand-shadow);
+  --input-bg: var(--brand-input);
+  --soft-surface: var(--brand-card);
+  --soft-surface-2: var(--brand-green-wash);
+  --ticket-bg: var(--brand-surface);
+  --ticket-box-bg: var(--brand-card);
+  --ticket-box-soft-bg: var(--brand-surface);
+  --ticket-control-bg: var(--brand-green-wash);
+  --nav-bg: var(--brand-surface);
+  --nav-text: var(--brand-slate);
+  --nav-active-bg: var(--brand-green-wash);
+  --modal-bg: var(--brand-surface);
+  --contact-bg: var(--brand-surface);
+  color: var(--brand-white);
+  background: var(--brand-background);
+  background-image: none;
+  color-scheme: dark;
+}
+
+body[data-theme="dark"] :is(.shell, #app, .app-shell, .app-screen, .marketing-page, .auth-landing, .installed-welcome-page) {
+  background-color: var(--brand-background);
+  background-image: none;
+  color: var(--brand-white);
+}
+
+body[data-theme="dark"] :is(h1, h2, h3, h4, h5, strong, .section-head, .card-title, .asset-name) {
+  color: var(--brand-white);
+}
+body[data-theme="dark"] :is(.muted-copy, .user-account-label, .user-account-currency-row, .user-activity-intro p, .user-activity-section-head p, .notification-time, small) {
+  color: var(--brand-slate);
+}
+body[data-theme="dark"] :is(.positive, .profit, .gain, .live-indicator, .session-status-pill) { color: var(--brand-emerald); }
+body[data-theme="dark"] :is(.negative, .loss, .error, .danger) { color: var(--brand-coral); }
+body[data-theme="dark"] :is(.positive, .negative, .asset-values, .user-account-balance, .fintech-card h2, .btc-dashboard-quote, .copy-plan-market-quote, td) {
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme="dark"] :is(.mobile-card, .settings-card, .auth-shell-card, .user-account-card, .user-home-overview .user-earnings-grid article, .user-home-overview .user-session-banner, .btc-dashboard-card, .copy-plan-market-card, .user-copy-plans-panel, .signal-page-hero, .signal-page-toolbar, .signal-board-card, .signal-chart-card, .admin-stat-tile, .admin-quick-nav, .notification-panel, .modal-card, .user-settings-profile, .user-activity-trades, .user-activity-exchange, .store-catalog-card, .store-stat-strip > div, .store-stat-strip > button) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  background-image: none;
+  color: var(--brand-white);
+  box-shadow: var(--brand-shadow);
+}
+body[data-theme="dark"] :is(.copy-plan-card, .signal-list-row, .wallet-history-row, .notification-item, .user-activity-trade, .settings-disclosure, .market-row, .asset-card) {
+  border-color: var(--brand-border) !important;
+  background: var(--brand-card) !important;
+  background-image: none !important;
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(.copy-plan-return-box, .copy-plan-active-data, .user-activity-tabs, .user-settings-page .settings-disclosure-summary, .notification-item-icon, .wallet-history-icon, .user-activity-trade-icon, .user-settings-avatar) {
+  border-color: var(--brand-border);
+  background: var(--brand-green-wash);
+  color: var(--brand-emerald);
+}
+body[data-theme="dark"] :is(.user-account-card, .summary-hero.fintech-card) {
+  border: 1px solid var(--brand-border);
+  background: var(--brand-card);
+  background-image: none;
+  box-shadow: var(--brand-shadow);
+}
+body[data-theme="dark"] .fintech-card-pattern { opacity: .08; }
+body[data-theme="dark"] .user-account-balance span,
+body[data-theme="dark"] .summary-hero h2 { color: var(--brand-white); }
+body[data-theme="dark"] .user-account-currency-row button,
+body[data-theme="dark"] .currency-settings-panel button { border-color: var(--brand-border); background: var(--brand-surface); color: var(--brand-white); }
+body[data-theme="dark"] :is(.user-session-banner .session-calendar-icon, .user-settings-page .settings-disclosure-summary .card-icon, .copy-plan-symbol-mark, .copy-plan-count, .marketing-feature-grid article > .nav-icon) {
+  background: var(--brand-green-wash);
+  color: var(--brand-emerald);
+}
+
+body[data-theme="dark"] :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  min-width: 0;
+  border: 1px solid var(--brand-border);
+  background: var(--brand-input);
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(input, textarea)::placeholder { color: var(--brand-disabled) !important; opacity: 1; }
+body[data-theme="dark"] :is(input, select, textarea, button, a, summary):focus-visible {
+  outline: 2px solid var(--brand-emerald);
+  outline-offset: 2px;
+}
+body[data-theme="dark"] :is(button, input, select, textarea):disabled { opacity: .55; cursor: not-allowed; }
+body[data-theme="dark"] :is(.button-primary, .marketing-primary-action, .micro-btn.primary, .user-account-actions button:first-child) {
+  min-height: 44px;
+  border: 1px solid var(--brand-emerald);
+  background: var(--brand-emerald);
+  background-image: none;
+  color: var(--brand-background);
+  box-shadow: none;
+  transition: background-color .16s ease, border-color .16s ease, transform .16s ease;
+}
+body[data-theme="dark"] :is(.button-primary, .marketing-primary-action, .micro-btn.primary, .user-account-actions button:first-child):hover:not(:disabled) {
+  border-color: var(--brand-emerald-hover);
+  background: var(--brand-emerald-hover);
+}
+body[data-theme="dark"] :is(.button-secondary, .marketing-secondary-action, .user-account-actions button:not(:first-child), .theme-btn, .nav-button) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(.button-secondary, .marketing-secondary-action, .user-account-actions button:not(:first-child), .theme-btn):hover:not(:disabled) {
+  background: var(--brand-card);
+  border-color: var(--brand-emerald);
+}
+body[data-theme="dark"] :is(.button-danger, .danger-button, .micro-btn.danger) {
+  border-color: var(--brand-coral);
+  background: var(--brand-coral);
+  color: var(--brand-background);
+}
+body[data-theme="dark"] .shimmer-button::after { display: none; animation: none; }
+
+body[data-theme="dark"] :is(.dashboard-topbar, .user-dashboard-topbar, .bottom-nav, .bottom-nav-user, .bottom-nav-admin, .menu-sheet, .notification-panel-head) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(.bottom-nav, .bottom-nav-user, .bottom-nav-admin) { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+body[data-theme="dark"] :is(.bottom-nav-user, .bottom-nav-admin) .nav-button { background: transparent; color: var(--brand-slate); }
+body[data-theme="dark"] :is(.bottom-nav-user, .bottom-nav-admin) .nav-button.active { background: var(--brand-green-wash); color: var(--brand-emerald); }
+body[data-theme="dark"] :is(.bottom-nav-user, .bottom-nav-admin) .nav-button:hover { color: var(--brand-white); }
+body[data-theme="dark"] :is(.dashboard-topbar, .user-dashboard-topbar) strong { color: var(--brand-white); }
+body[data-theme="dark"] :is(.notification-button, .notification-panel-head button, .notification-settings-link, .user-settings-logout) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  color: var(--brand-white);
+}
+body[data-theme="dark"] :is(.notification-badge, .notification-unread-dot) { background: var(--brand-emerald); }
+body[data-theme="dark"] .notification-badge { color: var(--brand-background); }
+body[data-theme="dark"] .trade-ticket { border-color: var(--brand-border); background: var(--brand-surface); background-image: none; color: var(--brand-white); box-shadow: none; }
+body[data-theme="dark"] :is(.ticket-box, .ticket-select-wrap, .ticket-symbol, .trade-row, .trade-disclosure) { border-color: var(--brand-border); background: var(--brand-card); background-image: none; color: var(--brand-white); }
+body[data-theme="dark"] .segment.active.buy { background: var(--brand-emerald); color: var(--brand-background); }
+body[data-theme="dark"] .segment.active.sell { background: var(--brand-coral); color: var(--brand-background); }
+body[data-theme="dark"] .segment:not(.active) { background: var(--brand-surface); color: var(--brand-slate); }
+body[data-theme="dark"] :is(.ticket-side-btn, .step-btn, .slider-pill) { border-color: var(--brand-border); background: var(--brand-green-wash); color: var(--brand-white); }
+body[data-theme="dark"] :is(.ticket-side-btn, .step-btn, .slider-pill):hover:not(:disabled) { color: var(--brand-emerald); }
+body[data-theme="dark"] :is(.admin-dashboard-intro, .admin-dashboard-section, .admin-trade-desk, .admin-control-tile, .admin-balance-tile) {
+  border: 1px solid var(--brand-border);
+  background: var(--brand-surface);
+  background-image: none;
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(.admin-dashboard-intro small, .admin-dashboard-intro > span, .admin-quick-nav-btn .nav-icon, .admin-dashboard-rail .admin-stat-tile .card-icon) { color: var(--brand-emerald); }
+body[data-theme="dark"] .admin-dashboard-intro p { color: var(--brand-slate); }
+body[data-theme="dark"] .admin-quick-nav-btn { border-color: var(--brand-border); background: var(--brand-card); color: var(--brand-white); box-shadow: none; }
+body[data-theme="dark"] .admin-quick-nav-btn:hover { border-color: var(--brand-emerald); background: var(--brand-green-wash); }
+body[data-theme="dark"] :is(.admin-stat-tile, .admin-control-tile, .admin-balance-tile) { border-color: var(--brand-border); background: var(--brand-card); background-image: none; }
+body[data-theme="dark"] :is(.hero-chip, .card-icon) { border-color: var(--brand-border); background: var(--brand-green-wash); color: var(--brand-emerald); }
+body[data-theme="dark"] .fintech-card-pattern { display: none; }
+
+body[data-theme="dark"] :is(.btc-dashboard-chart, .copy-plan-market-chart, .signal-chart-shell, .signal-chart, .signal-chart-backdrop, .signal-chart-modal-host) {
+  border-color: var(--brand-border);
+  background: var(--brand-background);
+  background-image: none;
+  color: var(--brand-slate);
+}
+body[data-theme="dark"] :is(.btc-dashboard-line, .copy-plan-market-line, .signal-chart-line.positive) { stroke: var(--brand-emerald); }
+body[data-theme="dark"] .signal-chart-line.negative { stroke: var(--brand-coral); }
+body[data-theme="dark"] :is(.signal-candle.positive, .signal-candle.positive .signal-candle-body) { fill: var(--brand-emerald); background: var(--brand-emerald); }
+body[data-theme="dark"] :is(.signal-candle.negative, .signal-candle.negative .signal-candle-body) { fill: var(--brand-coral); background: var(--brand-coral); }
+body[data-theme="dark"] :is(.btc-dashboard-live, .copy-plan-market-status, .signal-stream-pill.live) { color: var(--brand-emerald); }
+body[data-theme="dark"] :is(.btc-dashboard-live i, .copy-plan-market-status i, .signal-stream-dot) { background: var(--brand-emerald); box-shadow: 0 0 0 4px var(--brand-green-wash); }
+body[data-theme="dark"] :is(.signal-timeframe-btn.active, .signal-mini-btn.active, .user-activity-tabs button.active) {
+  border-color: var(--brand-border);
+  background: var(--brand-green-wash);
+  color: var(--brand-emerald);
+}
+body[data-theme="dark"] :is(.signal-guide-line, .signal-chart-grid, .signal-price-grid) { border-color: var(--brand-border); }
+body[data-theme="dark"] :is(.btc-dashboard-quote strong, .copy-plan-market-quote strong, .signal-list-main strong) { color: var(--brand-white); }
+body[data-theme="dark"] .signal-stream-pill.lagging .signal-stream-dot { background: var(--brand-slate); box-shadow: 0 0 0 4px rgba(148, 163, 184, .10); }
+
+body[data-theme="dark"] :is(.store-hero, .store-switcher, .store-catalog-card, .digital-search, .digital-category-row button, .store-stat-strip > div, .store-stat-strip > button) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  background-image: none;
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(.store-hero p, .store-stat-strip span) { color: var(--brand-slate); }
+body[data-theme="dark"] :is(.store-hero .eyebrow, .store-hero h3) { color: var(--brand-white); }
+body[data-theme="dark"] :is(.store-refresh-btn, .store-switcher button.active, .digital-category-row button.active) {
+  border: 1px solid var(--brand-border);
+  background: var(--brand-green-wash);
+  background-image: none;
+  color: var(--brand-emerald);
+  box-shadow: none;
+}
+body[data-theme="dark"] .store-switcher button:not(.active) { color: var(--brand-slate); }
+body[data-theme="dark"] .digital-search input { border: 0; background: transparent; }
+
+body[data-theme="dark"] :is(.referral-hero, .referral-bonus-chip, .referral-stats-grid > div, .admin-referral-stats > div, .referral-link-card, .referral-steps-card, .referral-list-section, .referral-step-list > div, .referral-list-card) {
+  border: 1px solid var(--brand-border);
+  background: var(--brand-surface);
+  background-image: none;
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(.referral-page .eyebrow, .referral-bonus-chip strong, .referral-check.done, .referral-progress-tags span) { color: var(--brand-emerald); }
+body[data-theme="dark"] :is(.referral-stats-grid span, .admin-referral-stats span, .referral-step-list p) { color: var(--brand-slate); }
+body[data-theme="dark"] :is(.referral-stats-grid strong, .admin-referral-stats strong, .referral-step-list strong, .referral-bonus-chip strong) { color: var(--brand-white); }
+body[data-theme="dark"] .referral-link-box { border-color: var(--brand-border); background: var(--brand-input); color: var(--brand-white); }
+
+body[data-theme="dark"] :is(.app-screen-quest, .quest-playfield) { background: var(--brand-background); background-image: none; color: var(--brand-white); box-shadow: none; }
+body[data-theme="dark"] .quest-playfield-bg { opacity: .2; }
+body[data-theme="dark"] :is(.quest-playfield .quest-hero, .quest-loading-card, .quest-start-card, .quest-playfield .quest-card, .quest-playfield .quest-countdown-screen, .quest-playfield .quest-unavailable-screen, .quest-view-panel, .quest-admin-hero) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  background-image: none;
+  color: var(--brand-white);
+  box-shadow: none;
+}
+body[data-theme="dark"] :is(.quest-start-card > span, .quest-loading-card > span) { background: var(--brand-green-wash); color: var(--brand-emerald); box-shadow: none; animation: none; }
+body[data-theme="dark"] .quest-exit-button { border-color: var(--brand-border); background: var(--brand-surface); }
+body[data-theme="dark"] .quest-loading-card .button-secondary { min-width: 126px; min-height: 44px; border: 1px solid var(--brand-border); border-radius: 12px; background: var(--brand-card); color: var(--brand-white); }
+body[data-theme="dark"] .app-screen-quest { scrollbar-color: var(--brand-border) var(--brand-background); }
+body[data-theme="dark"] .app-screen-quest::-webkit-scrollbar-thumb { background: var(--brand-border); border-radius: 999px; }
+
+body[data-theme="dark"] .marketing-page { background: var(--brand-background); color: var(--brand-white); }
+body[data-theme="dark"] :is(.marketing-nav, .marketing-footer) { border-color: var(--brand-border); color: var(--brand-slate); }
+body[data-theme="dark"] :is(.marketing-brand, .marketing-nav nav a, .marketing-hero h1, .marketing-section-heading h2, .marketing-download h2, .marketing-feature-grid h3) { color: var(--brand-white); }
+body[data-theme="dark"] :is(.marketing-hero h1 em, .marketing-kicker, .marketing-trust-row .nav-icon, .marketing-nav nav a:hover) { color: var(--brand-emerald); }
+body[data-theme="dark"] .marketing-kicker i { background: var(--brand-emerald); box-shadow: 0 0 0 5px var(--brand-green-wash); }
+body[data-theme="dark"] :is(.marketing-hero-copy > p, .marketing-section-heading > p, .marketing-download p, .marketing-trust-row, .marketing-feature-grid p) { color: var(--brand-slate); }
+body[data-theme="dark"] :is(.marketing-features, .marketing-device-wrap) { background: var(--brand-background); background-image: none; }
+body[data-theme="dark"] :is(.marketing-feature-grid article, .marketing-download, .marketing-device, .marketing-device-balance, .marketing-device-session, .marketing-device-metrics article, .marketing-float-card) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  background-image: none;
+  color: var(--brand-white);
+  box-shadow: var(--brand-shadow);
+}
+body[data-theme="dark"] :is(.marketing-device-top, .marketing-device-greeting strong, .marketing-device-balance strong, .marketing-device-session strong, .marketing-device-metrics strong, .marketing-float-card strong) { color: var(--brand-white); }
+body[data-theme="dark"] :is(.marketing-device-greeting small, .marketing-device-balance small, .marketing-device-session small, .marketing-device-metrics small, .marketing-device-balance span, .marketing-device-actions span, .marketing-float-card small) { color: var(--brand-slate); }
+body[data-theme="dark"] :is(.marketing-device-icon, .marketing-float-card > .nav-icon) { background: var(--brand-green-wash); color: var(--brand-emerald); }
+body[data-theme="dark"] .marketing-device-session i { color: var(--brand-emerald); }
+body[data-theme="dark"] .marketing-device-actions { border-color: var(--brand-border); }
+
+body[data-theme="dark"] :is(.auth-shell-card, .auth-card, .installed-welcome-benefits > div) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  background-image: none;
+  color: var(--brand-white);
+  box-shadow: var(--brand-shadow);
+}
+body[data-theme="dark"] :is(.auth-back-to-home, .auth-footnote, .auth-divider, .auth-role-note) { color: var(--brand-slate); }
+body[data-theme="dark"] :is(.auth-footnote button, .auth-back-to-home:hover, .auth-location-action, .account-location-action, .installed-welcome-location) { color: var(--brand-emerald); }
+body[data-theme="dark"] :is(.auth-divider::before, .auth-divider::after) { background: var(--brand-border); }
+body[data-theme="dark"] .installed-welcome-page { border: 0; background: var(--brand-background); }
+body[data-theme="dark"] .installed-welcome-symbol { background: var(--brand-green-wash); color: var(--brand-emerald); }
+body[data-theme="dark"] .installed-welcome-kicker { color: var(--brand-emerald); }
+body[data-theme="dark"] .installed-welcome-benefits > div > span { background: var(--brand-green-wash); color: var(--brand-emerald); }
+body[data-theme="dark"] .installed-welcome-benefits small { color: var(--brand-slate); }
+img[src*="netruefi-logo.png"] { filter: none; }
+body[data-theme="dark"] :is(.button-primary, .marketing-primary-action, .micro-btn.primary, .user-account-actions button:first-child) :is(strong, small, .nav-icon) { color: var(--brand-background); }
+
+body[data-theme="dark"] :is(.notification-item, .notification-panel-head, .notification-settings-link, .settings-disclosure-body, .user-activity-section > .mobile-card) { border-color: var(--brand-border); }
+body[data-theme="dark"] .user-settings-page .settings-disclosure { border: 1px solid var(--brand-border); background: var(--brand-surface) !important; box-shadow: none; }
+body[data-theme="dark"] .user-settings-page .settings-disclosure-summary { background: var(--brand-surface); color: var(--brand-white); }
+body[data-theme="dark"] .user-settings-page .settings-disclosure-body { border-color: var(--brand-border); background: var(--brand-card); }
+body[data-theme="dark"] .user-settings-page .theme-btn.active { border-color: var(--brand-emerald); background: var(--brand-green-wash); color: var(--brand-white); }
+body[data-theme="dark"] .user-settings-page .theme-btn.active .nav-icon { color: var(--brand-emerald); }
+body[data-theme="dark"] :is(.user-activity-section .wallet-history-row, .user-activity-trade, .user-activity-exchange-row, .wallet-history-row) { border-bottom-color: var(--brand-border); }
+body[data-theme="dark"] :is(.notification-item:hover, .wallet-history-row:hover, .signal-list-row:hover) { background: var(--brand-green-wash) !important; }
+body[data-theme="dark"] :is(.user-activity-empty, .signal-empty-state, .notification-empty, [class*="empty-state"]) {
+  border-color: var(--brand-border);
+  background: var(--brand-surface);
+  color: var(--brand-slate);
+}
+body[data-theme="dark"] :is(.loading-overlay, .section-loading-overlay, .app-loader, .modal-backdrop) { background-color: rgba(7, 26, 22, .78); }
+body[data-theme="dark"] :is(.spinner, .loading-spinner, .loading-ring) { border-top-color: var(--brand-emerald); }
+body[data-theme="dark"] :is(table, th, td, .table-scroll) { border-color: var(--brand-border); }
+body[data-theme="dark"] th { background: var(--brand-card); color: var(--brand-slate); }
+body[data-theme="dark"] td { background: var(--brand-surface); color: var(--brand-white); }
+body[data-theme="dark"] tr:hover td { background: var(--brand-card); }
+
+@media (max-width: 760px) {
+  body[data-theme="dark"] :is(.app-screen, .user-home-dashboard, .user-settings-page, .user-activity-page) { min-width: 0; max-width: 100%; }
+  body[data-theme="dark"] :is(.user-account-card, .user-home-overview .user-earnings-grid article, .copy-plan-market-card, .btc-dashboard-card) { min-width: 0; }
+  body[data-theme="dark"] .user-account-balance span { overflow-wrap: anywhere; }
+  body[data-theme="dark"] :is(.copy-plan-market-chart, .btc-dashboard-chart) { max-width: 100%; overflow: hidden; }
+  body[data-theme="dark"] :is(.modal-card, .notification-panel) { max-width: calc(100vw - 24px); }
+}
+
+@media (min-width: 900px) {
+  body[data-theme="dark"] .bottom-nav { top: 13px; right: 84px; bottom: auto; left: auto; transform: none; width: min(470px, calc(100vw - 380px)); min-height: 60px; border-radius: 16px; }
+  body[data-theme="dark"] .user-home-overview { grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); grid-template-rows: auto auto; align-items: stretch; gap: 16px; }
+  body[data-theme="dark"] .user-home-overview > [data-live-summary-host] { grid-column: 1; grid-row: 1 / 3; min-width: 0; }
+  body[data-theme="dark"] .user-home-overview > [data-live-summary-host] .balance-carousel,
+  body[data-theme="dark"] .user-home-overview > [data-live-summary-host] .user-account-card { height: 100%; }
+  body[data-theme="dark"] .user-home-overview > .user-session-banner { grid-column: 2; grid-row: 1; }
+  body[data-theme="dark"] .user-home-overview > .user-earnings-grid { grid-column: 2; grid-row: 2; }
+  body[data-theme="dark"] .user-account-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  body[data-theme="dark"] .app-screen-home:has(.admin-dashboard-intro) { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 18px; }
+  body[data-theme="dark"] .app-screen-home:has(.admin-dashboard-intro) > :not([data-live-summary-host]):not(.admin-dashboard-intro) { grid-column: 1 / -1; }
+  body[data-theme="dark"] .app-screen-home:has(.admin-dashboard-intro) > [data-live-summary-host],
+  body[data-theme="dark"] .app-screen-home:has(.admin-dashboard-intro) > .admin-dashboard-intro { min-width: 0; height: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme="dark"] *, body[data-theme="dark"] *::before, body[data-theme="dark"] *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

@@ -366,18 +366,18 @@
       autoSize: true,
       height: 360,
       layout: {
-        background: { color: theme === "dark" ? "#111926" : "#f7fbff" },
-        textColor: theme === "dark" ? "#dfe7f7" : "#42506a",
+        background: { color: theme === "dark" ? "#071A16" : "#FFFFFF" },
+        textColor: theme === "dark" ? "#FFFFFF" : "#102C25",
       },
       grid: {
-        vertLines: { color: theme === "dark" ? "rgba(255,255,255,0.06)" : "rgba(18,26,43,0.06)" },
-        horzLines: { color: theme === "dark" ? "rgba(255,255,255,0.06)" : "rgba(18,26,43,0.06)" },
+        vertLines: { color: theme === "dark" ? "#1D4035" : "rgba(29,64,53,0.12)" },
+        horzLines: { color: theme === "dark" ? "#1D4035" : "rgba(29,64,53,0.12)" },
       },
       rightPriceScale: {
-        borderColor: theme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(18,26,43,0.08)",
+        borderColor: theme === "dark" ? "#1D4035" : "rgba(29,64,53,0.12)",
       },
       timeScale: {
-        borderColor: theme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(18,26,43,0.08)",
+        borderColor: theme === "dark" ? "#1D4035" : "rgba(29,64,53,0.12)",
         timeVisible: true,
       },
       crosshair: {
@@ -386,17 +386,17 @@
     });
 
     const candleSeries = chart.addSeries(Charts.CandlestickSeries, {
-      upColor: "#3284ec",
-      downColor: "#ff4d6d",
-      borderUpColor: "#3284ec",
-      borderDownColor: "#ff4d6d",
-      wickUpColor: "#3284ec",
-      wickDownColor: "#ff4d6d",
+      upColor: "#00C781",
+      downColor: "#FF5263",
+      borderUpColor: "#00C781",
+      borderDownColor: "#FF5263",
+      wickUpColor: "#00C781",
+      wickDownColor: "#FF5263",
     });
     candleSeries.setData(payload.candles || []);
 
     const emaSeries = chart.addSeries(Charts.LineSeries, {
-      color: "#6f5ef9",
+      color: "#94A3B8",
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -405,7 +405,7 @@
 
     candleSeries.createPriceLine({
       price: Number(payload.entryPrice || 0),
-      color: "#3284ec",
+      color: "#FFFFFF",
       lineWidth: 2,
       lineStyle: 2,
       axisLabelVisible: true,
@@ -415,7 +415,7 @@
     if (Number(payload.supportLevel || 0) > 0) {
       candleSeries.createPriceLine({
         price: Number(payload.supportLevel),
-        color: "#2f7df6",
+        color: "#94A3B8",
         lineWidth: 2,
         lineStyle: 1,
         axisLabelVisible: true,
@@ -426,7 +426,7 @@
     if (Number(payload.resistanceLevel || 0) > 0) {
       candleSeries.createPriceLine({
         price: Number(payload.resistanceLevel),
-        color: "#f59b1d",
+        color: "#FFFFFF",
         lineWidth: 2,
         lineStyle: 1,
         axisLabelVisible: true,
@@ -437,7 +437,7 @@
     if (Number(payload.stopLoss || 0) > 0) {
       candleSeries.createPriceLine({
         price: Number(payload.stopLoss),
-        color: "#ff4d6d",
+        color: "#FF5263",
         lineWidth: 1,
         lineStyle: 4,
         axisLabelVisible: true,
@@ -448,7 +448,7 @@
     if (Number(payload.takeProfit || 0) > 0) {
       candleSeries.createPriceLine({
         price: Number(payload.takeProfit),
-        color: "#3284ec",
+        color: "#00C781",
         lineWidth: 1,
         lineStyle: 4,
         axisLabelVisible: true,

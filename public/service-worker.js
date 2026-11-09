@@ -11,6 +11,7 @@ const APP_SHELL_ASSETS = [
   "/site.webmanifest",
   "/config.js",
   "/styles.css",
+  "/premium-theme.css",
   "/trade-classification.js",
   "/app.js",
   "/components/signal-page.js",
