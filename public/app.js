@@ -6360,25 +6360,19 @@ function renderLanding() {
   bindPwaActions();
 }
 
-function isPublicMarketingRoute() {
-  const params = new URLSearchParams(window.location?.search || "");
-  return window.location?.pathname === "/" && !params.has("tab") && !getPaystackReferenceFromUrl();
-}
-
 function renderPublicLanding() {
   app.innerHTML = `
     <main class="marketing-page">
       <header class="marketing-nav">
         <a class="marketing-brand" href="/" aria-label="NetrueFi home"><img src="/netruefi-logo.png" alt="" /><span>NetrueFi</span></a>
         <nav aria-label="Main navigation"><a href="#features">Features</a><a href="#app-download">Get the app</a></nav>
-        <a class="marketing-signin" href="/dashboard">Sign in</a>
       </header>
       <section class="marketing-hero">
         <div class="marketing-hero-copy">
           <span class="marketing-kicker"><i></i> Your money, in one clear view</span>
           <h1>Trade and manage your money with <em>NetrueFi.</em></h1>
-          <p>Follow configured trade sessions, keep track of your balances and earnings, and take care of everyday digital services in one secure app.</p>
-          <div class="marketing-hero-actions"><a class="marketing-primary-action" href="/dashboard?signup=1">Create your account ${icon("arrow")}</a><button class="marketing-secondary-action" data-public-install type="button">${icon("download")} Download the app</button></div>
+          <p>Follow configured trade sessions, keep track of your balances and earnings, and take care of everyday digital services in one secure app. Install NetrueFi to create an account or sign in.</p>
+          <div class="marketing-hero-actions"><button class="marketing-primary-action" data-public-install type="button">${icon("download")} Download the app</button><a class="marketing-secondary-action" href="#features">Explore features ${icon("arrow")}</a></div>
           <div class="marketing-trust-row"><span>${icon("shield")} Secure account access</span><span>${icon("smartphone")} Built for mobile</span></div>
         </div>
         <div class="marketing-device-wrap" aria-label="NetrueFi app preview">
@@ -6386,14 +6380,14 @@ function renderPublicLanding() {
           <div class="marketing-float-card">${icon("check")} <span><strong>Everything together</strong><small>Simple, clear account tools</small></span></div>
         </div>
       </section>
-      <section class="marketing-features" id="features"><div class="marketing-section-heading"><span class="marketing-kicker">A simpler way to stay on top</span><h2>Everyday finance, organized.</h2><p>Clear tools for the things you do in NetrueFi.</p></div><div class="marketing-feature-grid">
-        <article>${icon("signals")}<h3>Configured trades</h3><p>See the session terms, duration, and return configured for each trade before joining.</p></article>
-        <article>${icon("card")}<h3>Wallet overview</h3><p>Review your available balance, trade commitments, and transaction activity.</p></article>
-        <article>${icon("users")}<h3>Separate earnings</h3><p>Keep referral earnings and trading interest visible in their own balance views.</p></article>
-        <article>${icon("gift")}<h3>Digital services</h3><p>Access supported airtime, data, and other services from your account.</p></article>
+      <section class="marketing-features" id="features"><div class="marketing-section-heading"><span class="marketing-kicker">What you can do</span><h2>More ways to earn and manage money.</h2><p>Simple tools, all in one NetrueFi app.</p></div><div class="marketing-feature-grid">
+        <article>${icon("signals")}<h3>Copy trade and earn</h3><p>Choose an admin-configured trade, set the amount you want to use, and see its return and timeframe before joining.</p></article>
+        <article>${icon("users")}<h3>Refer to earn</h3><p>Invite friends and track referral earnings in a separate balance.</p></article>
+        <article>${icon("history")}<h3>1% daily</h3><p>Review the daily trade offer and its terms in the app before you join a session.</p></article>
+        <article>${icon("gift")}<h3>Digital service</h3><p>Access supported airtime, data, and other everyday digital services.</p></article>
       </div></section>
-      <section class="marketing-download" id="app-download"><div><span class="marketing-kicker">Made for your home screen</span><h2>Take NetrueFi with you.</h2><p>Install the NetrueFi web app for a focused, full-screen mobile experience. You can also use NetrueFi in your browser.</p></div><div class="marketing-download-actions"><button class="marketing-primary-action" data-public-install type="button">${icon("download")} Download the app</button><a class="marketing-secondary-action" href="/dashboard">Open NetrueFi ${icon("arrow")}</a></div></section>
-      <footer class="marketing-footer"><a class="marketing-brand" href="/"><img src="/netruefi-logo.png" alt="" /><span>NetrueFi</span></a><span>© ${new Date().getFullYear()} NetrueFi</span><a href="/dashboard">Sign in</a></footer>
+      <section class="marketing-download" id="app-download"><div><span class="marketing-kicker">Made for your home screen</span><h2>Take NetrueFi with you.</h2><p>Install the NetrueFi app, then open it from your home screen to create an account or sign in.</p></div><div class="marketing-download-actions"><button class="marketing-primary-action" data-public-install type="button">${icon("download")} Download the app</button></div></section>
+      <footer class="marketing-footer"><a class="marketing-brand" href="/"><img src="/netruefi-logo.png" alt="" /><span>NetrueFi</span></a><span>© ${new Date().getFullYear()} NetrueFi</span></footer>
     </main>
     ${renderNotice()}${renderErrorModal()}${renderPwaLayer()}
   `;
@@ -17799,7 +17793,7 @@ function render() {
       refreshWatchlistDom();
       return;
     }
-    if (isPublicMarketingRoute()) {
+    if (!state.pwa.isStandalone && !getPaystackReferenceFromUrl()) {
       renderPublicLanding();
       refreshWatchlistDom();
       return;
