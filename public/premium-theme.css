@@ -339,3 +339,164 @@ body[data-theme="dark"] tr:hover td { background: var(--brand-card); }
 @media (prefers-reduced-motion: reduce) {
   body[data-theme="dark"] *, body[data-theme="dark"] *::before, body[data-theme="dark"] *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Light is the default application appearance. It shares the same emerald identity. */
+body[data-theme="light"] {
+  --bg: #F7FAF9;
+  --bg-start: #F7FAF9;
+  --bg-end: #F7FAF9;
+  --bg-glow-1: transparent;
+  --bg-glow-2: transparent;
+  --panel: #FFFFFF;
+  --panel-border: #E1EBE7;
+  --line: #DFEAE5;
+  --text: #102C25;
+  --muted: #64748B;
+  --accent: #008F61;
+  --accent-2: #00AD70;
+  --danger: #D74758;
+  --danger-soft: rgba(255,82,99,.10);
+  --warning: #008F61;
+  --warning-soft: rgba(0,199,129,.10);
+  --shadow: 0 10px 28px rgba(13,57,43,.06);
+  --input-bg: #F8FBF9;
+  --soft-surface: #F1F8F4;
+  --soft-surface-2: #E9F8F0;
+  --ticket-bg: #FFFFFF;
+  --ticket-box-bg: #F8FBF9;
+  --ticket-box-soft-bg: #F1F8F4;
+  --ticket-control-bg: #E9F8F0;
+  --nav-bg: #FFFFFF;
+  --nav-text: #64748B;
+  --nav-active-bg: #E9F8F0;
+  --modal-bg: #FFFFFF;
+  --contact-bg: #F1F8F4;
+  color: var(--text);
+  background: var(--bg);
+  background-image: none;
+  color-scheme: light;
+}
+body[data-theme="light"] :is(.shell, #app, .app-shell, .app-screen, .marketing-page, .auth-landing, .installed-welcome-page) { background-color: var(--bg); background-image: none; }
+body[data-theme="light"] :is(.dashboard-topbar, .user-dashboard-topbar, .bottom-nav, .bottom-nav-user, .bottom-nav-admin, .notification-panel, .menu-sheet) { border-color: var(--line); background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+body[data-theme="light"] :is(.user-account-card, .user-home-overview .user-earnings-grid article, .btc-dashboard-card, .copy-plan-market-card, .user-copy-plans-panel, .modal-card, .mobile-card, .settings-card, .notification-item, .admin-dashboard-intro, .admin-dashboard-section) { border-color: var(--line); background: var(--panel); background-image: none; color: var(--text); box-shadow: var(--shadow); }
+body[data-theme="light"] :is(.button-primary, .marketing-primary-action, .micro-btn.primary, .user-account-actions button:first-child) { border-color: var(--brand-emerald); background: var(--brand-emerald); background-image: none; color: var(--brand-background); box-shadow: none; }
+body[data-theme="light"] :is(.button-primary, .marketing-primary-action, .micro-btn.primary, .user-account-actions button:first-child):hover:not(:disabled) { border-color: var(--brand-emerald-hover); background: var(--brand-emerald-hover); }
+body[data-theme="light"] :is(.button-secondary, .user-account-actions button:not(:first-child), .theme-btn) { border-color: var(--line); background: var(--panel); color: var(--text); box-shadow: none; }
+body[data-theme="light"] :is(.button-danger, .danger-button, .micro-btn.danger) { border-color: var(--brand-coral); background: var(--brand-coral); color: #FFFFFF; }
+body[data-theme="light"] :is(.bottom-nav-user, .bottom-nav-admin) .nav-button { background: transparent; color: var(--muted); }
+body[data-theme="light"] :is(.bottom-nav-user, .bottom-nav-admin) .nav-button.active { background: var(--soft-surface-2); color: #008F61; }
+body[data-theme="light"] :is(.user-session-banner, .user-transfer-shortcut) { border-color: var(--line); background: var(--soft-surface); color: var(--text); box-shadow: none; }
+body[data-theme="light"] .user-session-banner .session-calendar-icon { background: #DBF4E7; color: #008F61; }
+body[data-theme="light"] .user-session-banner .session-status-pill { color: #008F61; }
+body[data-theme="light"] :is(.auth-location-action, .account-location-action, .installed-welcome-location, .user-account-currency-row, .user-dashboard-recent .text-link) { color: #008F61; }
+body[data-theme="light"] .user-account-currency-row span { color: var(--muted) !important; }
+body[data-theme="light"] :is(.btc-dashboard-chart, .copy-plan-market-chart, .signal-chart-shell) { border-color: var(--line); background: #F8FBF9; background-image: none; }
+body[data-theme="light"] :is(.btc-dashboard-live, .copy-plan-market-status, .signal-stream-pill.live) { color: #008F61; }
+body[data-theme="light"] :is(.btc-dashboard-live i, .copy-plan-market-status i, .signal-stream-dot) { background: var(--brand-emerald); box-shadow: 0 0 0 4px var(--soft-surface-2); }
+body[data-theme="light"] :is(.copy-plan-count, .copy-plan-symbol-mark, .copy-plan-market-status, .copy-plan-live-pill.is-open, .signal-stream-pill.live) { border-color:var(--line); background:var(--soft-surface-2); color:#008F61; }
+body[data-theme="light"] :is(.copy-plan-market-quote strong, .copy-plan-card-head strong, .copy-plan-return-box strong, .signal-list-main strong) { color:var(--text); }
+body[data-theme="light"] :is(.copy-plan-fallback-note, .copy-plan-card-head small, .copy-plan-chart-footer, .copy-plan-empty p) { color:var(--muted); }
+body[data-theme="light"] :is(.copy-plan-card, .copy-plan-empty, .copy-plan-return-box, .signal-list-row, .signal-board-card, .signal-page-hero) { border-color:var(--line); background:var(--panel); background-image:none; color:var(--text); box-shadow:none; }
+body[data-theme="light"] :is(.copy-plan-market-line, .btc-dashboard-line) { stroke:var(--brand-emerald); }
+body[data-theme="light"] :is(.notification-item-icon, .wallet-history-icon, .user-activity-trade-icon, .card-icon) { background: var(--soft-surface-2); color: #008F61; }
+body[data-theme="light"] :is(.store-hero, .store-switcher, .referral-hero, .referral-stats-grid > div) { border-color: var(--line); background: var(--panel); background-image: none; color: var(--text); }
+body[data-theme="light"] :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { border-color: var(--line); background: var(--input-bg); color: var(--text); }
+body[data-theme="light"] :is(input, select, textarea, button, a, summary):focus-visible { outline: 2px solid #008F61; outline-offset: 2px; }
+body[data-theme="light"] .shimmer-button::after { display: none; }
+
+/* Compact account overview and transaction list in both themes. */
+.user-dashboard-topbar .user-dashboard-greeting { display: inline-flex; align-items: center; gap: 6px; font-size: clamp(1.12rem, 4.3vw, 1.5rem); line-height: 1.2; letter-spacing: -.025em; }
+.user-dashboard-greeting span { font-size: .95em; }
+.user-account-card { padding: 20px 20px 16px; border-radius: 22px; }
+.user-account-balance { margin: 10px 0 6px; }
+.user-account-balance span { font-size: clamp(1.95rem, 6vw, 2.65rem); }
+.user-account-currency-row { margin: 0 0 12px; }
+.user-account-currency-row button.currency-swap-icon { display: grid; place-items: center; width:32px; height:32px; padding:0; border:1px solid var(--line); border-radius:10px; background:var(--soft-surface); color:var(--accent); }
+.currency-swap-icon .nav-icon { width:16px; height:16px; }
+.user-account-actions { padding-top:12px; }
+.user-account-actions button { min-height:42px; }
+.user-home-overview .user-session-banner { min-height:0; padding:10px 13px; border-radius:16px; }
+.user-home-overview .user-session-banner { grid-template-columns:auto minmax(0,1fr) auto; gap:9px; }
+.user-session-banner .session-calendar-icon { width:34px; height:34px; border-radius:10px; }
+.user-session-banner .session-calendar-icon .nav-icon { width:18px; height:18px; }
+.user-session-banner small { font-size:.68rem; }
+.user-session-banner strong { font-size:.81rem; }
+.user-session-banner p { font-size:.66rem; }
+.user-session-banner .session-status-pill { font-size:.68rem; }
+.user-session-banner .session-status-pill { white-space:nowrap; }
+.user-home-overview .user-earnings-grid article { min-height:0; gap:4px; padding:12px 13px; border-radius:16px; }
+.user-home-overview .user-earnings-grid small { font-size:.68rem; }
+.user-home-overview .user-earnings-grid strong { font-size:.91rem; }
+.user-home-overview .user-earnings-grid button { margin-top:3px; font-size:.68rem; }
+.user-home-dashboard { gap:12px; }
+.user-home-overview, .user-dashboard-content { gap:10px; }
+.user-transfer-shortcut { display:flex; align-items:center; gap:11px; width:100%; min-height:54px; padding:8px 12px; border:1px solid var(--line); border-radius:16px; background:var(--panel); color:var(--text); text-align:left; font:inherit; cursor:pointer; }
+.user-transfer-shortcut > span:first-child { display:grid; place-items:center; width:34px; height:34px; border-radius:11px; background:var(--soft-surface-2); color:var(--accent); }
+.user-transfer-shortcut > span:nth-child(2) { display:grid; gap:2px; flex:1; }
+.user-transfer-shortcut strong { font-size:.78rem; }
+.user-transfer-shortcut small { color:var(--muted); font-size:.66rem; }
+.user-transfer-shortcut > .nav-icon { width:16px; height:16px; color:var(--muted); }
+.home-promo-slider { gap:5px; }
+.home-promo-viewport { border-radius:15px; }
+.home-promo-slide .quest-ad-card, .home-promo-slide .referral-promo-banner { height:108px; min-height:108px; border-radius:15px; }
+.home-promo-slide .quest-ad-card img { object-fit:cover; }
+.home-promo-dots button.active { background:var(--brand-emerald); }
+.btc-dashboard-card { gap:10px; padding:15px; border-radius:18px; }
+.btc-dashboard-head h3 { font-size:1rem; }
+.btc-dashboard-quote strong { font-size:1.36rem; }
+.btc-dashboard-quote .neutral { color:var(--muted); }
+.btc-dashboard-chart { min-height:150px; }
+.btc-dashboard-chart svg { height:170px; }
+.btc-dashboard-timeframes { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:3px; padding:3px; border:1px solid var(--line); border-radius:11px; background:var(--soft-surface); }
+.btc-dashboard-timeframes button { min-width:0; min-height:32px; padding:3px 0; border:0; border-radius:8px; background:transparent; color:var(--muted); font:inherit; font-size:.69rem; font-weight:700; cursor:pointer; }
+.btc-dashboard-timeframes button.active { background:var(--panel); color:var(--accent); box-shadow:0 1px 4px rgba(0,0,0,.08); }
+.btc-dashboard-chart .btc-candle-grid path { fill:none; stroke:var(--line); stroke-width:1; }
+.btc-dashboard-chart .signal-candle.positive .signal-candle-wick { stroke:var(--brand-emerald); }
+.btc-dashboard-chart .signal-candle.positive .signal-candle-body { fill:var(--brand-emerald); }
+.btc-dashboard-chart .signal-candle.negative .signal-candle-wick { stroke:var(--brand-coral); }
+.btc-dashboard-chart .signal-candle.negative .signal-candle-body { fill:var(--brand-coral); }
+.user-dashboard-recent { padding:0; border:0; background:transparent; box-shadow:none; }
+.user-dashboard-recent .mobile-card { padding:14px; border:1px solid var(--line); border-radius:18px; background:var(--panel); box-shadow:none; }
+.user-dashboard-recent .section-head { align-items:center; margin-bottom:7px; }
+.user-dashboard-recent .section-head h3 { font-size:.91rem; }
+.user-dashboard-recent .section-head p { font-size:.67rem; }
+.user-dashboard-recent .text-link { font-size:.69rem; }
+.user-dashboard-recent .wallet-history-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:9px; padding:10px 0; border-bottom:1px solid var(--line); }
+.user-dashboard-recent .wallet-history-row:last-child { border-bottom:0; }
+.user-dashboard-recent .wallet-history-row strong { font-size:.75rem; }
+.user-dashboard-recent .wallet-history-row p { font-size:.65rem; }
+.user-home-history-empty > p { margin:8px 0 0; color:var(--muted); font-size:.72rem; }
+.notification-panel { width:min(360px,calc(100vw - 24px)); }
+.notification-item { align-items:center; gap:8px; padding:9px 12px; }
+.notification-item-icon { width:28px; height:28px; border-radius:9px; }
+.notification-item-icon .nav-icon { width:14px; height:14px; }
+.notification-item-copy { gap:2px; }
+.notification-item-copy strong { font-size:.69rem; line-height:1.25; }
+body[data-app-shell="dashboard"] .dashboard-topbar .notification-panel-head strong { font-size:.91rem; line-height:1.25; letter-spacing:0; }
+body[data-app-shell="dashboard"] .dashboard-topbar .notification-item-copy strong { font-size:.71rem; line-height:1.25; letter-spacing:0; }
+.notification-item-copy > span { display:-webkit-box; max-height:2.5em; overflow:hidden; -webkit-line-clamp:2; -webkit-box-orient:vertical; font-size:.64rem; line-height:1.25; }
+.notification-item-copy small { font-size:.58rem; }
+.notification-detail-modal { max-width:440px; }
+.notification-detail-modal h3 { font-size:1.07rem; }
+.notification-detail-message { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text); font-size:.83rem; line-height:1.55; }
+@media (max-width:760px) {
+  .user-home-overview .user-earnings-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .user-home-overview .user-earnings-grid article { min-height:0; padding:11px; }
+  .user-dashboard-content { grid-template-columns:minmax(0,1fr); }
+}
+@media (min-width:900px) {
+  body[data-theme="light"] .bottom-nav { top:13px; right:84px; bottom:auto; left:auto; transform:none; width:min(470px,calc(100vw - 380px)); min-height:60px; border-radius:16px; }
+  body[data-theme="light"] .user-home-overview { grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr); grid-template-rows:auto auto; align-items:stretch; gap:16px; }
+  body[data-theme="light"] .user-home-overview > [data-live-summary-host] { grid-column:1; grid-row:1 / 3; min-width:0; }
+  body[data-theme="light"] .user-home-overview > [data-live-summary-host] .balance-carousel,
+  body[data-theme="light"] .user-home-overview > [data-live-summary-host] .user-account-card { height:100%; }
+  body[data-theme="light"] .user-home-overview > .user-session-banner { grid-column:2; grid-row:1; }
+  body[data-theme="light"] .user-home-overview > .user-earnings-grid { grid-column:2; grid-row:2; }
+  body[data-theme="light"] .user-dashboard-content,
+  body[data-theme="dark"] .user-dashboard-content { grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr); gap:16px; }
+  .user-dashboard-content > [data-btc-dashboard-chart-host] { grid-column:1; grid-row:1 / 4; }
+  .user-dashboard-content > .user-transfer-shortcut { grid-column:2; grid-row:1; }
+  .user-dashboard-content > .home-promo-slider { grid-column:2; grid-row:2; }
+  .user-dashboard-content > .user-dashboard-recent { grid-column:2; grid-row:3; }
+  .user-dashboard-content > :not([data-btc-dashboard-chart-host]):not(.user-transfer-shortcut):not(.home-promo-slider):not(.user-dashboard-recent) { grid-column:1 / -1; }
+}

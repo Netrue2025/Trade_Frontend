@@ -17,12 +17,12 @@ const FUTURES_REFRESH_INTERVAL_MS = 180000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const WELCOME_COMPLETED_STORAGE_KEY = "netruefi-welcome-completed-v1";
-const PREMIUM_THEME_MIGRATION_KEY = "netruefi-premium-theme-v1";
+const PREMIUM_THEME_MIGRATION_KEY = "netruefi-light-theme-v2";
 const LOCATION_COUNTRY_STORAGE_KEY = "netruefi-location-country-v1";
 const DISPLAY_CURRENCY_STORAGE_KEY = "netruefi-display-currency-v1";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -123,8 +123,8 @@ function getDefaultSignalAutoTradeState() {
 const state = {
   user: null,
   theme: localStorage.getItem(PREMIUM_THEME_MIGRATION_KEY) === "true"
-    ? localStorage.getItem("tradeflow-theme") || "dark"
-    : "dark",
+    ? localStorage.getItem("tradeflow-theme") || "light"
+    : "light",
   authExchange: localStorage.getItem("tradeflow-auth-exchange") || "bybit",
   selectedExchange: localStorage.getItem("tradeflow-selected-exchange") || "bybit",
   authTab: "login",
@@ -150,7 +150,7 @@ const state = {
   trades: [],
   copyPlans: [],
   copyPlanChart: { symbol: "BTCUSDT", candles: [], loading: false, updatedAt: null },
-  btcDashboardChart: { candles: [], loading: false, updatedAt: null },
+  btcDashboardChart: { candles: [], loading: false, updatedAt: null, interval: "30m" },
   dashboardMarketMode: "spot",
   hideBalanceAmounts: localStorage.getItem(BALANCE_PRIVACY_STORAGE_KEY) === "true",
   locationCountry: localStorage.getItem(LOCATION_COUNTRY_STORAGE_KEY) || "",
@@ -382,6 +382,7 @@ function normalizeUserPayload(user) {
 
 function applyTheme() {
   document.body.dataset.theme = state.theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", state.theme === "dark" ? "#071A16" : "#F7FAF9");
   localStorage.setItem("tradeflow-theme", state.theme);
   localStorage.setItem(PREMIUM_THEME_MIGRATION_KEY, "true");
 }
@@ -4825,7 +4826,7 @@ function renderDashboardTopBar() {
   return `
     <header class="dashboard-topbar ${state.user.role === "user" ? "user-dashboard-topbar" : ""}">
       <div>
-        ${state.user.role === "user" ? state.activeTab === "settings" ? `<p class="user-dashboard-welcome">Your preferences</p><strong>Settings</strong>` : state.activeTab === "history" ? `<p class="user-dashboard-welcome">Your records</p><strong>Activity</strong>` : `<p class="user-dashboard-welcome">Welcome back${userFirstName ? `, ${escapeHtml(userFirstName)}` : ""}</p><strong>Your account</strong>` : `<strong>${escapeHtml(state.user.name || "Dashboard")}</strong><p class="muted-copy">Admin workspace</p>`}
+        ${state.user.role === "user" ? state.activeTab === "settings" ? `<p class="user-dashboard-welcome">Your preferences</p><strong>Settings</strong>` : state.activeTab === "history" ? `<p class="user-dashboard-welcome">Your records</p><strong>Activity</strong>` : `<strong class="user-dashboard-greeting">Welcome back${userFirstName ? `, ${escapeHtml(userFirstName)}` : ""} <span aria-hidden="true">👋</span></strong>` : `<strong>${escapeHtml(state.user.name || "Dashboard")}</strong><p class="muted-copy">Admin workspace</p>`}
         ${showMembershipBadge ? `<button class="pro-membership-badge ${membershipPlan === "PLUS" ? "plus-membership-badge" : ""}" data-tab="plans" type="button">${icon("star")} ${membershipPlan}</button>` : ""}
       </div>
       <div class="notification-wrap">
@@ -5346,6 +5347,18 @@ function renderAdminManualWithdrawalModal() {
 function renderActionModal() {
   if (!state.actionModal) {
     return "";
+  }
+
+  if (state.actionModal.type === "notification-detail") {
+    const notification = state.actionModal.notification || {};
+    const isMessage = String(notification.type || "").toUpperCase() === "MESSAGE";
+    return `<div class="modal-backdrop"><div class="modal-card action-modal-card notification-detail-modal" role="dialog" aria-modal="true" aria-label="Notification detail">
+      <button class="modal-close" id="action-modal-close-btn" type="button" aria-label="Close notification">${icon("x")}</button>
+      <p class="modal-eyebrow neutral">Notification${notification.createdAt ? ` · ${new Date(notification.createdAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}</p>
+      <h3>${escapeHtml(notification.title || notification.type || "Account update")}</h3>
+      <p class="notification-detail-message">${escapeHtml(notification.message || "No further details available.")}</p>
+      <div class="modal-actions"><button class="button-secondary" id="action-modal-cancel-btn" type="button">Close</button><button class="button-primary" data-notification-follow type="button">${isMessage ? "Open message" : "View related"}</button></div>
+    </div></div>`;
   }
 
   if (state.actionModal.type === "signal-chart") {
@@ -6500,6 +6513,21 @@ function renderTopbarActions() {
 }
 
 function bindModalActions() {
+  document.querySelector("[data-notification-follow]")?.addEventListener("click", () => {
+    const current = state.actionModal;
+    if (current?.type !== "notification-detail") return;
+    if (current.target?.modal === "message-reply") {
+      state.actionModal = { type: "message-reply", notificationId: current.notificationId, notification: current.notification };
+    } else {
+      state.actionModal = null;
+      state.activeTab = current.target?.tab || "home";
+      if (window.history?.pushState) window.history.pushState({}, "", getTabRoute(state.activeTab));
+      if (state.activeTab === "settings") connectSettingsUsersSocket();
+      else disconnectSettingsUsersSocket();
+    }
+    render();
+    if (current.target?.section) requestAnimationFrame(() => document.querySelector(`[data-section="${current.target.section}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  });
   const joinTradeAmountForm = document.getElementById("join-trade-amount-form");
   if (joinTradeAmountForm) {
     joinTradeAmountForm.addEventListener("submit", (event) => {
@@ -9638,41 +9666,15 @@ async function openNotification(notificationId) {
       item.id === notificationId
         ? { ...item, readAt: payload.notification?.readAt || new Date().toISOString() }
         : item
-    ).filter((item) => item.id !== notificationId);
+    );
     updateAppBadge();
   } catch (error) {
     showError(error.message);
     return;
   }
   state.showNotifications = false;
-  if (target.modal === "message-reply") {
-    state.actionModal = {
-      type: "message-reply",
-      notificationId,
-      notification: {
-        ...notification,
-        readAt: new Date().toISOString(),
-      },
-    };
-    render();
-    return;
-  }
-  state.activeTab = target.tab;
-  if (window.history?.pushState) {
-    window.history.pushState({}, "", getTabRoute(target.tab));
-  }
-  if (target.tab === "settings") {
-    connectSettingsUsersSocket();
-  } else {
-    disconnectSettingsUsersSocket();
-  }
+  state.actionModal = { type: "notification-detail", notificationId, notification: { ...notification, readAt: new Date().toISOString() }, target };
   render();
-  requestAnimationFrame(() => {
-    document.querySelector(`[data-section="${target.section}"]`)?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
-  });
 }
 
 async function dismissNotification(notificationId) {
@@ -10989,7 +10991,7 @@ function renderBottomNav() {
     return `
       <nav class="bottom-nav bottom-nav-user" aria-label="Primary">
         <button class="nav-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button">${icon("home")}<span>Home</span></button>
-        <button class="nav-button" data-scroll-to-copy-plans type="button">${icon("signals")}<span>Trade</span></button>
+        <button class="nav-button ${state.activeTab === "signals" ? "active" : ""}" data-tab="signals" type="button">${icon("signals")}<span>Trade</span></button>
         <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>Activity</span></button>
         <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("settings")}<span>Settings</span></button>
       </nav>
@@ -11086,13 +11088,11 @@ function renderSummaryCard() {
           <button class="user-account-balance balance-privacy-toggle ${state.hideBalanceAmounts ? "is-hidden" : ""}" data-balance-privacy-toggle type="button" aria-label="${state.hideBalanceAmounts ? "Show balance" : "Hide balance"}" aria-pressed="${state.hideBalanceAmounts ? "true" : "false"}">
             <span>${displayCurrency === "NGN" ? formatSignedNaira(investmentNgn) : formatUsdEquivalent(investmentUsd)}</span>${icon(state.hideBalanceAmounts ? "eyeOff" : "eye")}
           </button>
-          <div class="user-account-currency-row"><span class="${state.hideBalanceAmounts ? "is-hidden" : ""}">${displayCurrency === "NGN" ? `${formatUsdEquivalent(investmentUsd)} USD equivalent` : `${formatSignedNaira(investmentNgn)} equivalent`}</span><button data-display-currency-toggle type="button" aria-label="Switch primary currency">Switch to ${displayCurrency === "NGN" ? "USD" : "NGN"}</button></div>
+          <div class="user-account-currency-row"><span class="${state.hideBalanceAmounts ? "is-hidden" : ""}">${displayCurrency === "NGN" ? `${formatUsdEquivalent(investmentUsd)} USD equivalent` : `${formatSignedNaira(investmentNgn)} equivalent`}</span><button class="currency-swap-icon" data-display-currency-toggle type="button" aria-label="Switch primary currency to ${displayCurrency === "NGN" ? "USD" : "NGN"}" title="Switch to ${displayCurrency === "NGN" ? "USD" : "NGN"}">${icon("refresh")}</button></div>
           ${!state.locationCountry ? `<button class="account-location-action" data-location-request type="button">Enable location for local currency</button>` : ""}
           <div class="user-account-actions">
             <button id="netrue-deposit-btn" type="button">${icon("bank")} Deposit</button>
             <button id="netrue-withdraw-btn" type="button">${icon("download")} Withdraw</button>
-            <button data-transfer-open type="button">${icon("send")} Transfer</button>
-            <button data-tab="signals" type="button">${icon("signals")} Trade</button>
           </div>
         </article>
       </section>
@@ -11260,32 +11260,49 @@ function renderCopyPlanMarketChart() {
 }
 
 function renderBtcDashboardChart() {
-  const chart = state.copyPlanChart?.symbol === "BTCUSDT" && state.copyPlanChart.candles?.length
-    ? state.copyPlanChart : state.btcDashboardChart;
+  const chart = state.btcDashboardChart;
+  const interval = chart?.interval || "30m";
   const candles = chart?.candles || [];
   const geometry = candles.length ? getSignalChartGeometry(candles) : null;
   const summary = geometry ? getSignalChartSummary(candles) : null;
-  const line = geometry ? buildSignalLinePath(candles, geometry) : "";
+  const candleMarkup = geometry ? buildSignalCandleMarkup(candles, geometry) : "";
   const move = Number(summary?.movePercent || 0);
   return `<section class="btc-dashboard-card" aria-label="BTC/USDT live market">
     <div class="btc-dashboard-head"><div><small>Live market</small><h3>BTC/USDT</h3></div><span class="btc-dashboard-live"><i></i> Live</span></div>
-    <div class="btc-dashboard-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${move >= 0 ? "positive" : "negative"}">${summary ? `${move >= 0 ? "+" : ""}${formatNumber(move, 2)}%` : "Waiting for data"}</span></div>
-    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#00C781" stop-opacity=".22"/><stop offset="1" stop-color="#00C781" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
-    <div class="btc-dashboard-stats"><div><small>Range high</small><strong>${summary ? formatUsdtUnit(summary.highPrice) : "--"}</strong></div><div><small>Range low</small><strong>${summary ? formatUsdtUnit(summary.lowPrice) : "--"}</strong></div><div><small>Interval</small><strong>15 min</strong></div></div>
+    <div class="btc-dashboard-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${summary ? move >= 0 ? "positive" : "negative" : "neutral"}">${summary ? `${move >= 0 ? "+" : ""}${formatNumber(move, 2)}%` : "Waiting for data"}</span></div>
+    <div class="btc-dashboard-timeframes" role="group" aria-label="Chart timeframe">${[["5m", "5m"], ["30m", "30m"], ["1h", "1h"], ["1d", "1D"], ["1w", "1W"], ["1M", "1M"]].map(([value, label]) => `<button type="button" class="${interval === value ? "active" : ""}" data-btc-interval="${value}" aria-pressed="${interval === value}">${label}</button>`).join("")}</div>
+    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, ${interval} candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><g class="btc-candle-grid"><path d="M12 52H308 M12 90H308 M12 128H308"/></g>${candleMarkup}</svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
+    <div class="btc-dashboard-stats"><div><small>Range high</small><strong>${summary ? formatUsdtUnit(summary.highPrice) : "--"}</strong></div><div><small>Range low</small><strong>${summary ? formatUsdtUnit(summary.lowPrice) : "--"}</strong></div><div><small>Interval</small><strong>${interval === "1M" ? "1 month" : interval === "1w" ? "1 week" : interval === "1d" ? "1 day" : interval}</strong></div></div>
     <p class="btc-dashboard-foot">Market data for reference${chart?.updatedAt ? ` · Updated ${new Date(chart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
   </section>`;
 }
 
 async function refreshBtcDashboardChart() {
+  const interval = state.btcDashboardChart.interval || "30m";
   state.btcDashboardChart = { ...state.btcDashboardChart, loading: !state.btcDashboardChart.candles.length };
   try {
-    const payload = await api("/api/market/chart?symbol=BTCUSDT&interval=15m&limit=48");
-    state.btcDashboardChart = { candles: payload.candles || [], loading: false, updatedAt: new Date().toISOString() };
+    const payload = await api(`/api/market/chart?symbol=BTCUSDT&interval=${encodeURIComponent(interval)}&limit=48`);
+    if (state.btcDashboardChart.interval !== interval) return;
+    state.btcDashboardChart = { candles: payload.candles || [], loading: false, updatedAt: new Date().toISOString(), interval };
   } catch {
+    if (state.btcDashboardChart.interval !== interval) return;
     state.btcDashboardChart = { ...state.btcDashboardChart, loading: false };
   }
   const host = document.querySelector("[data-btc-dashboard-chart-host]");
-  if (host) host.innerHTML = renderBtcDashboardChart();
+  if (host) { host.innerHTML = renderBtcDashboardChart(); bindBtcDashboardControls(); }
+}
+
+function bindBtcDashboardControls() {
+  document.querySelectorAll("[data-btc-interval]").forEach((button) => {
+    button.onclick = () => {
+      const interval = button.dataset.btcInterval;
+      if (!interval || interval === state.btcDashboardChart.interval) return;
+      state.btcDashboardChart = { candles: [], loading: true, updatedAt: null, interval };
+      const host = document.querySelector("[data-btc-dashboard-chart-host]");
+      if (host) { host.innerHTML = renderBtcDashboardChart(); bindBtcDashboardControls(); }
+      void refreshBtcDashboardChart();
+    };
+  });
 }
 
 async function refreshUserCopyPlanChart({ refreshPlans = false } = {}) {
@@ -11295,8 +11312,16 @@ async function refreshUserCopyPlanChart({ refreshPlans = false } = {}) {
       const previous = (state.copyPlans || []).map((plan) => `${plan.id}:${plan.status}`).join("|");
       state.copyPlans = payload.plans;
       const next = state.copyPlans.map((plan) => `${plan.id}:${plan.status}`).join("|");
-      if (previous !== next) refreshUserCopyPlanPanelDom();
+      if (previous !== next) {
+        refreshUserCopyPlanPanelDom();
+        const banner = document.querySelector(".user-home-overview .user-session-banner");
+        if (banner) banner.outerHTML = renderCopyPlanSessionBanner();
+      }
     }
+  }
+  if (state.activeTab === "home") {
+    await refreshBtcDashboardChart();
+    return;
   }
   const symbol = getUserCopyPlanChartSymbol();
   if (state.copyPlanChart.symbol !== symbol) state.copyPlanChart = { ...state.copyPlanChart, symbol, candles: [], loading: true };
@@ -11312,13 +11337,7 @@ async function refreshUserCopyPlanChart({ refreshPlans = false } = {}) {
   }
   const nextHost = document.querySelector("[data-copy-plan-chart-host]");
   if (nextHost) nextHost.innerHTML = renderCopyPlanMarketChart();
-  if (symbol === "BTCUSDT") {
-    state.btcDashboardChart = { ...state.copyPlanChart };
-    const btcHost = document.querySelector("[data-btc-dashboard-chart-host]");
-    if (btcHost) btcHost.innerHTML = renderBtcDashboardChart();
-  } else {
-    await refreshBtcDashboardChart();
-  }
+  if (document.querySelector("[data-btc-dashboard-chart-host]")) await refreshBtcDashboardChart();
 }
 
 function refreshUserCopyPlanPanelDom() {
@@ -11343,11 +11362,11 @@ function refreshUserCopyPlanPanelDom() {
 
 let copyPlanChartRefreshTimer = null;
 function syncCopyPlanChartRefreshTimer() {
-  if (state.user?.role === "user" && state.activeTab === "home") {
+  if (state.user?.role === "user" && ["home", "signals"].includes(state.activeTab)) {
     if (!copyPlanChartRefreshTimer) {
       void refreshUserCopyPlanChart();
       copyPlanChartRefreshTimer = setInterval(() => {
-        if (isDocumentVisible() && state.activeTab === "home") void refreshUserCopyPlanChart({ refreshPlans: true });
+        if (isDocumentVisible() && ["home", "signals"].includes(state.activeTab)) void refreshUserCopyPlanChart({ refreshPlans: true });
       }, 30000);
     }
   } else {
@@ -14546,6 +14565,7 @@ function renderSignalsPane() {
   return window.SignalPage?.renderSignalPage
     ? `
       ${tradesError}
+      ${state.user?.role === "user" ? renderUserCopyPlans() : ""}
       <div id="signal-page-shell-host">
         ${window.SignalPage.renderSignalPage({
           signalFeed: state.signalFeed,
@@ -15189,17 +15209,16 @@ function renderReferralPane() {
 
 function renderHomePane() {
     const userHomeContent = `<section class="user-dashboard-content">
+      <button class="user-transfer-shortcut" data-transfer-open type="button"><span>${icon("send")}</span><span><strong>Transfer</strong><small>Send money to another NetrueFi account</small></span>${icon("arrow")}</button>
+      ${renderHomePromoSlider()}
       <div data-btc-dashboard-chart-host>${renderBtcDashboardChart()}</div>
-      ${renderUserCopyPlans()}
-      <div class="user-dashboard-wide" data-home-trades-host>${renderHomeOpenTradeSection()}</div>
       <div class="user-dashboard-recent">${renderWalletHistorySection({
         limit: 3,
-        title: "Recent activity",
-        description: "Latest account transactions",
+        title: "Transaction Histories",
+        description: "Your latest money movements",
         showMore: true,
-      })}</div>
+      }) || `<section class="mobile-card user-home-history-empty"><div class="section-head"><div><h3>Transaction Histories</h3><p class="muted-copy">Your latest money movements</p></div><button class="text-link" data-tab="history" type="button">See all</button></div><p>No transactions yet.</p></section>`}</div>
       ${renderVtuQuickActions()}
-      ${renderHomePromoSlider()}
     </section>`;
 
     return `
@@ -15218,7 +15237,7 @@ function renderCopyPlanSessionBanner() {
 
 function renderUserQuickLinks() {
   return `<nav class="user-shortcut-card" aria-label="Quick links">
-    <button type="button" data-scroll-to-copy-plans><span>${icon("signals")}</span><strong>Trade</strong></button>
+    <button type="button" data-tab="signals"><span>${icon("signals")}</span><strong>Trade</strong></button>
     <button type="button" data-tab="history"><span>${icon("lock")}</span><strong>Wallet</strong></button>
     <button type="button" data-tab="referral"><span>${icon("users")}</span><strong>Referral</strong></button>
   </nav>`;
@@ -15617,6 +15636,7 @@ async function joinScheduledCopyPlan(planId) {
 }
 
 function bindDashboardActions() {
+  bindBtcDashboardControls();
   bindPasswordVisibilityToggles();
   bindPwaActions();
   bindMarketModeActions();
