@@ -16,9 +16,10 @@ const LIVE_STATE_FALLBACK_INTERVAL_MS = 30000;
 const FUTURES_REFRESH_INTERVAL_MS = 180000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
+const WELCOME_COMPLETED_STORAGE_KEY = "netruefi-welcome-completed-v1";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.3.3";
+const APP_VERSION = "1.3.4";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -890,7 +891,7 @@ async function updatePushPreferences(form) {
 }
 
 function getPwaBuildId() {
-  return String(window.NETRUEFI_BUILD_ID || APP_VERSION || "local")
+  return String(`${APP_VERSION}-${window.NETRUEFI_BUILD_ID || "local"}`)
     .trim()
     .replace(/[^a-zA-Z0-9._-]/g, "-")
     .slice(0, 80) || "local";
@@ -997,8 +998,8 @@ function initPwaExperience() {
   window.addEventListener("appinstalled", () => {
     state.pwa.installEvent = null;
     state.pwa.installPromptVisible = false;
-    state.pwa.isStandalone = true;
-    showNotice("NetrueFi installed");
+    state.pwa.isStandalone = isStandalonePwa();
+    showNotice("NetrueFi installed. Open it from your home screen.");
   });
   window.addEventListener("online", () => {
     state.pwa.isOnline = true;
@@ -1109,6 +1110,7 @@ async function completeGoogleAuth(credential) {
         role: getVisibleAuthRole(),
         referralCode: getPendingReferralCode(),
         exchange: state.authExchange || "bybit",
+        registrationCountry: document.querySelector(".auth-form input[name='registrationCountry']")?.value || getSuggestedRegistrationCountry(),
       }),
     });
     setAuthSessionToken(result.sessionToken);
@@ -6202,6 +6204,28 @@ function startSplashSequence(force = false) {
   }, 2600);
 }
 
+function getSuggestedRegistrationCountry() {
+  const timeZoneCountries = {
+    "Africa/Lagos": "Nigeria",
+    "Africa/Accra": "Ghana",
+    "Africa/Nairobi": "Kenya",
+    "Africa/Johannesburg": "South Africa",
+    "Europe/London": "United Kingdom",
+    "Asia/Kolkata": "India",
+    "Asia/Dubai": "United Arab Emirates",
+  };
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (timeZoneCountries[timeZone]) return timeZoneCountries[timeZone];
+  try {
+    const region = new Intl.Locale(navigator.language || "").region;
+    if (!region) return "";
+    const name = new Intl.DisplayNames(["en"], { type: "region" }).of(region);
+    return name && name !== region ? name : "";
+  } catch {
+    return "";
+  }
+}
+
 function renderAuthPane() {
   const googleButton = renderGoogleAuthButton();
   if (state.authTab === "register") {
@@ -6216,6 +6240,7 @@ function renderAuthPane() {
           <label>Last name <input name="lastName" placeholder="Last name" autocomplete="family-name" required /></label>
         </div>
         <label>Email <input name="email" type="email" placeholder="Email address" autocomplete="email" required /></label>
+        <label>Country of registration <input name="registrationCountry" autocomplete="country-name" value="${escapeHtml(getSuggestedRegistrationCountry())}" placeholder="Enter your country" maxlength="80" required /><small class="auth-country-hint">Suggested from your device. Please confirm it before creating your account.</small></label>
         ${renderPasswordField({
           label: "Password",
           name: "password",
@@ -6279,7 +6304,7 @@ function renderAuthLanding() {
   const pendingShopOrder = readPendingShopOrder();
   return `
     <section class="auth-landing">
-      <a class="auth-back-to-home" href="/">${icon("arrowLeft")} Back to NetrueFi</a>
+      ${state.pwa.isStandalone ? "" : `<a class="auth-back-to-home" href="/">${icon("arrowLeft")} Back to NetrueFi</a>`}
       <section class="auth-shell-card">
         <div class="auth-brand-block">
           <img class="auth-brand-logo" src="/netruefi-logo.png" alt="NetrueFi logo" />
@@ -6294,6 +6319,31 @@ function renderAuthLanding() {
       </section>
     </section>
   `;
+}
+
+function renderInstalledWelcome() {
+  app.innerHTML = `
+    <main class="installed-welcome-page">
+      <div class="installed-welcome-brand"><img src="/netruefi-logo.png" alt="" /><span>NetrueFi</span></div>
+      <div class="installed-welcome-content">
+        <div class="installed-welcome-symbol">${icon("signals")}</div>
+        <span class="installed-welcome-kicker">Welcome to NetrueFi</span>
+        <h1>Trade with clarity. Keep everything in view.</h1>
+        <p>Join configured trade sessions, track your separate earnings, and manage digital services from one simple app.</p>
+        <div class="installed-welcome-benefits">
+          <div><span>${icon("signals")}</span><div><strong>Copy configured trades</strong><small>See the return, timeframe, and amount before you join.</small></div></div>
+          <div><span>${icon("wallet")}</span><div><strong>Follow your balances</strong><small>Trading earnings and referral rewards stay separate.</small></div></div>
+          <div><span>${icon("smartphone")}</span><div><strong>Use everyday services</strong><small>Access supported digital services in the same app.</small></div></div>
+        </div>
+      </div>
+      <div class="installed-welcome-footer"><button class="button-primary" data-welcome-continue type="button">Get started ${icon("arrow")}</button><small>You'll see this introduction only once on this device.</small></div>
+    </main>
+  `;
+  document.querySelector("[data-welcome-continue]")?.addEventListener("click", () => {
+    localStorage.setItem(WELCOME_COMPLETED_STORAGE_KEY, "true");
+    state.authTab = "login";
+    render();
+  });
 }
 
 function renderGoogleAuthButton() {
@@ -14181,7 +14231,7 @@ function renderSettingsPane() {
     const userInitials = String(state.user.name || "User").trim().split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
     return `
       <section class="user-settings-page" aria-label="Account settings">
-        <div class="user-settings-profile"><span class="user-settings-avatar">${escapeHtml(userInitials)}</span><div><strong>${escapeHtml(state.user.name || "Your account")}</strong><small>${escapeHtml(state.user.email || "")}</small></div><span class="user-settings-profile-icon">${icon("shield")}</span></div>
+        <div class="user-settings-profile"><span class="user-settings-avatar">${escapeHtml(userInitials)}</span><div><strong>${escapeHtml(state.user.name || "Your account")}</strong><small>${escapeHtml(state.user.email || "")}</small>${state.user.registrationCountry ? `<small>${escapeHtml(state.user.registrationCountry)}</small>` : ""}</div><span class="user-settings-profile-icon">${icon("shield")}</span></div>
         <div class="user-settings-group"><h3>Preferences</h3>
           ${renderSettingsDisclosure({ key: "user-appearance", title: "Appearance", subtitle: state.theme === "dark" ? "Dark mode" : "Light mode", iconName: "settings", content: appearancePanel, open: true })}
           ${renderSettingsDisclosure({ key: "user-app", title: "App & notifications", subtitle: state.pwa.isStandalone ? "Installed on this device" : "Install and manage alerts", iconName: "smartphone", content: renderPwaSettingsContent(), section: "app" })}
@@ -17785,6 +17835,10 @@ function render() {
   applyTheme();
   document.body.dataset.activeTab = state.user ? state.activeTab : "guest";
   renderTopbarActions();
+  if (isStandalonePwa() && localStorage.getItem(WELCOME_COMPLETED_STORAGE_KEY) !== "true") {
+    renderInstalledWelcome();
+    return;
+  }
   if (!state.user) {
     syncHomePromoSliderTimer();
     syncDepositStatusTimer();
