@@ -8,9 +8,9 @@
   --brand-border: #1D4035;
   --brand-coral: #FF5263;
   --brand-white: #FFFFFF;
-  --brand-slate: #94A3B8;
+  --brand-slate: #b8c2b7;
   --brand-input: #0B211B;
-  --brand-disabled: #64748B;
+  --brand-disabled: #768078;
   --brand-green-wash: rgba(0, 199, 129, 0.10);
   --brand-red-wash: rgba(255, 82, 99, 0.10);
   --brand-shadow: 0 12px 30px rgba(0, 0, 0, 0.16);
@@ -207,7 +207,7 @@ body[data-theme="dark"] :is(.signal-timeframe-btn.active, .signal-mini-btn.activ
 }
 body[data-theme="dark"] :is(.signal-guide-line, .signal-chart-grid, .signal-price-grid) { border-color: var(--brand-border); }
 body[data-theme="dark"] :is(.btc-dashboard-quote strong, .copy-plan-market-quote strong, .signal-list-main strong) { color: var(--brand-white); }
-body[data-theme="dark"] .signal-stream-pill.lagging .signal-stream-dot { background: var(--brand-slate); box-shadow: 0 0 0 4px rgba(148, 163, 184, .10); }
+body[data-theme="dark"] .signal-stream-pill.lagging .signal-stream-dot { background: var(--brand-slate); box-shadow: 0 0 0 4px rgba(184, 194, 183, .10); }
 
 body[data-theme="dark"] :is(.store-hero, .store-switcher, .store-catalog-card, .digital-search, .digital-category-row button, .store-stat-strip > div, .store-stat-strip > button) {
   border-color: var(--brand-border);
@@ -351,7 +351,7 @@ body[data-theme="light"] {
   --panel-border: #E1EBE7;
   --line: #DFEAE5;
   --text: #102C25;
-  --muted: #64748B;
+  --muted: #768078;
   --accent: #008F61;
   --accent-2: #00AD70;
   --danger: #D74758;
@@ -367,7 +367,7 @@ body[data-theme="light"] {
   --ticket-box-soft-bg: #F1F8F4;
   --ticket-control-bg: #E9F8F0;
   --nav-bg: #FFFFFF;
-  --nav-text: #64748B;
+  --nav-text: #768078;
   --nav-active-bg: #E9F8F0;
   --modal-bg: #FFFFFF;
   --contact-bg: #F1F8F4;
@@ -495,8 +495,63 @@ body[data-app-shell="dashboard"] .dashboard-topbar .notification-item-copy stron
   body[data-theme="light"] .user-dashboard-content,
   body[data-theme="dark"] .user-dashboard-content { grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr); gap:16px; }
   .user-dashboard-content > [data-btc-dashboard-chart-host] { grid-column:1; grid-row:1 / 4; }
-  .user-dashboard-content > .user-transfer-shortcut { grid-column:2; grid-row:1; }
+  .user-dashboard-content > .user-home-shortcuts { grid-column:2; grid-row:1; }
   .user-dashboard-content > .home-promo-slider { grid-column:2; grid-row:2; }
   .user-dashboard-content > .user-dashboard-recent { grid-column:2; grid-row:3; }
-  .user-dashboard-content > :not([data-btc-dashboard-chart-host]):not(.user-transfer-shortcut):not(.home-promo-slider):not(.user-dashboard-recent) { grid-column:1 / -1; }
+  .user-dashboard-content > :not([data-btc-dashboard-chart-host]):not(.user-home-shortcuts):not(.home-promo-slider):not(.user-dashboard-recent) { grid-column:1 / -1; }
 }
+
+/* Gold exchange and account surfaces */
+.user-home-shortcuts { display:grid; gap:8px; min-width:0; }
+.user-exchange-shortcut > span:first-child { background:#fff0be; color:#8b6400; }
+body[data-theme="dark"] .user-exchange-shortcut > span:first-child { background:rgba(234,179,8,.16); color:#facc15; }
+body[data-theme="light"] .user-account-card { position:relative; isolation:isolate; overflow:hidden; border-color:#235544; background:linear-gradient(120deg,#082f28 0%,#124536 60%,#1b5b47 100%); color:#fff; box-shadow:0 16px 35px rgba(8,47,40,.2); }
+body[data-theme="light"] .user-account-card::before { content:""; position:absolute; z-index:-1; inset:0; background:repeating-radial-gradient(circle at 95% 15%,transparent 0 23px,rgba(245,205,93,.13) 24px 25px,transparent 26px 48px),linear-gradient(130deg,transparent 35%,rgba(255,215,93,.12) 100%); pointer-events:none; }
+body[data-theme="light"] .user-account-card :is(strong,small,h2,p,span) { color:inherit; }
+body[data-theme="light"] .user-account-card :is(.user-account-label,.user-account-currency-row > span) { color:rgba(255,255,255,.79); }
+body[data-theme="light"] .user-account-card .user-account-balance { color:#fff; }
+body[data-theme="light"] .user-account-card .currency-swap-icon { border-color:rgba(255,255,255,.3); background:rgba(255,255,255,.12); color:#f5c842; }
+body[data-theme="light"] .user-account-card .user-account-actions { border-color:rgba(255,255,255,.2); }
+body[data-theme="light"] .user-account-card .user-account-actions button:not(:first-child) { background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.25); color:#fff; }
+body[data-theme="dark"] .user-account-card { position:relative; isolation:isolate; overflow:hidden; background:linear-gradient(130deg,#12352b,#1c4b3b); }
+body[data-theme="dark"] .user-account-card::before { content:""; position:absolute; z-index:-1; inset:0; background:repeating-radial-gradient(circle at 95% 15%,transparent 0 23px,rgba(245,205,93,.11) 24px 25px,transparent 26px 48px); pointer-events:none; }
+.exchange-page { display:grid; gap:14px; width:min(660px,100%); margin:0 auto; padding:12px 12px 34px; color:var(--text); }
+.exchange-page-header { display:flex; align-items:center; gap:12px; padding:8px 2px 4px; }
+.exchange-page-header > div { flex:1; }
+.exchange-page-header small { color:#a47708; font-size:.65rem; font-weight:800; letter-spacing:.13em; }
+.exchange-page-header h2 { margin:2px 0; font-size:1.3rem; }
+.exchange-page-header p { margin:0; color:var(--muted); font-size:.75rem; }
+.exchange-back,.exchange-refresh { display:grid; place-items:center; flex:none; width:38px; height:38px; border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--text); cursor:pointer; }
+.exchange-panel,.exchange-requests { display:grid; gap:14px; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--panel); box-shadow:var(--shadow); }
+.exchange-side-switch { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border-radius:13px; background:var(--soft-surface); }
+.exchange-side-switch button { min-height:40px; border:0; border-radius:10px; background:transparent; color:var(--muted); font:inherit; font-size:.78rem; font-weight:750; cursor:pointer; }
+.exchange-side-switch button.active { background:#f5c842; color:#0f2d25; box-shadow:0 2px 8px rgba(132,95,7,.18); }
+.exchange-rate-line,.exchange-quote { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:.75rem; }
+.exchange-rate-line span,.exchange-quote span { color:var(--muted); }
+.exchange-rate-line strong { color:#a47708; }
+.exchange-panel form { display:grid; gap:12px; }
+.exchange-amount-label { display:grid; gap:8px; position:relative; color:var(--muted); font-size:.73rem; }
+.exchange-amount-label span { position:absolute; right:15px; bottom:13px; color:var(--text); font-weight:800; }
+.exchange-amount-label input { width:100%; height:54px; padding:10px 74px 10px 14px; border:1px solid var(--line); border-radius:12px; background:var(--input-bg); color:var(--text); font:inherit; font-size:1.3rem; font-weight:750; box-sizing:border-box; }
+.exchange-quote { padding:12px 0; border-top:1px solid var(--line); }
+.exchange-quote strong { font-size:1rem; }
+.exchange-rate-note { margin:0; color:var(--muted); font-size:.67rem; line-height:1.5; }
+.exchange-panel .button-primary { min-height:44px; }
+.exchange-requests .section-head { margin:0; }
+.exchange-requests .section-head h3 { margin:0; font-size:.9rem; }
+.exchange-request-card { display:grid; gap:12px; padding:14px; border:1px solid var(--line); border-radius:15px; background:var(--soft-surface); }
+.exchange-request-head,.exchange-request-amount { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.exchange-request-head > div { display:grid; gap:3px; }
+.exchange-request-head strong { font-size:.82rem; }
+.exchange-request-head small { color:var(--muted); font-size:.65rem; }
+.exchange-status { padding:5px 7px; border-radius:8px; background:#fff2c8; color:#845e00; font-size:.58rem; font-weight:800; text-transform:capitalize; }
+.exchange-status-approved { background:#ddf8e9; color:#087044; }.exchange-status-rejected { background:#ffe4e6; color:#aa2638; }
+.exchange-request-amount { display:grid; grid-template-columns:1fr auto; font-size:.72rem; }.exchange-request-amount span { color:var(--muted); }.exchange-request-amount strong { font-size:.83rem; }
+.exchange-payment-instructions { display:grid; gap:4px; padding:12px; border:1px solid #e9d8a0; border-radius:12px; background:#fffaf0; color:#112a23; }.exchange-payment-instructions p { margin:0 0 6px; font-size:.69rem; }.exchange-payment-instructions span { margin-top:6px; color:#768078; font-size:.63rem; }.exchange-payment-instructions strong,.exchange-payment-instructions code { font-size:.76rem; overflow-wrap:anywhere; }
+.exchange-payment-form { display:grid; gap:9px; }.exchange-payment-form label { display:grid; gap:5px; color:var(--muted); font-size:.7rem; }.exchange-payment-form input { min-height:41px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--input-bg); color:var(--text); font:inherit; }.exchange-payment-form button { min-height:40px; }
+.exchange-pending-note,.exchange-approved-note,.exchange-rejected-note,.exchange-empty { margin:0; color:var(--muted); font-size:.72rem; line-height:1.5; }.exchange-approved-note { color:#087044; }.exchange-rejected-note { color:#aa2638; }
+.exchange-queue-count { display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 4px; border-radius:7px; background:#fff0be; color:#845e00; font-size:.7rem; }
+.admin-exchange-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:12px 0; border-top:1px solid var(--line); }.admin-exchange-row > div:first-child { display:grid; gap:4px; min-width:0; }.admin-exchange-row strong { font-size:.78rem; }.admin-exchange-row small { color:var(--muted); font-size:.68rem; }.admin-exchange-row code { overflow-wrap:anywhere; font-size:.69rem; }.admin-exchange-actions { display:flex; gap:7px; }.admin-exchange-actions button { min-height:35px; padding:5px 10px; font-size:.7rem; }
+.exchange-review-details { display:grid; grid-template-columns:1fr auto; gap:8px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--soft-surface); font-size:.75rem; }.exchange-review-details span { color:var(--muted); }.exchange-review-details code { max-width:200px; overflow-wrap:anywhere; text-align:right; }.exchange-review-modal .stack-label { display:grid; gap:6px; margin:12px 0; font-size:.73rem; }.exchange-review-modal textarea { width:100%; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--input-bg); color:var(--text); font:inherit; box-sizing:border-box; }
+body[data-theme="dark"] .exchange-payment-instructions { border-color:#695723; background:#302c1e; color:#f8f2e6; }
+@media (min-width:900px) { .user-home-shortcuts { align-self:start; } }

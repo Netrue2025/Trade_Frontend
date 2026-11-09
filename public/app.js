@@ -22,7 +22,7 @@ const LOCATION_COUNTRY_STORAGE_KEY = "netruefi-location-country-v1";
 const DISPLAY_CURRENCY_STORAGE_KEY = "netruefi-display-currency-v1";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.7.0";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -177,6 +177,8 @@ const state = {
   adminTransactions: [],
   adminGiftCards: [],
   adminVtuTransactions: [],
+  nairaExchange: { settings: null, requests: [], side: "BUY" },
+  adminExchangeRequests: [],
   referralProfile: null,
   adminReferrals: null,
   loadingReferral: false,
@@ -378,6 +380,10 @@ function normalizeUserPayload(user) {
     cachedAccountSnapshot: user.cachedAccountSnapshot || null,
     cachedAccountSnapshots: user.cachedAccountSnapshots || {},
   };
+}
+
+function isNigeriaAccount() {
+  return (state.user?.countryCode || state.locationCountry) === "NG";
 }
 
 function applyTheme() {
@@ -1119,6 +1125,7 @@ async function completeGoogleAuth(credential) {
         credential,
         role: getVisibleAuthRole(),
         referralCode: getPendingReferralCode(),
+        countryCode: state.locationCountry || "",
         exchange: state.authExchange || "bybit",
       }),
     });
@@ -1857,7 +1864,7 @@ async function openWalletActionModal(type) {
       state.resolvedBankAccount = savedAccounts[0] || null;
       showActionModal({
         type,
-        currency: "",
+        currency: isNigeriaAccount() ? "" : "USDT",
         bankMode: savedAccounts.length ? "saved" : "new",
         bankAccountId: savedAccounts[0]?.id || "",
       });
@@ -1877,12 +1884,12 @@ async function openWalletActionModal(type) {
     const draft = type === "deposit" ? readDepositDraft() : {};
     showActionModal({
       type,
-      currency: draft.currency || "",
+      currency: isNigeriaAccount() ? draft.currency || "" : "USDT",
       amount: draft.amount || "",
       transactionHash: draft.transactionHash || "",
       depositorName: draft.depositorName || state.user?.name || "",
       depositMode: "manual",
-      depositStep: draft.step || (draft.currency ? "amount" : "currency"),
+      depositStep: isNigeriaAccount() ? draft.step || (draft.currency ? "amount" : "currency") : "amount",
       depositIdempotencyKey: draft.idempotencyKey || createIdempotencyKey("deposit"),
     });
   }).catch((error) => showError(error.message));
@@ -1979,11 +1986,11 @@ function renderDepositFlowModal() {
   const currencyScreen = `
     <div class="deposit-flow-section">
       <div class="deposit-choice-grid">
-        <button class="deposit-currency-card ${currency === "NGN" ? "active" : ""}" data-deposit-currency="NGN" type="button">
+        ${isNigeriaAccount() ? `<button class="deposit-currency-card ${currency === "NGN" ? "active" : ""}" data-deposit-currency="NGN" type="button">
           <span>${icon("bank")}</span>
           <strong>Naira</strong>
           <small>Bank transfer</small>
-        </button>
+        </button>` : ""}
         <button class="deposit-currency-card ${currency === "USDT" ? "active" : ""}" data-deposit-currency="USDT" type="button">
           <span>${icon("wallet")}</span>
           <strong>USDT</strong>
@@ -3682,6 +3689,19 @@ async function loadAdminFinanceQueues() {
   syncFinanceHistorySelection();
 }
 
+async function loadNairaExchange() {
+  if (state.user?.role !== "user" || !isNigeriaAccount()) return;
+  const result = await api("/api/naira-exchange");
+  state.nairaExchange.settings = result.settings || null;
+  state.nairaExchange.requests = result.requests || [];
+}
+
+async function loadAdminExchangeRequests() {
+  if (state.user?.role !== "admin") return;
+  const result = await api("/api/admin/naira-exchange");
+  state.adminExchangeRequests = result.requests || [];
+}
+
 async function loadQuestData() {
   const requestVersion = ++questDataRequestVersion;
   if (!state.user || state.user.role !== "user") {
@@ -5349,6 +5369,13 @@ function renderActionModal() {
     return "";
   }
 
+  if (state.actionModal.type === "admin-exchange-review") {
+    const request = state.adminExchangeRequests.find((item) => item.id === state.actionModal.requestId);
+    if (!request) return "";
+    const approve = state.actionModal.reviewAction === "approve";
+    return `<div class="modal-backdrop"><div class="modal-card action-modal-card exchange-review-modal" role="dialog" aria-modal="true" aria-label="Review exchange"><button class="modal-close" id="action-modal-close-btn" type="button" aria-label="Close">${icon("x")}</button><p class="modal-eyebrow neutral">EXCHANGE REVIEW</p><h3>${approve ? "Approve" : "Decline"} ${request.side === "BUY" ? "buy" : "sell"} request</h3><p class="muted-copy">Verify funds received before approving ${escapeHtml(request.userName)}.</p><div class="exchange-review-details"><span>Payment</span><strong>${escapeHtml(formatCurrencyAmount(request.amount, request.payCurrency))}</strong><span>Credit</span><strong>${escapeHtml(formatCurrencyAmount(request.receiveAmount, request.receiveCurrency))}</strong><span>Reference</span><code>${escapeHtml(request.paymentReference || "")}</code></div><label class="stack-label">${approve ? "Admin note (optional)" : "Reason shown to user"}<textarea id="exchange-admin-note" rows="3" placeholder="${approve ? "Optional" : "Explain why the payment could not be verified"}"></textarea></label><div class="modal-actions"><button class="button-secondary" id="action-modal-cancel-btn" type="button">Cancel</button><button class="${approve ? "button-primary" : "button-danger"}" data-exchange-review-submit type="button">${approve ? "Approve and credit" : "Decline request"}</button></div></div></div>`;
+  }
+
   if (state.actionModal.type === "notification-detail") {
     const notification = state.actionModal.notification || {};
     const isMessage = String(notification.type || "").toUpperCase() === "MESSAGE";
@@ -5879,7 +5906,7 @@ function renderActionModal() {
     `;
     const currencyChoices = `
       <div class="wallet-choice-row" role="group" aria-label="${isDeposit ? "Deposit" : "Withdrawal"} currency">
-        <button class="wallet-choice ${currency === "NGN" ? "active" : ""}" data-wallet-currency="NGN" type="button">Naira</button>
+        ${isNigeriaAccount() ? `<button class="wallet-choice ${currency === "NGN" ? "active" : ""}" data-wallet-currency="NGN" type="button">Naira</button>` : ""}
         <button class="wallet-choice ${currency === "USDT" ? "active" : ""}" data-wallet-currency="USDT" type="button">USDT</button>
       </div>
     `;
@@ -6232,7 +6259,7 @@ function startSplashSequence(force = false) {
 function getDisplayCurrency() {
   return state.displayCurrencyOverride === "NGN" || state.displayCurrencyOverride === "USD"
     ? state.displayCurrencyOverride
-    : state.locationCountry === "NG" ? "NGN" : "USD";
+    : isNigeriaAccount() ? "NGN" : "USD";
 }
 
 function isPointInRing(longitude, latitude, ring) {
@@ -6268,6 +6295,10 @@ async function requestLocationCurrency() {
     state.locationCountry = isPointInNigeria(position.coords.longitude, position.coords.latitude, boundary) ? "NG" : "OTHER";
     state.locationError = "";
     localStorage.setItem(LOCATION_COUNTRY_STORAGE_KEY, state.locationCountry);
+    if (state.user?.role === "user") {
+      const result = await api("/api/user/location", { method: "POST", body: JSON.stringify({ countryCode: state.locationCountry }) });
+      state.user = normalizeUserPayload(result.user);
+    }
     render();
     showNotice(`Display currency set to ${getDisplayCurrency()}.`);
   } catch {
@@ -6768,6 +6799,7 @@ function bindAuthForms() {
         const payload = Object.fromEntries(new FormData(registerForm).entries());
         payload.name = `${payload.firstName || ""} ${payload.lastName || ""}`.replace(/\s+/g, " ").trim();
         payload.referralCode = payload.referralCode || getPendingReferralCode();
+        payload.countryCode = state.locationCountry || "";
         const result = await api("/api/auth/register", {
           method: "POST",
           body: JSON.stringify(payload),
@@ -7626,6 +7658,15 @@ async function loadDashboardData() {
     render();
     return;
   }
+
+  if (state.user.role === "user" && !state.user.countryCode && state.locationCountry) {
+    try {
+      const location = await api("/api/user/location", { method: "POST", body: JSON.stringify({ countryCode: state.locationCountry }) });
+      state.user = normalizeUserPayload(location.user);
+    } catch { /* Wallet access remains USDT until location is saved. */ }
+  }
+  if (state.user.role === "admin") void loadAdminExchangeRequests().then(() => render()).catch(() => undefined);
+  if (state.user.role === "user" && isNigeriaAccount()) void loadNairaExchange().then(() => render()).catch(() => undefined);
 
   updateSignalNotificationPermission();
   void loadPushSettings().catch(() => undefined);
@@ -9617,7 +9658,7 @@ function getTabRoute(tab) {
   if (tab === "adminQuests") {
     return `${dashboardPath}?tab=adminQuests`;
   }
-  if (["home", "settings", "signals", "store", "history", "plans"].includes(tab)) {
+  if (["home", "settings", "signals", "store", "history", "plans", "exchange"].includes(tab)) {
     return `${dashboardPath}?tab=${encodeURIComponent(tab)}`;
   }
   return `${dashboardPath}?tab=home`;
@@ -10992,7 +11033,7 @@ function renderBottomNav() {
       <nav class="bottom-nav bottom-nav-user" aria-label="Primary">
         <button class="nav-button ${state.activeTab === "home" ? "active" : ""}" data-tab="home" type="button">${icon("home")}<span>Home</span></button>
         <button class="nav-button ${state.activeTab === "signals" ? "active" : ""}" data-tab="signals" type="button">${icon("signals")}<span>Trade</span></button>
-        <button class="nav-button ${state.activeTab === "history" ? "active" : ""}" data-tab="history" type="button">${icon("history")}<span>Activity</span></button>
+        <button class="nav-button ${state.activeTab === "store" ? "active" : ""}" data-tab="store" type="button">${icon("gift")}<span>Shop</span></button>
         <button class="nav-button ${state.activeTab === "settings" ? "active" : ""}" data-tab="settings" type="button">${icon("settings")}<span>Settings</span></button>
       </nav>
     `;
@@ -11168,6 +11209,7 @@ function renderAdminHomeDashboard() {
         <small>Open / queue</small>
       </div>
     </section>
+    ${renderAdminExchangeQueue()}
     <section class="admin-dashboard-section admin-trade-desk" id="admin-trade-desk">
       <div class="section-head">
         <div>
@@ -14840,7 +14882,7 @@ function applyRouteTarget() {
     state.activeTab = "store";
     return;
   }
-  if (["home", "settings", "history", "signals", "store", "plans"].includes(params.get("tab"))) {
+  if (["home", "settings", "history", "signals", "store", "plans", "exchange"].includes(params.get("tab"))) {
     state.activeTab = params.get("tab");
   }
 }
@@ -15207,9 +15249,39 @@ function renderReferralPane() {
   `;
 }
 
+function renderNairaExchangePane() {
+  if (!isNigeriaAccount()) return `<section class="exchange-page"><div class="exchange-panel"><h2>USDT exchange</h2><p>This service is available for Nigeria accounts after location is enabled.</p><button class="button-secondary" data-location-request type="button">Enable location</button></div></section>`;
+  const model = state.nairaExchange;
+  const side = model.side || "BUY";
+  const amount = Number(model.amount || 0);
+  const rate = Number(model.settings?.rate || 0);
+  const receive = rate > 0 && amount > 0 ? (side === "BUY" ? amount / rate : amount * rate) : 0;
+  const pending = (model.requests || []).filter((item) => ["AWAITING_PAYMENT", "PENDING"].includes(item.status));
+  const history = (model.requests || []).filter((item) => !["AWAITING_PAYMENT", "PENDING"].includes(item.status));
+  const requestCard = (item) => {
+    const awaiting = item.status === "AWAITING_PAYMENT";
+    const destination = item.paymentDestination || {};
+    return `<article class="exchange-request-card">
+      <div class="exchange-request-head"><div><strong>${item.side === "BUY" ? "Buy USDT" : "Sell USDT"}</strong><small>${escapeHtml(new Date(item.createdAt).toLocaleString())}</small></div><span class="exchange-status exchange-status-${escapeHtml(item.status.toLowerCase())}">${escapeHtml(item.status.replaceAll("_", " "))}</span></div>
+      <div class="exchange-request-amount"><span>Send ${escapeHtml(item.payCurrency)}</span><strong>${escapeHtml(formatCurrencyAmount(item.amount, item.payCurrency))}</strong><span>Receive ${escapeHtml(item.receiveCurrency)}</span><strong>${escapeHtml(formatCurrencyAmount(item.receiveAmount, item.receiveCurrency))}</strong></div>
+      ${awaiting ? `<div class="exchange-payment-instructions"><p>Send the exact amount to this ${item.side === "BUY" ? "bank account" : "wallet"}, then enter your payment reference below.</p>${item.side === "BUY" ? `<span>Bank</span><strong>${escapeHtml(destination.bankName || "")}</strong><span>Account number</span><div class="copy-value-row"><code>${escapeHtml(destination.accountNumber || "")}</code>${renderCopyButton(destination.accountNumber, "Copy account number")}</div><span>Account name</span><strong>${escapeHtml(destination.accountName || "")}</strong>` : `<span>Network</span><strong>${escapeHtml(destination.network || "")}</strong><span>Wallet address</span><div class="copy-value-row"><code>${escapeHtml(destination.address || "")}</code>${renderCopyButton(destination.address, "Copy wallet address")}</div>`}</div><form class="exchange-payment-form" data-exchange-payment="${escapeHtml(item.id)}"><label>${item.side === "BUY" ? "Bank transfer reference" : "Transaction hash"}<input name="paymentReference" required minlength="6" autocomplete="off" placeholder="Enter payment reference" /></label><button class="button-primary" type="submit">I have paid</button></form>` : item.status === "PENDING" ? `<p class="exchange-pending-note">Payment submitted. Your exchange is pending admin approval.</p>` : item.status === "REJECTED" ? `<p class="exchange-rejected-note">${escapeHtml(item.adminNote || "Payment could not be verified. Contact support if you have paid.")}</p>` : `<p class="exchange-approved-note">${escapeHtml(formatCurrencyAmount(item.receiveAmount, item.receiveCurrency))} credited to your balance.</p>`}
+    </article>`;
+  };
+  return `<section class="exchange-page"><header class="exchange-page-header"><button class="exchange-back" data-tab="home" type="button" aria-label="Back to home">${icon("arrowLeft")}</button><div><small>NAIRA ⇄ USDT</small><h2>Buy & Sell USDT</h2><p>Exchange at the current admin rate</p></div><button class="exchange-refresh" data-exchange-refresh type="button" aria-label="Refresh exchanges">${icon("refresh")}</button></header>
+    <section class="exchange-panel"><div class="exchange-side-switch" role="group" aria-label="Exchange direction"><button data-exchange-side="BUY" class="${side === "BUY" ? "active" : ""}" type="button">Buy USDT</button><button data-exchange-side="SELL" class="${side === "SELL" ? "active" : ""}" type="button">Sell USDT</button></div>
+      <div class="exchange-rate-line"><span>Current rate</span><strong>${rate > 0 ? `${formatNaira(rate)} / USDT` : "Rate unavailable"}</strong></div>
+      <form id="exchange-create-form"><label class="exchange-amount-label">You send <span>${side === "BUY" ? "NGN" : "USDT"}</span><input name="amount" id="exchange-amount" type="number" step="0.00000001" min="0.00000001" inputmode="decimal" required placeholder="0.00" value="${escapeHtml(model.amount || "")}" /></label><div class="exchange-quote"><span>Estimated to receive</span><strong id="exchange-receive-quote">${receive > 0 ? escapeHtml(formatCurrencyAmount(receive, side === "BUY" ? "USDT" : "NGN")) : "—"}</strong></div><p class="exchange-rate-note">The rate is locked when you create the request. Your balance is credited only after admin approval.</p><button class="button-primary" type="submit" ${rate > 0 ? "" : "disabled"}>Continue</button></form></section>
+    <section class="exchange-requests"><div class="section-head"><div><h3>Pending exchanges</h3><p class="muted-copy">Payment details and review status</p></div></div>${pending.map(requestCard).join("") || `<p class="exchange-empty">No pending exchanges.</p>`}</section>${history.length ? `<section class="exchange-requests"><div class="section-head"><h3>Exchange history</h3></div>${history.map(requestCard).join("")}</section>` : ""}</section>`;
+}
+
+function renderAdminExchangeQueue() {
+  const requests = (state.adminExchangeRequests || []).filter((item) => item.status === "PENDING");
+  return `<section class="admin-dashboard-section admin-exchange-queue"><div class="section-head"><div><h3>USDT exchange review <span class="exchange-queue-count">${requests.length}</span></h3><p class="muted-copy">Verify received funds before approving. Rates and destinations are set in Settings.</p></div><button class="text-link" data-exchange-refresh type="button">Refresh</button></div>${requests.map((item) => `<article class="admin-exchange-row"><div><strong>${escapeHtml(item.userName)} · ${item.side === "BUY" ? "Buys" : "Sells"} USDT</strong><small>${escapeHtml(formatCurrencyAmount(item.amount, item.payCurrency))} → ${escapeHtml(formatCurrencyAmount(item.receiveAmount, item.receiveCurrency))} · ${escapeHtml(new Date(item.submittedAt || item.createdAt).toLocaleString())}</small><code>${escapeHtml(item.paymentReference || "")}</code></div><div class="admin-exchange-actions"><button class="button-secondary" data-admin-exchange-reject="${escapeHtml(item.id)}" type="button">Decline</button><button class="button-primary" data-admin-exchange-approve="${escapeHtml(item.id)}" type="button">Approve</button></div></article>`).join("") || `<p class="exchange-empty">No exchange payments waiting for review.</p>`}</section>`;
+}
+
 function renderHomePane() {
     const userHomeContent = `<section class="user-dashboard-content">
-      <button class="user-transfer-shortcut" data-transfer-open type="button"><span>${icon("send")}</span><span><strong>Transfer</strong><small>Send money to another NetrueFi account</small></span>${icon("arrow")}</button>
+      <div class="user-home-shortcuts"><button class="user-transfer-shortcut" data-transfer-open type="button"><span>${icon("send")}</span><span><strong>Transfer</strong><small>Send money to another NetrueFi account</small></span>${icon("arrow")}</button>${isNigeriaAccount() ? `<button class="user-transfer-shortcut user-exchange-shortcut" data-tab="exchange" type="button"><span>${icon("wallet")}</span><span><strong>Buy / Sell USDT</strong><small>Exchange Naira and USDT</small></span>${icon("arrow")}</button>` : ""}</div>
       ${renderHomePromoSlider()}
       <div data-btc-dashboard-chart-host>${renderBtcDashboardChart()}</div>
       <div class="user-dashboard-recent">${renderWalletHistorySection({
@@ -15450,6 +15522,9 @@ async function navigateToTab(nextTab) {
       }
     }).catch((error) => showError(error.message));
   }
+  if (nextTab === "exchange") {
+    await withLoading(loadNairaExchange).then(() => render()).catch((error) => showError(error.message));
+  }
   if (nextTab === "adminQuests") {
     await withLoading(loadAdminQuestData).catch((error) => showError(error.message));
   }
@@ -15505,6 +15580,7 @@ function renderDashboardShell() {
   const paneMap = {
     home: renderHomePane(),
     store: renderDigitalServicesPane(),
+    exchange: renderNairaExchangePane(),
     settings: renderSettingsPane(),
     signals: renderSignalsPane(),
     history: renderHistoryPane(),
@@ -15636,6 +15712,63 @@ async function joinScheduledCopyPlan(planId) {
 }
 
 function bindDashboardActions() {
+  document.querySelectorAll("[data-exchange-side]").forEach((button) => button.addEventListener("click", () => {
+    state.nairaExchange.side = button.dataset.exchangeSide;
+    state.nairaExchange.amount = "";
+    render();
+  }));
+  document.getElementById("exchange-amount")?.addEventListener("input", (event) => {
+    state.nairaExchange.amount = event.target.value;
+    const rate = Number(state.nairaExchange.settings?.rate || 0);
+    const amount = Number(event.target.value || 0);
+    const receive = rate > 0 && amount > 0 ? state.nairaExchange.side === "BUY" ? amount / rate : amount * rate : 0;
+    const quote = document.getElementById("exchange-receive-quote");
+    if (quote) quote.textContent = receive > 0 ? formatCurrencyAmount(receive, state.nairaExchange.side === "BUY" ? "USDT" : "NGN") : "—";
+  });
+  document.getElementById("exchange-create-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const amount = String(new FormData(event.currentTarget).get("amount") || "");
+    void withLoading(async () => {
+      await api("/api/naira-exchange", { method: "POST", body: JSON.stringify({ side: state.nairaExchange.side, amount, clientRequestId: createIdempotencyKey("exchange") }) });
+      state.nairaExchange.amount = "";
+      await loadNairaExchange();
+      render();
+      showNotice("Request created. Send payment using the details below.");
+    }).catch((error) => showError(error.message));
+  });
+  document.querySelectorAll("[data-exchange-payment]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const paymentReference = String(new FormData(form).get("paymentReference") || "").trim();
+    void withLoading(async () => {
+      await api(`/api/naira-exchange/${encodeURIComponent(form.dataset.exchangePayment)}/payment`, { method: "POST", body: JSON.stringify({ paymentReference }) });
+      await loadNairaExchange();
+      render();
+      showNotice("Payment submitted for admin review.");
+    }).catch((error) => showError(error.message));
+  }));
+  document.querySelectorAll("[data-exchange-refresh]").forEach((button) => button.addEventListener("click", () => {
+    void withLoading(async () => { if (state.user?.role === "admin") await loadAdminExchangeRequests(); else await loadNairaExchange(); render(); }).catch((error) => showError(error.message));
+  }));
+  document.querySelectorAll("[data-admin-exchange-approve], [data-admin-exchange-reject]").forEach((button) => button.addEventListener("click", () => {
+    const approve = !!button.dataset.adminExchangeApprove;
+    const id = button.dataset.adminExchangeApprove || button.dataset.adminExchangeReject;
+    const record = state.adminExchangeRequests.find((item) => item.id === id);
+    if (!record) return;
+    showActionModal({ type: "admin-exchange-review", requestId: id, reviewAction: approve ? "approve" : "reject" });
+  }));
+  document.querySelector("[data-exchange-review-submit]")?.addEventListener("click", () => {
+    const id = state.actionModal?.requestId;
+    const approve = state.actionModal?.reviewAction === "approve";
+    const adminNote = String(document.getElementById("exchange-admin-note")?.value || "").trim();
+    if (!approve && !adminNote) { showError("Enter a reason for declining this exchange."); return; }
+    void withLoading(async () => {
+      await api(`/api/admin/naira-exchange/${encodeURIComponent(id)}/${approve ? "approve" : "reject"}`, { method: "POST", body: JSON.stringify({ adminNote }) });
+      await Promise.all([loadAdminExchangeRequests(), loadFinancialDashboard()]);
+      state.actionModal = null;
+      render();
+      showNotice(approve ? "Exchange approved and wallet credited." : "Exchange declined.");
+    }).catch((error) => showError(error.message));
+  });
   bindBtcDashboardControls();
   bindPasswordVisibilityToggles();
   bindPwaActions();
@@ -16856,6 +16989,7 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-deposit-currency]").forEach((button) => {
     button.addEventListener("click", () => {
       const currency = button.dataset.depositCurrency || "";
+      if (currency === "NGN" && !isNigeriaAccount()) return;
       const draft = saveDepositDraft({
         ...readDepositDraft(),
         currency,
@@ -16954,6 +17088,7 @@ function bindDashboardActions() {
   document.querySelectorAll("[data-wallet-currency]").forEach((button) => {
     button.addEventListener("click", () => {
       const nextCurrency = button.dataset.walletCurrency;
+      if (nextCurrency === "NGN" && !isNigeriaAccount()) return;
       const savedBanks = getSavedBankAccounts();
       const nextModal = {
         ...state.actionModal,
