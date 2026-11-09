@@ -22,6 +22,7 @@ const STATIC_ASSETS = [
   "/services/default-digital-service.png",
   "/netrue-quest-ad.png",
   "/netruefi-logo.png",
+  "/data/nigeria-boundary.json",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
   "/icons/maskable-512.png",

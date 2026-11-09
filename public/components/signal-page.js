@@ -386,11 +386,11 @@
     });
 
     const candleSeries = chart.addSeries(Charts.CandlestickSeries, {
-      upColor: "#16c47f",
+      upColor: "#3284ec",
       downColor: "#ff4d6d",
-      borderUpColor: "#16c47f",
+      borderUpColor: "#3284ec",
       borderDownColor: "#ff4d6d",
-      wickUpColor: "#16c47f",
+      wickUpColor: "#3284ec",
       wickDownColor: "#ff4d6d",
     });
     candleSeries.setData(payload.candles || []);
@@ -405,7 +405,7 @@
 
     candleSeries.createPriceLine({
       price: Number(payload.entryPrice || 0),
-      color: "#16c47f",
+      color: "#3284ec",
       lineWidth: 2,
       lineStyle: 2,
       axisLabelVisible: true,
@@ -448,7 +448,7 @@
     if (Number(payload.takeProfit || 0) > 0) {
       candleSeries.createPriceLine({
         price: Number(payload.takeProfit),
-        color: "#16c47f",
+        color: "#3284ec",
         lineWidth: 1,
         lineStyle: 4,
         axisLabelVisible: true,

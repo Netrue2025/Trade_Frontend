@@ -17,9 +17,11 @@ const FUTURES_REFRESH_INTERVAL_MS = 180000;
 const SIGNAL_AUDIO_ENABLED_STORAGE_KEY = "tradeflow-signal-audio-enabled";
 const BALANCE_PRIVACY_STORAGE_KEY = "tradeflow-balance-hidden";
 const WELCOME_COMPLETED_STORAGE_KEY = "netruefi-welcome-completed-v1";
+const LOCATION_COUNTRY_STORAGE_KEY = "netruefi-location-country-v1";
+const DISPLAY_CURRENCY_STORAGE_KEY = "netruefi-display-currency-v1";
 const FORM_DRAFT_STORAGE_KEY = "tradeflow-form-drafts";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "tradeflow-session-token";
-const APP_VERSION = "1.3.4";
+const APP_VERSION = "1.4.0";
 const PWA_INSTALL_DISMISSED_UNTIL_KEY = "netruefi-pwa-install-dismissed-until";
 const PWA_INSTALL_VISITS_KEY = "netruefi-pwa-install-visits";
 const PWA_INSTALL_DELAY_MS = 9000;
@@ -148,6 +150,9 @@ const state = {
   btcDashboardChart: { candles: [], loading: false, updatedAt: null },
   dashboardMarketMode: "spot",
   hideBalanceAmounts: localStorage.getItem(BALANCE_PRIVACY_STORAGE_KEY) === "true",
+  locationCountry: localStorage.getItem(LOCATION_COUNTRY_STORAGE_KEY) || "",
+  locationError: "",
+  displayCurrencyOverride: localStorage.getItem(DISPLAY_CURRENCY_STORAGE_KEY) || "",
   futuresAccount: null,
   futuresLastLoadedAt: 0,
   futuresError: "",
@@ -1110,7 +1115,6 @@ async function completeGoogleAuth(credential) {
         role: getVisibleAuthRole(),
         referralCode: getPendingReferralCode(),
         exchange: state.authExchange || "bybit",
-        registrationCountry: document.querySelector(".auth-form input[name='registrationCountry']")?.value || getSuggestedRegistrationCountry(),
       }),
     });
     setAuthSessionToken(result.sessionToken);
@@ -2196,6 +2200,10 @@ function formatSignedNaira(value, { positiveSign = false } = {}) {
     return `-${formatNaira(Math.abs(amount))}`;
   }
   return `${positiveSign && amount > 0 ? "+" : ""}${formatNaira(amount)}`;
+}
+
+function formatUsdEquivalent(value) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value || 0));
 }
 
 function formatUsdtUnit(value) {
@@ -6204,25 +6212,50 @@ function startSplashSequence(force = false) {
   }, 2600);
 }
 
-function getSuggestedRegistrationCountry() {
-  const timeZoneCountries = {
-    "Africa/Lagos": "Nigeria",
-    "Africa/Accra": "Ghana",
-    "Africa/Nairobi": "Kenya",
-    "Africa/Johannesburg": "South Africa",
-    "Europe/London": "United Kingdom",
-    "Asia/Kolkata": "India",
-    "Asia/Dubai": "United Arab Emirates",
-  };
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  if (timeZoneCountries[timeZone]) return timeZoneCountries[timeZone];
+function getDisplayCurrency() {
+  return state.displayCurrencyOverride === "NGN" || state.displayCurrencyOverride === "USD"
+    ? state.displayCurrencyOverride
+    : state.locationCountry === "NG" ? "NGN" : "USD";
+}
+
+function isPointInRing(longitude, latitude, ring) {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) {
+    const [x1, y1] = ring[index];
+    const [x2, y2] = ring[previous];
+    if ((y1 > latitude) !== (y2 > latitude) && longitude < ((x2 - x1) * (latitude - y1)) / (y2 - y1) + x1) inside = !inside;
+  }
+  return inside;
+}
+
+function isPointInNigeria(longitude, latitude, boundary) {
+  const polygons = boundary.type === "MultiPolygon" ? boundary.coordinates : [boundary.coordinates];
+  return polygons.some((rings) => rings.length && isPointInRing(longitude, latitude, rings[0]) &&
+    !rings.slice(1).some((ring) => isPointInRing(longitude, latitude, ring)));
+}
+
+async function requestLocationCurrency() {
+  if (!navigator.geolocation) {
+    state.locationError = "Location unavailable. USD display is available.";
+    showNotice("Location is unavailable on this device. You can choose your display currency.");
+    return;
+  }
   try {
-    const region = new Intl.Locale(navigator.language || "").region;
-    if (!region) return "";
-    const name = new Intl.DisplayNames(["en"], { type: "region" }).of(region);
-    return name && name !== region ? name : "";
+    const position = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: false, timeout: 12000, maximumAge: 600000,
+    }));
+    // geoBoundaries gbOpen NGA ADM0, CC BY 4.0. Coordinates are used locally and discarded.
+    const response = await fetch("/data/nigeria-boundary.json");
+    if (!response.ok) throw new Error("Country boundary unavailable");
+    const boundary = await response.json();
+    state.locationCountry = isPointInNigeria(position.coords.longitude, position.coords.latitude, boundary) ? "NG" : "OTHER";
+    state.locationError = "";
+    localStorage.setItem(LOCATION_COUNTRY_STORAGE_KEY, state.locationCountry);
+    render();
+    showNotice(`Display currency set to ${getDisplayCurrency()}.`);
   } catch {
-    return "";
+    state.locationError = "Location unavailable. You can choose your currency later.";
+    showNotice("Location could not be determined. You can choose your display currency.");
   }
 }
 
@@ -6240,19 +6273,14 @@ function renderAuthPane() {
           <label>Last name <input name="lastName" placeholder="Last name" autocomplete="family-name" required /></label>
         </div>
         <label>Email <input name="email" type="email" placeholder="Email address" autocomplete="email" required /></label>
-        <label>Country of registration <input name="registrationCountry" autocomplete="country-name" value="${escapeHtml(getSuggestedRegistrationCountry())}" placeholder="Enter your country" maxlength="80" required /><small class="auth-country-hint">Suggested from your device. Please confirm it before creating your account.</small></label>
+        <button class="auth-location-action" data-location-request type="button">${state.locationCountry ? `Location enabled · ${getDisplayCurrency()} display` : "Enable location for account currency"}</button>
         ${renderPasswordField({
           label: "Password",
           name: "password",
           placeholder: "Create password",
           autocomplete: "new-password",
         })}
-        <label>Sign up as
-          <select name="role">
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </select>
-        </label>
+        <input type="hidden" name="role" value="user" />
         <button class="button-primary shimmer-button" type="submit">Create account</button>
       </form>
       <p class="auth-footnote">Already a user? <button class="text-link inline-link" data-auth-mode="login" type="button">Sign in</button></p>
@@ -6311,7 +6339,7 @@ function renderAuthLanding() {
           <div>
             <p class="eyebrow">NetrueFi</p>
             <h2>${isRegister ? "Create account" : "Welcome back"}</h2>
-            <p class="muted-copy">${isRegister ? "Choose the account type you are requesting." : "Sign in with your account details."}</p>
+            <p class="muted-copy">${isRegister ? "Create your personal account." : "Sign in with your account details."}</p>
           </div>
         </div>
         ${pendingShopOrder ? `<div class="referral-signup-note">${icon("gift")} Your shop order is saved. Login or signup to complete checkout.</div>` : ""}
@@ -6336,7 +6364,7 @@ function renderInstalledWelcome() {
           <div><span>${icon("smartphone")}</span><div><strong>Use everyday services</strong><small>Access supported digital services in the same app.</small></div></div>
         </div>
       </div>
-      <div class="installed-welcome-footer"><button class="button-primary" data-welcome-continue type="button">Get started ${icon("arrow")}</button><small>You'll see this introduction only once on this device.</small></div>
+      <div class="installed-welcome-footer"><button class="button-primary" data-welcome-continue type="button">Get started ${icon("arrow")}</button><button class="installed-welcome-location" data-location-request type="button">${state.locationCountry ? `Location enabled · ${getDisplayCurrency()}` : "Use my location for currency"}</button>${state.locationError ? `<small>${escapeHtml(state.locationError)}</small>` : ""}</div>
     </main>
   `;
   document.querySelector("[data-welcome-continue]")?.addEventListener("click", () => {
@@ -6344,6 +6372,7 @@ function renderInstalledWelcome() {
     state.authTab = "login";
     render();
   });
+  document.querySelector("[data-location-request]")?.addEventListener("click", requestLocationCurrency);
 }
 
 function renderGoogleAuthButton() {
@@ -6668,6 +6697,7 @@ function bindPasswordVisibilityToggles() {
 function bindAuthForms() {
   bindPasswordVisibilityToggles();
   mountGoogleAuthButtons();
+  document.querySelectorAll("[data-location-request]").forEach((button) => { button.onclick = requestLocationCurrency; });
 
   const loginForm = document.getElementById("login-form");
   const registerForm = document.getElementById("register-form");
@@ -7055,6 +7085,14 @@ function refreshTradeSectionsDom() {
 }
 
 function bindLiveDashboardControls() {
+  document.querySelectorAll("[data-display-currency-toggle]").forEach((button) => {
+    button.onclick = () => {
+      state.displayCurrencyOverride = getDisplayCurrency() === "NGN" ? "USD" : "NGN";
+      localStorage.setItem(DISPLAY_CURRENCY_STORAGE_KEY, state.displayCurrencyOverride);
+      refreshLiveDashboardDom();
+    };
+  });
+  document.querySelectorAll("[data-location-request]").forEach((button) => { button.onclick = requestLocationCurrency; });
   document.querySelectorAll("[data-balance-privacy-toggle]").forEach((button) => {
     button.onclick = () => {
       state.hideBalanceAmounts = !state.hideBalanceAmounts;
@@ -10985,6 +11023,8 @@ function renderSummaryCard() {
   const userDynamicPnlUsdt = getUserDynamicPnlUsdt();
   const liveInvestmentNgn = Number(state.financialDashboard?.totalBalance?.liveNgnEquivalent ?? baseInvestmentNgn + (configuredRate ? userDynamicPnlUsdt * configuredRate : 0));
   const investmentNgn = isAdmin ? baseInvestmentNgn : liveInvestmentNgn;
+  const investmentUsd = Number(state.financialDashboard?.totalBalance?.liveUsdt ?? (configuredRate ? investmentNgn / configuredRate : ledgerUsdt + userDynamicPnlUsdt));
+  const displayCurrency = getDisplayCurrency();
   const accountLoading = state.loadingAccount;
   const exchangeLabel = getExchangeLabel(getActiveExchange());
   const todayValue = isFuturesMode()
@@ -11038,9 +11078,10 @@ function renderSummaryCard() {
           ${state.loadingFinancial ? renderSectionLoadingOverlay("Loading investment view", "Pulling your ledger wallet") : ""}
           <div class="user-account-label">Investment balance</div>
           <button class="user-account-balance balance-privacy-toggle ${state.hideBalanceAmounts ? "is-hidden" : ""}" data-balance-privacy-toggle type="button" aria-label="${state.hideBalanceAmounts ? "Show balance" : "Hide balance"}" aria-pressed="${state.hideBalanceAmounts ? "true" : "false"}">
-            <span>${formatSignedNaira(investmentNgn)}</span>${icon(state.hideBalanceAmounts ? "eyeOff" : "eye")}
+            <span>${displayCurrency === "NGN" ? formatSignedNaira(investmentNgn) : formatUsdEquivalent(investmentUsd)}</span>${icon(state.hideBalanceAmounts ? "eyeOff" : "eye")}
           </button>
-          <p class="user-account-caption">Balances and activity at a glance</p>
+          <div class="user-account-currency-row"><span class="${state.hideBalanceAmounts ? "is-hidden" : ""}">${displayCurrency === "NGN" ? `${formatUsdEquivalent(investmentUsd)} USD equivalent` : `${formatSignedNaira(investmentNgn)} NGN equivalent`}</span><button data-display-currency-toggle type="button" aria-label="Switch primary currency">Switch to ${displayCurrency === "NGN" ? "USD" : "NGN"}</button></div>
+          ${!state.locationCountry ? `<button class="account-location-action" data-location-request type="button">Enable location for local currency</button>` : ""}
           <div class="user-account-actions">
             <button id="netrue-deposit-btn" type="button">${icon("bank")} Deposit</button>
             <button id="netrue-withdraw-btn" type="button">${icon("download")} Withdraw</button>
@@ -11204,7 +11245,7 @@ function renderCopyPlanMarketChart() {
   return `<article class="copy-plan-market-card ${activePlan ? "has-active-plan" : ""}">
     <div class="copy-plan-market-head"><span class="copy-plan-symbol-mark">${icon("signals")}</span><div><strong>${escapeHtml(chartSymbol.replace(/(USDT|USD)$/, "/$1"))}</strong><small>${activePlan ? "Admin configured live trade" : "Bitcoin live market"}</small></div><span class="copy-plan-market-status"><i></i>${activePlan ? "Live" : "Market"}</span></div>
     <div class="copy-plan-market-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${Number(summary?.movePercent || 0) >= 0 ? "positive" : "negative"}">${summary ? `${Number(summary.movePercent) >= 0 ? "+" : ""}${formatNumber(summary.movePercent, 2)}%` : "24h market"}</span></div>
-    <div class="copy-plan-market-chart" aria-label="${escapeHtml(chartSymbol)} live market chart">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="copy-plan-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#0b966c" stop-opacity=".24"/><stop offset="1" stop-color="#0b966c" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#copy-plan-chart-fill)"/><path d="${line}" class="copy-plan-market-line"/></svg>` : `<div class="copy-plan-chart-loading">${loading ? "Loading live market data…" : "Market chart will appear when data is available."}</div>`}</div>
+    <div class="copy-plan-market-chart" aria-label="${escapeHtml(chartSymbol)} live market chart">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="copy-plan-chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#1768d1" stop-opacity=".24"/><stop offset="1" stop-color="#1768d1" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#copy-plan-chart-fill)"/><path d="${line}" class="copy-plan-market-line"/></svg>` : `<div class="copy-plan-chart-loading">${loading ? "Loading live market data…" : "Market chart will appear when data is available."}</div>`}</div>
     ${activePlan ? `<div class="copy-plan-active-data"><div><small>Configured return</small><strong>${formatNumber(activePlan.profitPercent, 2)}%</strong></div><div><small>Session ends in</small><strong data-copy-plan-countdown>${remaining}</strong></div><div><small>Term</small><strong>${formatNumber(activePlan.durationHours, 2)}h</strong></div><div><small>Your investment</small><strong>${activePlan.userInvestment ? formatUsdtUnit(activePlan.userInvestment.amountUsdt || 0) : "Not joined"}</strong></div></div><p class="copy-plan-market-disclaimer">Market prices are shown for reference. Your return follows the admin configured trade.</p>` : `<div class="copy-plan-fallback-note">BTC/USDT market view · 15 minute candles</div>`}
     <div class="copy-plan-chart-footer"><span>Live market data</span><span>${state.copyPlanChart?.updatedAt ? `Updated ${new Date(state.copyPlanChart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Connecting"}</span></div>
   </article>`;
@@ -11221,7 +11262,7 @@ function renderBtcDashboardChart() {
   return `<section class="btc-dashboard-card" aria-label="BTC/USDT live market">
     <div class="btc-dashboard-head"><div><small>Live market</small><h3>BTC/USDT</h3></div><span class="btc-dashboard-live"><i></i> Live</span></div>
     <div class="btc-dashboard-quote"><strong>${summary?.currentPrice ? formatUsdtUnit(summary.currentPrice) : "--"}</strong><span class="${move >= 0 ? "positive" : "negative"}">${summary ? `${move >= 0 ? "+" : ""}${formatNumber(move, 2)}%` : "Waiting for data"}</span></div>
-    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#0b966c" stop-opacity=".22"/><stop offset="1" stop-color="#0b966c" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
+    <div class="btc-dashboard-chart" aria-label="Bitcoin price chart, 15 minute candles">${geometry ? `<svg viewBox="0 0 320 180" role="img"><defs><linearGradient id="btc-home-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#1768d1" stop-opacity=".22"/><stop offset="1" stop-color="#1768d1" stop-opacity="0"/></linearGradient></defs><path d="${line} L 308 180 L 12 180 Z" fill="url(#btc-home-fill)"/><path d="${line}" class="btc-dashboard-line"/></svg>` : `<p>${chart?.loading ? "Loading live BTC/USDT chart..." : "BTC/USDT chart is temporarily unavailable."}</p>`}</div>
     <div class="btc-dashboard-stats"><div><small>Range high</small><strong>${summary ? formatUsdtUnit(summary.highPrice) : "--"}</strong></div><div><small>Range low</small><strong>${summary ? formatUsdtUnit(summary.lowPrice) : "--"}</strong></div><div><small>Interval</small><strong>15 min</strong></div></div>
     <p class="btc-dashboard-foot">Market data for reference${chart?.updatedAt ? ` · Updated ${new Date(chart.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}</p>
   </section>`;
@@ -14231,9 +14272,10 @@ function renderSettingsPane() {
     const userInitials = String(state.user.name || "User").trim().split(/\s+/).slice(0, 2).map((part) => part[0] || "").join("").toUpperCase();
     return `
       <section class="user-settings-page" aria-label="Account settings">
-        <div class="user-settings-profile"><span class="user-settings-avatar">${escapeHtml(userInitials)}</span><div><strong>${escapeHtml(state.user.name || "Your account")}</strong><small>${escapeHtml(state.user.email || "")}</small>${state.user.registrationCountry ? `<small>${escapeHtml(state.user.registrationCountry)}</small>` : ""}</div><span class="user-settings-profile-icon">${icon("shield")}</span></div>
+        <div class="user-settings-profile"><span class="user-settings-avatar">${escapeHtml(userInitials)}</span><div><strong>${escapeHtml(state.user.name || "Your account")}</strong><small>${escapeHtml(state.user.email || "")}</small></div><span class="user-settings-profile-icon">${icon("shield")}</span></div>
         <div class="user-settings-group"><h3>Preferences</h3>
           ${renderSettingsDisclosure({ key: "user-appearance", title: "Appearance", subtitle: state.theme === "dark" ? "Dark mode" : "Light mode", iconName: "settings", content: appearancePanel, open: true })}
+          ${renderSettingsDisclosure({ key: "user-currency", title: "Display currency", subtitle: `${getDisplayCurrency()} primary`, iconName: "bank", content: `<div class="currency-settings-panel"><p>${state.locationCountry === "NG" ? "Nigeria detected" : state.locationCountry ? "Location enabled" : "Use your location to set the default currency."}</p><div><button class="button-secondary" data-location-request type="button">Use my location</button><button class="button-secondary" data-display-currency-toggle type="button">Switch to ${getDisplayCurrency() === "NGN" ? "USD" : "NGN"}</button></div></div>` })}
           ${renderSettingsDisclosure({ key: "user-app", title: "App & notifications", subtitle: state.pwa.isStandalone ? "Installed on this device" : "Install and manage alerts", iconName: "smartphone", content: renderPwaSettingsContent(), section: "app" })}
         </div>
         <div class="user-settings-group"><h3>Your account</h3>
@@ -17134,6 +17176,15 @@ function bindDashboardActions() {
       render();
       showNotice(`${state.theme === "dark" ? "Dark" : "Light"} mode enabled`);
     });
+  });
+
+  document.querySelectorAll("[data-location-request]").forEach((button) => { button.onclick = requestLocationCurrency; });
+  document.querySelectorAll("[data-display-currency-toggle]").forEach((button) => {
+    button.onclick = () => {
+      state.displayCurrencyOverride = getDisplayCurrency() === "NGN" ? "USD" : "NGN";
+      localStorage.setItem(DISPLAY_CURRENCY_STORAGE_KEY, state.displayCurrencyOverride);
+      render();
+    };
   });
 
   document.querySelectorAll("[data-admin-deposit-approve]").forEach((button) => {
